@@ -8,16 +8,48 @@ Rectangle {
     color: Theme.timelineBackground
 
     property real currentTime: 0
-    property real duration: 100
+    property real duration: 100  // Минимум 100 секунд
     property int zoomLevel: 100
     property real pixelsPerSecond: 10
-    property var clipManager: null  // Ссылка на ClipManager из main.qml
+    property var clipManager: null
+    property bool snapEnabled: true  // Snap включён
 
     signal timeChanged(real time)
     signal zoomChanged(int zoom)
 
     onZoomLevelChanged: {
         pixelsPerSecond = zoomLevel / 10
+    }
+    
+    // Автоматически расширяем duration когда добавляются клипы
+    Connections {
+        target: clipManager
+        function onRevisionChanged() {
+            updateDuration()
+        }
+    }
+    
+    function updateDuration() {
+        if (!clipManager) return
+        
+        // Находим максимальное endTime всех клипов
+        var maxEndTime = 100  // Минимум
+        
+        for (var i = 0; i < clipManager.clips.length; i++) {
+            var clip = clipManager.clips[i]
+            var endTime = clip.startTime + clip.duration
+            if (endTime > maxEndTime) {
+                maxEndTime = endTime
+            }
+        }
+        
+        // Добавляем буфер 20 секунд
+        duration = maxEndTime + 20
+        console.log("Timeline duration обновлён:", duration, "сек")
+    }
+    
+    Component.onCompleted: {
+        updateDuration()
     }
 
     Rectangle {
@@ -154,7 +186,8 @@ Rectangle {
                         duration: root.duration
                         pixelsPerSecond: root.pixelsPerSecond
                         currentTime: root.currentTime
-                        clipManager: root.clipManager  // Передаем сам менеджер
+                        snapEnabled: root.snapEnabled  // Передаём snap!
+                        clipManager: root.clipManager
                         
                         // Когда видео дропнули
                         onClipDropped: (filepath, time) => {

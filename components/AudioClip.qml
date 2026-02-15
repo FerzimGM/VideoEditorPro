@@ -31,13 +31,15 @@ Rectangle {
         opacity: isPrimary ? 0.2 : 0.5
     }
 
-    // Waveform
+    // ===== WAVEFORM CANVAS =====
+    // TODO: FFmpeg will extract audio samples
+    // cppFFmpeg.extractWaveform(audioPath) → signal waveformReady(samples[])
     Canvas {
         id: waveformCanvas
         anchors.fill: parent
         anchors.margins: 2
         
-        property var waveformData: generateWaveformData()
+        property var waveformData: generateWaveformData()  // Mock data
         
         onPaint: {
             var ctx = getContext("2d")
@@ -53,6 +55,7 @@ Rectangle {
             ctx.beginPath()
             ctx.moveTo(0, centerY)
             
+            // Рисуем верхнюю часть волны
             for (var x = 0; x < width; x++) {
                 var dataIndex = Math.floor(x * pointsPerPixel)
                 if (dataIndex < waveformData.length) {
@@ -62,6 +65,7 @@ Rectangle {
                 }
             }
             
+            // Рисуем нижнюю часть волны
             for (var x = width - 1; x >= 0; x--) {
                 var dataIndex = Math.floor(x * pointsPerPixel)
                 if (dataIndex < waveformData.length) {
@@ -76,7 +80,9 @@ Rectangle {
             ctx.stroke()
         }
         
+        // Mock waveform generator (пока нет FFmpeg)
         function generateWaveformData() {
+            // TODO: Replace with real audio samples from FFmpeg
             var data = []
             var points = 200
             for (var i = 0; i < points; i++) {
@@ -93,6 +99,17 @@ Rectangle {
             target: root
             function onWidthChanged() { waveformCanvas.requestPaint() }
         }
+        
+        // TODO: Подключение к FFmpeg
+        // Connections {
+        //     target: cppFFmpeg
+        //     function onWaveformReady(filepath, samples) {
+        //         if (filepath === root.audioPath) {
+        //             waveformData = samples
+        //             requestPaint()
+        //         }
+        //     }
+        // }
     }
 
     // Информация о клипе

@@ -8,6 +8,8 @@ Rectangle {
     color: Theme.panelBackground
 
     property int currentMode: 0 // 0 - эффекты, 1 - экспорт
+    property var videoPlayer: null  // Ссылка на VideoPlayer для эффектов
+    property string selectedEffect: ""  // Выбранный эффект
 
     Rectangle {
         anchors.right: parent.right
@@ -81,12 +83,286 @@ Rectangle {
                                 }
                             }
 
-                            Text {
-                                text: "Выберите эффект\nдля настройки"
-                                color: Theme.textDisabled
-                                font.family: Theme.fontFamily
-                                font.pixelSize: Theme.fontSize
-                                horizontalAlignment: Text.AlignHCenter
+                            ColumnLayout {
+                                width: parent.width - 20
+                                spacing: Theme.spacing
+                                
+                                // Заголовок выбранного эффекта
+                                Text {
+                                    text: root.selectedEffect || "Выберите эффект"
+                                    color: root.selectedEffect ? Theme.rubyPrimary : Theme.textDisabled
+                                    font.family: Theme.fontFamily
+                                    font.pixelSize: Theme.fontSizeLarge
+                                    font.bold: true
+                                    Layout.fillWidth: true
+                                }
+                                
+                                Rectangle {
+                                    Layout.fillWidth: true
+                                    height: 1
+                                    color: Theme.dividerColor
+                                    visible: root.selectedEffect !== ""
+                                }
+                                
+                                // ===== ПАРАМЕТРЫ ЯРКОСТИ =====
+                                Column {
+                                    Layout.fillWidth: true
+                                    spacing: Theme.spacing
+                                    visible: root.selectedEffect === "Яркость"
+                                    
+                                    Text {
+                                        text: "Уровень яркости"
+                                        color: Theme.textPrimary
+                                        font.family: Theme.fontFamily
+                                        font.pixelSize: Theme.fontSize
+                                    }
+                                    
+                                    Slider {
+                                        width: parent.width
+                                        from: 0.5
+                                        to: 2.0
+                                        value: 1.0
+                                        stepSize: 0.1
+                                        
+                                        onMoved: {
+                                            if (root.videoPlayer) {
+                                                root.videoPlayer.brightness = value
+                                            }
+                                        }
+                                        
+                                        background: Rectangle {
+                                            x: parent.leftPadding
+                                            y: parent.topPadding + parent.availableHeight / 2 - height / 2
+                                            width: parent.availableWidth
+                                            height: 4
+                                            radius: 2
+                                            color: Theme.backgroundDark
+                                            
+                                            Rectangle {
+                                                width: parent.parent.visualPosition * parent.width
+                                                height: parent.height
+                                                color: Theme.rubyPrimary
+                                                radius: 2
+                                            }
+                                        }
+                                        
+                                        handle: Rectangle {
+                                            x: parent.leftPadding + parent.visualPosition * parent.availableWidth - width / 2
+                                            y: parent.topPadding + parent.availableHeight / 2 - height / 2
+                                            width: 16
+                                            height: 16
+                                            radius: 8
+                                            color: parent.pressed ? Theme.rubyLight : Theme.rubyPrimary
+                                        }
+                                    }
+                                    
+                                    Text {
+                                        text: root.videoPlayer ? root.videoPlayer.brightness.toFixed(2) + "x" : "1.00x"
+                                        color: Theme.textSecondary
+                                        font.family: Theme.fontFamily
+                                        font.pixelSize: Theme.fontSizeSmall
+                                    }
+                                }
+                                
+                                // ===== ПАРАМЕТРЫ КОНТРАСТА =====
+                                Column {
+                                    Layout.fillWidth: true
+                                    spacing: Theme.spacing
+                                    visible: root.selectedEffect === "Контраст"
+                                    
+                                    Text {
+                                        text: "Уровень контраста"
+                                        color: Theme.textPrimary
+                                        font.family: Theme.fontFamily
+                                        font.pixelSize: Theme.fontSize
+                                    }
+                                    
+                                    Slider {
+                                        width: parent.width
+                                        from: 0.5
+                                        to: 2.0
+                                        value: 1.0
+                                        stepSize: 0.1
+                                        
+                                        onMoved: {
+                                            if (root.videoPlayer) {
+                                                root.videoPlayer.contrast = value
+                                            }
+                                        }
+                                        
+                                        background: Rectangle {
+                                            x: parent.leftPadding
+                                            y: parent.topPadding + parent.availableHeight / 2 - height / 2
+                                            width: parent.availableWidth
+                                            height: 4
+                                            radius: 2
+                                            color: Theme.backgroundDark
+                                            
+                                            Rectangle {
+                                                width: parent.parent.visualPosition * parent.width
+                                                height: parent.height
+                                                color: Theme.rubyPrimary
+                                                radius: 2
+                                            }
+                                        }
+                                        
+                                        handle: Rectangle {
+                                            x: parent.leftPadding + parent.visualPosition * parent.availableWidth - width / 2
+                                            y: parent.topPadding + parent.availableHeight / 2 - height / 2
+                                            width: 16
+                                            height: 16
+                                            radius: 8
+                                            color: parent.pressed ? Theme.rubyLight : Theme.rubyPrimary
+                                        }
+                                    }
+                                    
+                                    Text {
+                                        text: root.videoPlayer ? root.videoPlayer.contrast.toFixed(2) + "x" : "1.00x"
+                                        color: Theme.textSecondary
+                                        font.family: Theme.fontFamily
+                                        font.pixelSize: Theme.fontSizeSmall
+                                    }
+                                }
+                                
+                                // ===== ПАРАМЕТРЫ НАСЫЩЕННОСТИ =====
+                                Column {
+                                    Layout.fillWidth: true
+                                    spacing: Theme.spacing
+                                    visible: root.selectedEffect === "Насыщенность"
+                                    
+                                    Text {
+                                        text: "Уровень насыщенности"
+                                        color: Theme.textPrimary
+                                        font.family: Theme.fontFamily
+                                        font.pixelSize: Theme.fontSize
+                                    }
+                                    
+                                    Slider {
+                                        width: parent.width
+                                        from: 0.0
+                                        to: 2.0
+                                        value: 1.0
+                                        stepSize: 0.1
+                                        
+                                        onMoved: {
+                                            if (root.videoPlayer) {
+                                                root.videoPlayer.saturation = value
+                                            }
+                                        }
+                                        
+                                        background: Rectangle {
+                                            x: parent.leftPadding
+                                            y: parent.topPadding + parent.availableHeight / 2 - height / 2
+                                            width: parent.availableWidth
+                                            height: 4
+                                            radius: 2
+                                            color: Theme.backgroundDark
+                                            
+                                            Rectangle {
+                                                width: parent.parent.visualPosition * parent.width
+                                                height: parent.height
+                                                color: Theme.rubyPrimary
+                                                radius: 2
+                                            }
+                                        }
+                                        
+                                        handle: Rectangle {
+                                            x: parent.leftPadding + parent.visualPosition * parent.availableWidth - width / 2
+                                            y: parent.topPadding + parent.availableHeight / 2 - height / 2
+                                            width: 16
+                                            height: 16
+                                            radius: 8
+                                            color: parent.pressed ? Theme.rubyLight : Theme.rubyPrimary
+                                        }
+                                    }
+                                    
+                                    Text {
+                                        text: root.videoPlayer ? root.videoPlayer.saturation.toFixed(2) + "x" : "1.00x"
+                                        color: Theme.textSecondary
+                                        font.family: Theme.fontFamily
+                                        font.pixelSize: Theme.fontSizeSmall
+                                    }
+                                    
+                                    CheckBox {
+                                        text: "Чёрно-белое"
+                                        
+                                        onToggled: {
+                                            if (root.videoPlayer) {
+                                                root.videoPlayer.grayscale = checked
+                                            }
+                                        }
+                                        
+                                        contentItem: Text {
+                                            text: parent.text
+                                            color: Theme.textPrimary
+                                            font.family: Theme.fontFamily
+                                            font.pixelSize: Theme.fontSize
+                                            leftPadding: parent.indicator.width + parent.spacing
+                                            verticalAlignment: Text.AlignVCenter
+                                        }
+                                        
+                                        indicator: Rectangle {
+                                            width: 20
+                                            height: 20
+                                            radius: 3
+                                            color: parent.checked ? Theme.rubyPrimary : Theme.backgroundDark
+                                            border.color: Theme.rubyPrimary
+                                            border.width: 2
+                                            
+                                            Text {
+                                                anchors.centerIn: parent
+                                                text: "✓"
+                                                color: "white"
+                                                font.pixelSize: 16
+                                                font.bold: true
+                                                visible: parent.parent.checked
+                                            }
+                                        }
+                                    }
+                                }
+                                
+                                // TODO: Добавить параметры для остальных эффектов
+                                Text {
+                                    visible: root.selectedEffect !== "" && 
+                                            root.selectedEffect !== "Яркость" && 
+                                            root.selectedEffect !== "Контраст" && 
+                                            root.selectedEffect !== "Насыщенность"
+                                    text: "Параметры для эффекта\n\"" + root.selectedEffect + "\"\nбудут доступны в C++ версии"
+                                    color: Theme.textDisabled
+                                    font.family: Theme.fontFamily
+                                    font.pixelSize: Theme.fontSize
+                                    Layout.fillWidth: true
+                                    wrapMode: Text.WordWrap
+                                }
+                                
+                                Item { Layout.fillHeight: true }
+                                
+                                // Кнопка сброса (всегда видна если эффект выбран)
+                                Button {
+                                    visible: root.selectedEffect !== ""
+                                    text: "Сбросить эффекты"
+                                    Layout.fillWidth: true
+                                    
+                                    onClicked: {
+                                        if (root.videoPlayer) {
+                                            root.videoPlayer.resetEffects()
+                                        }
+                                    }
+                                    
+                                    contentItem: Text {
+                                        text: parent.text
+                                        color: Theme.textPrimary
+                                        font.family: Theme.fontFamily
+                                        font.pixelSize: Theme.fontSize
+                                        horizontalAlignment: Text.AlignHCenter
+                                        verticalAlignment: Text.AlignVCenter
+                                    }
+                                    
+                                    background: Rectangle {
+                                        color: parent.down ? Theme.rubyDark : (parent.hovered ? Theme.rubyLight : Theme.rubyPrimary)
+                                        radius: Theme.borderRadius
+                                    }
+                                }
                             }
                         }
                     }
@@ -346,7 +622,10 @@ Rectangle {
                         id: effectMouseArea
                         anchors.fill: parent
                         hoverEnabled: true
-                        onClicked: console.log("Эффект:", modelData.name)
+                        onClicked: {
+                            root.selectedEffect = modelData.name
+                            console.log("Выбран эффект:", modelData.name)
+                        }
                     }
                 }
             }

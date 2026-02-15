@@ -12,11 +12,39 @@ Rectangle {
 
     property string clipName: "Clip"
     property bool selected: false
-    property int clipId: -1  // ID клипа для удаления
+    property int clipId: -1
+    property string thumbnailPath: ""  // Путь к превью кадру (от FFmpeg)
     
     signal moved(real newX)
     signal clicked()
-    signal deleteRequested(int clipId)  // Новый сигнал!
+    signal deleteRequested(int clipId)
+    
+    // ===== ПРЕВЬЮ КАДРА =====
+    // TODO: FFmpeg will generate thumbnail
+    // cppTimeline.generateThumbnail(clipId, 0.0) → signal thumbnailReady(clipId, path)
+    Image {
+        anchors.fill: parent
+        anchors.margins: 2
+        source: root.thumbnailPath ? "file:///" + root.thumbnailPath : ""
+        fillMode: Image.PreserveAspectCrop
+        visible: root.thumbnailPath !== ""
+        opacity: 0.3  // Полупрозрачный чтобы видеть название
+        
+        // Placeholder пока нет FFmpeg
+        Rectangle {
+            anchors.fill: parent
+            color: Qt.rgba(0.2, 0.2, 0.3, 0.5)
+            visible: root.thumbnailPath === ""
+            
+            Text {
+                anchors.centerIn: parent
+                text: "🎬"
+                color: Theme.rubyPrimary
+                font.pixelSize: 32
+                opacity: 0.3
+            }
+        }
+    }
 
     // Градиент для красоты
     gradient: Gradient {

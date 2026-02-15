@@ -30,6 +30,7 @@ QtObject {
             trackNumber: trackNumber,
             startTime: startTime,
             duration: mockDuration,  // Mock длительность!
+            thumbnailPath: "",  // TODO: FFmpeg will generate thumbnail
             selected: false,
             videoPath: filepath,
             audioPath: filepath,
@@ -42,6 +43,11 @@ QtObject {
         clipsChanged()
         
         clipAdded(filepath, trackNumber, startTime)
+        
+        // TODO: Request thumbnail from FFmpeg
+        // cppFFmpeg.generateThumbnail(filepath, 0.0)
+        // → signal thumbnailReady(filepath, thumbnailPath)
+        // → updateClipThumbnail(clipId, thumbnailPath)
         
         console.log("Mock клип добавлен:", filepath, "длительность:", mockDuration.toFixed(1), "сек")
         return clipId

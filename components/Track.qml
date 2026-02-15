@@ -12,7 +12,8 @@ Rectangle {
     property real pixelsPerSecond: 10
     property real currentTime: 0
     property var clips: []
-    property var clipManager: null  // Ссылка на ClipManager
+    property var clipManager: null
+    property bool snapEnabled: true  // Snap включён
 
     signal clipDropped(string filepath, real time)
     signal clipMoved(int clipId, real newTime)
@@ -106,7 +107,8 @@ Rectangle {
                     height: Theme.trackHeight - 10
                     
                     clipName: modelData.filename
-                    clipId: modelData.id  // Передаём ID!
+                    clipId: modelData.id
+                    thumbnailPath: modelData.thumbnailPath || ""  // Передаём превью
                     selected: modelData.selected
                     
                     Component.onCompleted: {
@@ -115,6 +117,50 @@ Rectangle {
                     
                     onMoved: (newX) => {
                         var newTime = newX / root.pixelsPerSecond
+                        var currentClipId = modelData.id
+                        
+                        // ===== SNAP К ДРУГИМ КЛИПАМ =====
+                        if (root.snapEnabled && root.clips) {
+                            var snapThreshold = 0.5  // 0.5 секунды snap distance
+                            var snapped = false
+                            
+                            for (var i = 0; i < root.clips.length; i++) {
+                                var otherClip = root.clips[i]
+                                
+                                // Пропускаем себя
+                                if (otherClip.id === currentClipId) continue
+                                
+                                var otherStart = otherClip.startTime
+                                var otherEnd = otherClip.startTime + otherClip.duration
+                                
+                                // Snap к началу другого клипа
+                                if (Math.abs(newTime - otherStart) < snapThreshold) {
+                                    newTime = otherStart
+                                    snapped = true
+                                    break
+                                }
+                                
+                                // Snap к концу другого клипа
+                                if (Math.abs(newTime - otherEnd) < snapThreshold) {
+                                    newTime = otherEnd
+                                    snapped = true
+                                    break
+                                }
+                                
+                                // Snap конца текущего клипа к началу другого
+                                var currentEnd = newTime + modelData.duration
+                                if (Math.abs(currentEnd - otherStart) < snapThreshold) {
+                                    newTime = otherStart - modelData.duration
+                                    snapped = true
+                                    break
+                                }
+                            }
+                            
+                            if (snapped) {
+                                console.log("✨ Snap к позиции:", newTime)
+                            }
+                        }
+                        
                         root.clipMoved(modelData.id, newTime)
                     }
                     

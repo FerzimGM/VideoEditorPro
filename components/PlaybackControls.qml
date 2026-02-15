@@ -42,17 +42,17 @@ Rectangle {
 
             ControlButton {
                 icon: "⏮"
-                tooltip: "Назад на 5 минут"
+                tooltip: "Назад на " + (5 * root.playbackSpeed).toFixed(1) + " сек"
                 size: 38
                 onClicked: {
-                    var skipTime = 300 * root.playbackSpeed // 5 минут * скорость
-                    root.seek(Math.max(0, root.currentTime - skipTime))
+                    var rewindAmount = 5 * root.playbackSpeed  // 5 сек × скорость
+                    root.seek(Math.max(0, root.currentTime - rewindAmount))
                 }
             }
 
             ControlButton {
                 icon: root.isPlaying ? "⏸" : "▶"
-                tooltip: root.isPlaying ? "Пауза (Space)" : "Воспроизведение (Space)"
+                tooltip: root.isPlaying ? "Пауза (K)" : "Воспроизведение (K)"
                 highlighted: true
                 size: 46
                 onClicked: root.playPauseClicked()
@@ -67,11 +67,11 @@ Rectangle {
 
             ControlButton {
                 icon: "⏭"
-                tooltip: "Вперед на 5 минут"
+                tooltip: "Вперёд на " + (5 * root.playbackSpeed).toFixed(1) + " сек"
                 size: 38
                 onClicked: {
-                    var skipTime = 300 * root.playbackSpeed // 5 минут * скорость
-                    root.seek(Math.min(root.duration, root.currentTime + skipTime))
+                    var fastForwardAmount = 5 * root.playbackSpeed  // 5 сек × скорость
+                    root.seek(Math.min(root.duration, root.currentTime + fastForwardAmount))
                 }
             }
         }
