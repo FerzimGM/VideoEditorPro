@@ -1,0 +1,19 @@
+<RCC>
+    <qresource prefix="/">
+        <file>main.qml</file>
+        <file>theme.js</file>
+        <file>components/TopMenuBar.qml</file>
+        <file>components/LeftSidebar.qml</file>
+        <file>components/ModeSwitcher.qml</file>
+        <file>components/VideoPlayer.qml</file>
+        <file>components/PlaybackControls.qml</file>
+        <file>components/Timeline.qml</file>
+        <file>components/AudioClip.qml</file>
+        <file>components/TimeRuler.qml</file>
+        <file>components/Track.qml</file>
+        <file>components/VideoClip.qml</file>
+        <file>main_test.qml</file>
+        <file>components/SplashScreen.qml</file>
+        <file>components/ClipManager.qml</file>
+    </qresource>
+</RCC>
