@@ -9,25 +9,32 @@ import "theme.js" as Theme
 QtObject {
     id: appRoot
     
-    // Отдельное окно для SplashScreen (показывается первым)
-    Window {
-        id: splashWindow
-        visible: true
-        width: 550
-        height: 400
-        color: "#000000"
+    // ===== ОКНО 1: SPLASH SCREEN (показывается первым) =====
+    property var splashWindow: Window {
+        id: splashWin
+        visible: true  // Показываем сразу!
+        width: 800
+        height: 435
+        color: "transparent"
         flags: Qt.SplashScreen | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint
         
-        // Центрируем
+        // Центрируем на экране
         Component.onCompleted: {
             x = (Screen.width - width) / 2
             y = (Screen.height - height) / 2
         }
         
+        // Затемнённый фон
         Rectangle {
-            anchors.centerIn: parent
-            width: 550
-            height: 400
+            anchors.fill: parent
+            color: "#000000"
+            opacity: 0.95
+            radius: Theme.borderRadius
+        }
+        
+        // SplashScreen компонент
+        Rectangle {
+            anchors.fill: parent
             color: Theme.backgroundColor
             radius: Theme.borderRadius
             border.color: Theme.rubyPrimary
@@ -35,19 +42,20 @@ QtObject {
             
             SplashScreen {
                 anchors.fill: parent
+                
                 onLoaded: {
                     // Закрываем splash и показываем главное окно
-                    splashWindow.close()
-                    root.visible = true
+                    splashWin.close()
+                    mainWindow.visible = true
                 }
             }
         }
     }
-
-    // Главное окно (скрыто до окончания загрузки)
-    Window {
-        id: root  // Оставляем root для совместимости с кодом
-        visible: false  // Скрыто!
+    
+    // ===== ОКНО 2: ГЛАВНОЕ ОКНО (скрыто до окончания загрузки) =====
+    property var mainWindow: Window {
+        id: root
+        visible: false  // Скрыто пока идёт загрузка!
         width: 1600
         height: 900
         minimumWidth: 1280
@@ -55,10 +63,6 @@ QtObject {
         title: "VideoEditor Pro"
         color: Theme.backgroundColor
         flags: Qt.Window | Qt.FramelessWindowHint
-
-        // Состояние загрузки (для внутреннего использования)
-        property bool isLoading: false  // После показа уже не грузится
-        property bool componentsLoaded: true
 
     // Resize handles для frameless окна
     // Правый край
@@ -230,7 +234,6 @@ QtObject {
         }
     }
 
-
     // Верхняя панель меню
     TopMenuBar {
         id: menuBar
@@ -239,7 +242,6 @@ QtObject {
         anchors.right: parent.right
         height: Theme.panelHeight
         z: 100
-        visible: true  // Скрываем при загрузке
         
         targetWindow: root
         
@@ -251,14 +253,13 @@ QtObject {
         onClose: Qt.quit()
     }
 
-    // Главный layout (БЕЗ Loader для прямого доступа к managers)
+    // Главный layout
     ColumnLayout {
         anchors.top: menuBar.bottom
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: parent.bottom
         spacing: 0
-        visible: true  // Скрываем пока грузится!
 
         // Основная рабочая область
         RowLayout {
@@ -377,5 +378,6 @@ QtObject {
         sequence: "End"
         onActivated: playbackManager.currentTime = playbackManager.duration
     }
-}
-}
+    
+    } // Window (mainWindow)
+} // QtObject (appRoot)
