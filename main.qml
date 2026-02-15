@@ -6,6 +6,7 @@ import QtQuick.Dialogs
 import "components"
 import "theme.js" as Theme
 
+<<<<<<< HEAD
 QtObject {
     id: appRoot
     
@@ -63,6 +64,22 @@ QtObject {
         title: "VideoEditor Pro"
         color: Theme.backgroundColor
         flags: Qt.Window | Qt.FramelessWindowHint
+=======
+Window {
+    id: root
+    visible: true  // Показываем сразу
+    width: 1600
+    height: 900
+    minimumWidth: 1280
+    minimumHeight: 720
+    title: "VideoEditor Pro"
+    color: Theme.backgroundColor
+    flags: Qt.Window | Qt.FramelessWindowHint
+
+    // Состояние загрузки
+    property bool isLoading: true
+    property bool componentsLoaded: true
+>>>>>>> master
 
     // Resize handles для frameless окна
     // Правый край
@@ -234,6 +251,35 @@ QtObject {
         }
     }
 
+<<<<<<< HEAD
+=======
+    // Экран загрузки - fullscreen с затемнением
+    Rectangle {
+        anchors.fill: parent
+        color: "#000000"
+        visible: root.isLoading
+        z: 10000  // Поверх всего
+        
+        // SplashScreen по центру (550x400 чтобы всё влезло)
+        Rectangle {
+            anchors.centerIn: parent
+            width: 800
+            height: 435
+            color: Theme.backgroundColor
+            radius: Theme.borderRadius
+            border.color: Theme.rubyPrimary
+            border.width: 2
+            
+            SplashScreen {
+                anchors.fill: parent
+                onLoaded: {
+                    root.isLoading = false
+                }
+            }
+        }
+    }
+
+>>>>>>> master
     // Верхняя панель меню
     TopMenuBar {
         id: menuBar
@@ -242,6 +288,10 @@ QtObject {
         anchors.right: parent.right
         height: Theme.panelHeight
         z: 100
+<<<<<<< HEAD
+=======
+        visible: !root.isLoading  // Скрываем при загрузке
+>>>>>>> master
         
         targetWindow: root
         
@@ -260,6 +310,10 @@ QtObject {
         anchors.right: parent.right
         anchors.bottom: parent.bottom
         spacing: 0
+<<<<<<< HEAD
+=======
+        visible: !root.isLoading  // Скрываем пока грузится!
+>>>>>>> master
 
         // Основная рабочая область
         RowLayout {
@@ -378,6 +432,10 @@ QtObject {
         sequence: "End"
         onActivated: playbackManager.currentTime = playbackManager.duration
     }
+<<<<<<< HEAD
     
     } // Window (mainWindow)
 } // QtObject (appRoot)
+=======
+}
+>>>>>>> master
