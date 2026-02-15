@@ -6,59 +6,20 @@ import QtQuick.Dialogs
 import "components"
 import "theme.js" as Theme
 
-QtObject {
-    id: appRoot
-    
-    // Отдельное окно для SplashScreen (показывается первым)
-    Window {
-        id: splashWindow
-        visible: true
-        width: 550
-        height: 400
-        color: "#000000"
-        flags: Qt.SplashScreen | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint
-        
-        // Центрируем
-        Component.onCompleted: {
-            x = (Screen.width - width) / 2
-            y = (Screen.height - height) / 2
-        }
-        
-        Rectangle {
-            anchors.centerIn: parent
-            width: 550
-            height: 400
-            color: Theme.backgroundColor
-            radius: Theme.borderRadius
-            border.color: Theme.rubyPrimary
-            border.width: 2
-            
-            SplashScreen {
-                anchors.fill: parent
-                onLoaded: {
-                    // Закрываем splash и показываем главное окно
-                    splashWindow.close()
-                    root.visible = true
-                }
-            }
-        }
-    }
+Window {
+    id: root
+    visible: true  // Показываем сразу
+    width: 1600
+    height: 900
+    minimumWidth: 1280
+    minimumHeight: 720
+    title: "VideoEditor Pro"
+    color: Theme.backgroundColor
+    flags: Qt.Window | Qt.FramelessWindowHint
 
-    // Главное окно (скрыто до окончания загрузки)
-    Window {
-        id: root  // Оставляем root для совместимости с кодом
-        visible: false  // Скрыто!
-        width: 1600
-        height: 900
-        minimumWidth: 1280
-        minimumHeight: 720
-        title: "VideoEditor Pro"
-        color: Theme.backgroundColor
-        flags: Qt.Window | Qt.FramelessWindowHint
-
-        // Состояние загрузки (для внутреннего использования)
-        property bool isLoading: false  // После показа уже не грузится
-        property bool componentsLoaded: true
+    // Состояние загрузки
+    property bool isLoading: true
+    property bool componentsLoaded: true
 
     // Resize handles для frameless окна
     // Правый край
@@ -230,6 +191,31 @@ QtObject {
         }
     }
 
+    // Экран загрузки - fullscreen с затемнением
+    Rectangle {
+        anchors.fill: parent
+        color: "#000000"
+        visible: root.isLoading
+        z: 10000  // Поверх всего
+        
+        // SplashScreen по центру (550x400 чтобы всё влезло)
+        Rectangle {
+            anchors.centerIn: parent
+            width: 800
+            height: 435
+            color: Theme.backgroundColor
+            radius: Theme.borderRadius
+            border.color: Theme.rubyPrimary
+            border.width: 2
+            
+            SplashScreen {
+                anchors.fill: parent
+                onLoaded: {
+                    root.isLoading = false
+                }
+            }
+        }
+    }
 
     // Верхняя панель меню
     TopMenuBar {
@@ -239,7 +225,7 @@ QtObject {
         anchors.right: parent.right
         height: Theme.panelHeight
         z: 100
-        visible: true  // Скрываем при загрузке
+        visible: !root.isLoading  // Скрываем при загрузке
         
         targetWindow: root
         
@@ -258,7 +244,7 @@ QtObject {
         anchors.right: parent.right
         anchors.bottom: parent.bottom
         spacing: 0
-        visible: true  // Скрываем пока грузится!
+        visible: !root.isLoading  // Скрываем пока грузится!
 
         // Основная рабочая область
         RowLayout {
@@ -377,5 +363,4 @@ QtObject {
         sequence: "End"
         onActivated: playbackManager.currentTime = playbackManager.duration
     }
-}
 }

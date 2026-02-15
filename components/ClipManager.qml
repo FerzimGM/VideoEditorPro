@@ -8,7 +8,7 @@ QtObject {
     
     // Список всех клипов на таймлайне
     property var clips: []
-    property int revision: 0  // Счётчик изменений для триггера обновления
+    property int revision: 0
     
     // Сигналы для будущего бэкенда
     signal clipAdded(string filepath, int trackNumber, real startTime)
@@ -16,15 +16,20 @@ QtObject {
     signal clipRemoved(int clipId)
     signal clipSelected(int clipId)
     
-    // Добавить клип
+    // Добавить клип (пока mock с фейковой длительностью)
     function addClip(filepath, trackNumber, startTime, duration) {
+        var clipId = clips.length
+        
+        // Mock: случайная длительность 10-60 сек (как будто FFmpeg вернул)
+        var mockDuration = duration || (Math.random() * 50 + 10)
+        
         var clip = {
-            id: clips.length,
+            id: clipId,
             filepath: filepath,
-            filename: filepath.split('/').pop().split('\\').pop(),  // Windows путь
+            filename: filepath.split('/').pop().split('\\').pop(),
             trackNumber: trackNumber,
             startTime: startTime,
-            duration: duration || 10.0,
+            duration: mockDuration,  // Mock длительность!
             selected: false,
             videoPath: filepath,
             audioPath: filepath,
@@ -33,13 +38,13 @@ QtObject {
         }
         
         clips.push(clip)
-        revision++  // Триггер обновления
+        revision++
         clipsChanged()
         
         clipAdded(filepath, trackNumber, startTime)
         
-        console.log("Клип добавлен:", filepath, "на дорожку", trackNumber, "revision:", revision)
-        return clip.id
+        console.log("Mock клип добавлен:", filepath, "длительность:", mockDuration.toFixed(1), "сек")
+        return clipId
     }
     
     // Переместить клип

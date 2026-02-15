@@ -34,8 +34,12 @@ Rectangle {
     
     function updateClips() {
         if (clipManager) {
-            clips = clipManager.getClipsForTrack(trackNumber)
-            console.log("Track", trackNumber, "обновлён, клипов:", clips.length)
+            var newClips = clipManager.getClipsForTrack(trackNumber)
+            // Обновляем только если изменилось количество
+            if (!clips || clips.length !== newClips.length) {
+                clips = newClips
+                console.log("Track", trackNumber, "обновлён, клипов:", clips.length)
+            }
         }
     }
 
@@ -69,13 +73,19 @@ Rectangle {
                 keys: ["text/uri-list"]  // Стандартный MIME type для файлов
                 
                 onDropped: (drop) => {
+                    console.log("=== DROP EVENT ===")
+                    console.log("hasUrls:", drop.hasUrls)
                     if (drop.hasUrls) {
                         var url = drop.urls[0].toString()
-                        // Убираем file:/// prefix
+                        console.log("URL raw:", url)
                         url = url.replace(/^file:\/\/\//, "")
+                        console.log("URL cleaned:", url)
                         var time = (drop.x / root.pixelsPerSecond)
+                        console.log("Calling root.clipDropped...")
                         root.clipDropped(url, time)
                         console.log("Видео дроп:", url, "время:", time)
+                    } else {
+                        console.log("NO URLs in drop!")
                     }
                 }
                 
@@ -96,6 +106,7 @@ Rectangle {
                     height: Theme.trackHeight - 10
                     
                     clipName: modelData.filename
+                    clipId: modelData.id  // Передаём ID!
                     selected: modelData.selected
                     
                     Component.onCompleted: {
@@ -105,6 +116,13 @@ Rectangle {
                     onMoved: (newX) => {
                         var newTime = newX / root.pixelsPerSecond
                         root.clipMoved(modelData.id, newTime)
+                    }
+                    
+                    onDeleteRequested: (clipId) => {
+                        console.log("Track: удаление клипа", clipId)
+                        if (root.clipManager) {
+                            root.clipManager.removeClip(clipId)
+                        }
                     }
                 }
             }

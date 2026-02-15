@@ -12,9 +12,11 @@ Rectangle {
 
     property string clipName: "Clip"
     property bool selected: false
+    property int clipId: -1  // ID клипа для удаления
     
     signal moved(real newX)
     signal clicked()
+    signal deleteRequested(int clipId)  // Новый сигнал!
 
     // Градиент для красоты
     gradient: Gradient {
@@ -42,18 +44,25 @@ Rectangle {
         anchors.fill: parent
         hoverEnabled: true
         cursorShape: Qt.OpenHandCursor
+        acceptedButtons: Qt.LeftButton | Qt.RightButton  // Левый и правый клик
         
         property real startX: 0
         property real dragStartX: 0
         
         onPressed: (mouse) => {
-            startX = root.x
-            dragStartX = mouse.x
-            cursorShape = Qt.ClosedHandCursor
+            if (mouse.button === Qt.RightButton) {
+                // Правый клик - показываем меню
+                contextMenu.popup()
+            } else {
+                // Левый клик - начинаем перетаскивание
+                startX = root.x
+                dragStartX = mouse.x
+                cursorShape = Qt.ClosedHandCursor
+            }
         }
         
         onPositionChanged: (mouse) => {
-            if (pressed) {
+            if (pressed && mouse.buttons & Qt.LeftButton) {
                 var delta = mouse.x - dragStartX
                 root.x = startX + delta
             }
@@ -61,10 +70,69 @@ Rectangle {
         
         onReleased: {
             cursorShape = Qt.OpenHandCursor
-            root.moved(root.x)
+            if (pressed) {
+                root.moved(root.x)
+            }
         }
         
-        onClicked: root.clicked()
+        onClicked: (mouse) => {
+            if (mouse.button === Qt.LeftButton) {
+                root.clicked()
+            }
+        }
+    }
+    
+    // Контекстное меню
+    Menu {
+        id: contextMenu
+        
+        MenuItem {
+            text: "✂ Разрезать"
+            onTriggered: {
+                console.log("Разрезать клип:", root.clipId)
+                // TODO: emit splitRequested(clipId, currentTime)
+            }
+        }
+        
+        MenuItem {
+            text: "📋 Копировать"
+            onTriggered: {
+                console.log("Копировать клип:", root.clipId)
+            }
+        }
+        
+        MenuSeparator { }
+        
+        MenuItem {
+            text: "🗑 Удалить"
+            onTriggered: {
+                console.log("Удалить клип:", root.clipId)
+                root.deleteRequested(root.clipId)
+            }
+        }
+        
+        background: Rectangle {
+            color: Theme.panelBackground
+            border.color: Theme.rubyPrimary
+            border.width: 1
+            radius: Theme.borderRadius
+        }
+        
+        delegate: MenuItem {
+            id: menuItem
+            
+            contentItem: Text {
+                text: menuItem.text
+                color: menuItem.highlighted ? Theme.rubyPrimary : Theme.textPrimary
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontSize
+            }
+            
+            background: Rectangle {
+                color: menuItem.highlighted ? Theme.hoverColor : "transparent"
+                radius: Theme.borderRadius
+            }
+        }
     }
 
     // Resize handle слева
