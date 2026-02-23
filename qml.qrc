@@ -12,7 +12,6 @@
         <file>components/TimeRuler.qml</file>
         <file>components/Track.qml</file>
         <file>components/VideoClip.qml</file>
-        <file>main_test.qml</file>
         <file>components/SplashScreen.qml</file>
         <file>components/ClipManager.qml</file>
     </qresource>

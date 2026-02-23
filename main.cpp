@@ -1,8 +1,10 @@
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
+#include <QQmlContext>
 #include <QIcon>
 #include <QQuickStyle>
 #include <QQuickWindow>
+#include "timeline.h"  // ← Подключаем наш Timeline!
 
 int main(int argc, char *argv[])
 {
@@ -20,10 +22,20 @@ int main(int argc, char *argv[])
     // 3. Потом стиль
     QQuickStyle::setStyle("Basic");
 
-    app.setOrganizationName("VideoEditor");
+    app.setOrganizationName("MyDiplomWork");
     app.setApplicationName("VideoEditor Pro");
 
+    // ===== СОЗДАНИЕ C++ ОБЪЕКТА TIMELINE =====
+    Timeline timeline;  // Создаём наш C++ объект!
+
+    qDebug() << "✅ Timeline создан в C++";
+
     QQmlApplicationEngine engine;
+
+    qDebug() << "✅ Timeline зарегистрирован в QML как 'cppTimeline'";
+
+    // Зарегистрировать в QML
+    engine.rootContext()->setContextProperty("cppTimeline", &timeline);
 
     const QUrl url(QStringLiteral("qrc:/main.qml"));
     QObject::connect(&engine, &QQmlApplicationEngine::objectCreated,
@@ -32,7 +44,10 @@ int main(int argc, char *argv[])
                              QCoreApplication::exit(-1);
                      }, Qt::QueuedConnection);
 
+
     engine.load(url);
 
+    // ===== ЗАПУСК ПРИЛОЖЕНИЯ =====
+    qDebug() << "Приложение запущено!";
     return app.exec();
 }

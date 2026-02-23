@@ -1,109 +1,47 @@
-// ClipManager.qml - Менеджер клипов для фронтенда
-// Позже будет подключен к C++ бэкенду через сигналы/слоты
-
 import QtQuick
+import "../theme.js" as Theme
 
-QtObject {
+Item {
     id: clipManager
-    
-    // Список всех клипов на таймлайне
-    property var clips: []
-    property int revision: 0
-    
-    // Сигналы для будущего бэкенда
-    signal clipAdded(string filepath, int trackNumber, real startTime)
-    signal clipMoved(int clipId, int newTrack, real newTime)
-    signal clipRemoved(int clipId)
-    signal clipSelected(int clipId)
-    
-    // Добавить клип (пока mock с фейковой длительностью)
-    function addClip(filepath, trackNumber, startTime, duration) {
-        var clipId = clips.length
-        
-        // Mock: случайная длительность 10-60 сек (как будто FFmpeg вернул)
-        var mockDuration = duration || (Math.random() * 50 + 10)
-        
-        var clip = {
-            id: clipId,
-            filepath: filepath,
-            filename: filepath.split('/').pop().split('\\').pop(),
-            trackNumber: trackNumber,
-            startTime: startTime,
-            duration: mockDuration,  // Mock длительность!
-            thumbnailPath: "",  // TODO: FFmpeg will generate thumbnail
-            selected: false,
-            videoPath: filepath,
-            audioPath: filepath,
-            hasVideo: true,
-            hasAudio: true
+    visible: false
+
+    // ===== ДОБАВИТЬ КЛИП (ДЕЛЕГИРУЕМ В C++!) =====
+    function addClip(filepath, trackNumber, startTime) {
+        console.log("   ClipManager: Вызываю cppTimeline.addClip")
+        console.log("   filepath:", filepath)
+        console.log("   trackNumber:", trackNumber)
+        console.log("   startTime:", startTime)
+
+        var success = cppTimeline.addClip(filepath, trackNumber, startTime)
+
+        if (success) {
+            console.log("✅ C++ успешно добавил клип!")
+        } else {
+            console.log("❌ C++ не смог добавить клип")
         }
-        
-        clips.push(clip)
-        revision++
-        clipsChanged()
-        
-        clipAdded(filepath, trackNumber, startTime)
-        
-        // TODO: Request thumbnail from FFmpeg
-        // cppFFmpeg.generateThumbnail(filepath, 0.0)
-        // → signal thumbnailReady(filepath, thumbnailPath)
-        // → updateClipThumbnail(clipId, thumbnailPath)
-        
-        console.log("Mock клип добавлен:", filepath, "длительность:", mockDuration.toFixed(1), "сек")
-        return clipId
+
+        // C++ сам emit clipsChanged() → QML обновится!
     }
-    
-    // Переместить клип
-    function moveClip(clipId, newTrack, newTime) {
-        for (var i = 0; i < clips.length; i++) {
-            if (clips[i].id === clipId) {
-                clips[i].trackNumber = newTrack
-                clips[i].startTime = newTime
-                revision++
-                clipsChanged()
-                clipMoved(clipId, newTrack, newTime)
-                break
-            }
+
+    // ===== СЛУШАЕМ СИГНАЛЫ ОТ C++ =====
+    Connections {
+        target: cppTimeline
+
+        function onClipsChanged() {
+            console.log(" Получен сигнал: clipsChanged от C++")
+            // Timeline.qml автоматически обновится!
         }
-    }
-    
-    // Удалить клип
-    function removeClip(clipId) {
-        for (var i = 0; i < clips.length; i++) {
-            if (clips[i].id === clipId) {
-                clips.splice(i, 1)
-                revision++
-                clipsChanged()
-                clipRemoved(clipId)
-                break
-            }
+
+        function onClipAdded(index) {
+            console.log(" Клип добавлен, индекс:", index)
         }
-    }
-    
-    // Выбрать клип
-    function selectClip(clipId) {
-        for (var i = 0; i < clips.length; i++) {
-            clips[i].selected = (clips[i].id === clipId)
+
+        function onClipRemoved(index) {
+            console.log(" Клип удалён, индекс:", index)
         }
-        revision++
-        clipsChanged()
-        clipSelected(clipId)
-    }
-    
-    // Получить клипы для дорожки
-    function getClipsForTrack(trackNumber) {
-        var result = []
-        for (var i = 0; i < clips.length; i++) {
-            if (clips[i].trackNumber === trackNumber) {
-                result.push(clips[i])
-            }
+
+        function onTotalDurationChanged() {
+            console.log(" Длительность timeline изменилась")
         }
-        return result
-    }
-    
-    // Очистить всё
-    function clearAll() {
-        clips = []
-        clipsChanged()
     }
 }

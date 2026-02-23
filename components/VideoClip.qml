@@ -21,7 +21,7 @@ Rectangle {
     
     // ===== ПРЕВЬЮ КАДРА =====
     // TODO: FFmpeg will generate thumbnail
-    // cppTimeline.generateThumbnail(clipId, 0.0) → signal thumbnailReady(clipId, path)
+    //cppTimeline.generateThumbnail(clipId, 0.0) → signal thumbnailReady(clipId, path)
     Image {
         anchors.fill: parent
         anchors.margins: 2

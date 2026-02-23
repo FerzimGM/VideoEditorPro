@@ -1,0 +1,7 @@
+# Build файлы
+build/
+*.pro.user
+
+# FFmpeg binaries (хранятся в LFS)
+bin/ffmpeg.exe
+bin/ffprobe.exe

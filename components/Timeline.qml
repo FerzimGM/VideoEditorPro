@@ -8,11 +8,12 @@ Rectangle {
     color: Theme.timelineBackground
 
     property real currentTime: 0
-    property real duration: 100  // Минимум 100 секунд
+    property real duration: cppTimeline ? Math.max(
+                                              120, cppTimeline.totalDuration
+                                              + 20) : 120 // Минимум 100 секунд
     property int zoomLevel: 100
     property real pixelsPerSecond: 10
-    property var clipManager: null
-    property bool snapEnabled: true  // Snap включён
+    property bool snapEnabled: true // Snap включён
 
     signal timeChanged(real time)
     signal zoomChanged(int zoom)
@@ -20,36 +21,19 @@ Rectangle {
     onZoomLevelChanged: {
         pixelsPerSecond = zoomLevel / 10
     }
-    
-    // Автоматически расширяем duration когда добавляются клипы
+
+    // Обновляем duration при добавлении клипов
     Connections {
-        target: clipManager
-        function onRevisionChanged() {
-            updateDuration()
+        target: cppTimeline
+        function onTotalDurationChanged() {
+            // duration пересчитывается автоматически через binding выше
+            console.log("📏 Общая длительность:", cppTimeline.totalDuration,
+                        "→ duration:", root.duration)
         }
-    }
-    
-    function updateDuration() {
-        if (!clipManager) return
-        
-        // Находим максимальное endTime всех клипов
-        var maxEndTime = 100  // Минимум
-        
-        for (var i = 0; i < clipManager.clips.length; i++) {
-            var clip = clipManager.clips[i]
-            var endTime = clip.startTime + clip.duration
-            if (endTime > maxEndTime) {
-                maxEndTime = endTime
-            }
+        function onClipsChanged() {
+            console.log("📋 Clips changed, totalDuration:",
+                        cppTimeline ? cppTimeline.totalDuration : "N/A")
         }
-        
-        // Добавляем буфер 20 секунд
-        duration = maxEndTime + 20
-        console.log("Timeline duration обновлён:", duration, "сек")
-    }
-    
-    Component.onCompleted: {
-        updateDuration()
     }
 
     Rectangle {
@@ -57,8 +41,14 @@ Rectangle {
         width: parent.width
         height: 2
         gradient: Gradient {
-            GradientStop { position: 0.0; color: Theme.rubyGradientStart }
-            GradientStop { position: 1.0; color: Theme.rubyGradientEnd }
+            GradientStop {
+                position: 0.0
+                color: Theme.rubyGradientStart
+            }
+            GradientStop {
+                position: 1.0
+                color: Theme.rubyGradientEnd
+            }
         }
     }
 
@@ -83,7 +73,6 @@ Rectangle {
                 anchors.fill: parent
                 spacing: 0
 
-                // Заголовок
                 Rectangle {
                     Layout.fillWidth: true
                     Layout.preferredHeight: 40
@@ -106,10 +95,8 @@ Rectangle {
                     }
                 }
 
-                // Дорожки - 3 штуки
                 Repeater {
                     model: 2
-
                     TrackLabel {
                         trackNumber: index + 1
                         Layout.fillWidth: true
@@ -117,23 +104,25 @@ Rectangle {
                     }
                 }
 
-                Item { Layout.fillHeight: true }
+                Item {
+                    Layout.fillHeight: true
+                }
             }
         }
 
-        // Область таймлайна - РАСТЯНУТА
+        // Область таймлайна
         Flickable {
             id: timelineFlickable
             Layout.fillWidth: true
             Layout.fillHeight: true
-            contentWidth: Math.max(width, root.duration * root.pixelsPerSecond + 100)
+            contentWidth: Math.max(width,
+                                   root.duration * root.pixelsPerSecond + 100)
             contentHeight: height
             clip: true
             boundsBehavior: Flickable.StopAtBounds
 
             ScrollBar.horizontal: ScrollBar {
                 policy: ScrollBar.AlwaysOn
-                
                 contentItem: Rectangle {
                     implicitHeight: 8
                     radius: 4
@@ -142,26 +131,27 @@ Rectangle {
                 }
             }
 
-            // Масштабирование колесиком мыши
+            // Масштабирование колесиком мыши (Ctrl+scroll)
             MouseArea {
                 anchors.fill: parent
                 propagateComposedEvents: true
                 acceptedButtons: Qt.NoButton
-                
-                onWheel: (wheel) => {
-                    if (wheel.modifiers & Qt.ControlModifier) {
-                        var delta = wheel.angleDelta.y > 0 ? 10 : -10
-                        var newZoom = Math.max(20, Math.min(500, root.zoomLevel + delta))
-                        root.zoomChanged(newZoom)
-                        wheel.accepted = true
-                    } else {
-                        wheel.accepted = false
-                    }
-                }
+                onWheel: wheel => {
+                             if (wheel.modifiers & Qt.ControlModifier) {
+                                 var delta = wheel.angleDelta.y > 0 ? 10 : -10
+                                 var newZoom = Math.max(
+                                     20, Math.min(500, root.zoomLevel + delta))
+                                 root.zoomChanged(newZoom)
+                                 wheel.accepted = true
+                             } else {
+                                 wheel.accepted = false
+                             }
+                         }
             }
 
             ColumnLayout {
-                width: Math.max(timelineFlickable.width, timelineFlickable.contentWidth)
+                width: Math.max(timelineFlickable.width,
+                                timelineFlickable.contentWidth)
                 height: timelineFlickable.height
                 spacing: 0
 
@@ -175,7 +165,7 @@ Rectangle {
                     currentTime: root.currentTime
                 }
 
-                // Дорожки - 3 штуки
+                // *** ИСПРАВЛЕНО: используем root.pixelsPerSecond и root.snapEnabled (не timeline.*) ***
                 Repeater {
                     model: 2
 
@@ -183,42 +173,52 @@ Rectangle {
                         trackNumber: index + 1
                         Layout.fillWidth: true
                         Layout.preferredHeight: Theme.trackHeight * 2
-                        duration: root.duration
+                        // ПРАВИЛЬНО: root.pixelsPerSecond (не timeline.pixelsPerSeconde — опечатка!)
                         pixelsPerSecond: root.pixelsPerSecond
-                        currentTime: root.currentTime
-                        snapEnabled: root.snapEnabled  // Передаём snap!
-                        clipManager: root.clipManager
-                        
-                        // Когда видео дропнули
+                        // ПРАВИЛЬНО: root.snapEnabled (не timeline.snapEnabled)
+                        snapEnabled: root.snapEnabled
+
+                        // Когда видео дропнули на дорожку
                         onClipDropped: (filepath, time) => {
-                            console.log("=== Timeline.onClipDropped ===")
-                            console.log("filepath:", filepath)
-                            console.log("time:", time)
-                            console.log("track:", index + 1)
-                            console.log("clipManager exists:", !!root.clipManager)
-                            if (root.clipManager) {
-                                console.log("Calling clipManager.addClip...")
-                                root.clipManager.addClip(filepath, index + 1, time, 10.0)
-                            } else {
-                                console.log("ERROR: clipManager is NULL!")
-                            }
-                        }
-                        
+                                           console.log(
+                                               "=== Timeline.onClipDropped ===")
+                                           console.log("filepath:", filepath)
+                                           console.log("time:", time)
+                                           console.log("track:", index + 1)
+                                           // ПРАВИЛЬНО: используем глобальный cppTimeline (не timeline.cppTimeline)
+                                           if (cppTimeline) {
+                                               console.log(
+                                                   "Calling cppTimeline.addClip...")
+                                               cppTimeline.addClip(filepath,
+                                                                   index + 1,
+                                                                   time)
+                                           } else {
+                                               console.log(
+                                                   "ERROR: cppTimeline is NULL!")
+                                           }
+                                       }
+
                         // Когда клип подвинули
                         onClipMoved: (clipId, newTime) => {
-                            if (root.clipManager) {
-                                root.clipManager.moveClip(clipId, index + 1, newTime)
-                            }
-                        }
+                                         // ПРАВИЛЬНО: используем глобальный cppTimeline (не root.cppTimeline)
+                                         if (cppTimeline) {
+                                             cppTimeline.moveClip(clipId,
+                                                                  index + 1,
+                                                                  newTime)
+                                         }
+                                     }
                     }
                 }
 
-                Item { Layout.fillHeight: true }
+                Item {
+                    Layout.fillHeight: true
+                }
             }
 
-            // Линия воспроизведения (Playhead)
+            // *** Линия воспроизведения (Playhead) ***
             Rectangle {
                 id: playhead
+                // ПРАВИЛЬНО: x привязан к currentTime * pixelsPerSecond
                 x: root.currentTime * root.pixelsPerSecond
                 y: 0
                 width: 2
@@ -253,7 +253,7 @@ Rectangle {
                 // Временной код на playhead
                 Rectangle {
                     anchors.horizontalCenter: parent.horizontalCenter
-                    y: parent.height - height - 5
+                    y: 5
                     width: playheadTime.width + 10
                     height: playheadTime.height + 6
                     color: Qt.rgba(0, 0, 0, 0.9)
@@ -274,21 +274,25 @@ Rectangle {
 
                 Behavior on x {
                     enabled: !playheadMouseArea.drag.active
-                    NumberAnimation { duration: 100 }
+                    NumberAnimation {
+                        duration: 50
+                    }
                 }
             }
 
-            // MouseArea для перемещения playhead
+            // MouseArea для клика по таймлайну — перемещаем playhead
             MouseArea {
                 id: playheadMouseArea
                 anchors.fill: parent
                 z: 999
                 acceptedButtons: Qt.LeftButton
-                
-                onClicked: (mouse) => {
-                    var time = (mouse.x + timelineFlickable.contentX) / root.pixelsPerSecond
-                    root.timeChanged(Math.max(0, Math.min(root.duration, time)))
-                }
+
+                onClicked: mouse => {
+                               var time = (mouse.x + timelineFlickable.contentX)
+                               / root.pixelsPerSecond
+                               root.timeChanged(
+                                   Math.max(0, Math.min(root.duration, time)))
+                           }
             }
         }
     }
@@ -298,15 +302,14 @@ Rectangle {
         var mins = Math.floor((seconds % 3600) / 60)
         var secs = Math.floor(seconds % 60)
         var frames = Math.floor((seconds % 1) * 30)
-        
         if (hours > 0) {
             return pad(hours) + ":" + pad(mins) + ":" + pad(secs)
         }
-        return pad(mins) + ":" + pad(secs) + ":" + pad(frames, 2)
+        return pad(mins) + ":" + pad(secs) + ":" + pad(frames)
     }
 
-    function pad(num, digits = 2) {
-        return String(num).padStart(digits, '0')
+    function pad(num) {
+        return num < 10 ? "0" + num : String(num)
     }
 
     component TrackLabel: Rectangle {
@@ -342,26 +345,23 @@ Rectangle {
                     height: 18
                     radius: 2
                     color: Theme.clipColor
-
                     Text {
                         anchors.centerIn: parent
                         text: "V"
-                        color: "#FFFFFF"
+                        color: "#FFF"
                         font.pixelSize: 11
                         font.bold: true
                     }
                 }
-
                 Rectangle {
                     width: 18
                     height: 18
                     radius: 2
                     color: Theme.waveformColor
-
                     Text {
                         anchors.centerIn: parent
                         text: "A"
-                        color: "#FFFFFF"
+                        color: "#FFF"
                         font.pixelSize: 11
                         font.bold: true
                     }

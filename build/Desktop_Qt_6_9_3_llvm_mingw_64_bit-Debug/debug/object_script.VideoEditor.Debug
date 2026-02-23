@@ -1,0 +1,10 @@
+debug/main.o
+debug/mediadecoder.o
+debug/mediaencoder.o
+debug/renderengine.o
+debug/timeline.o
+debug/qrc_qml.o
+debug/moc_mediadecoder.o
+debug/moc_mediaencoder.o
+debug/moc_renderengine.o
+debug/moc_timeline.o
