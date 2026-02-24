@@ -1,6 +1,8 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtMultimedia
+// ← QMediaPlayer + AudioOutput + VideoOutput
 import "../theme.js" as Theme
 
 Rectangle {
@@ -10,39 +12,50 @@ Rectangle {
     border.color: Theme.borderLight
     border.width: 1
 
+    // ===== СВОЙСТВА =====
     property real currentTime: 0
     property real duration: cppTimeline ? Math.max(
                                               60,
                                               cppTimeline.totalDuration) : 60
 
-    // ===== ЭФФЕКТЫ В РЕАЛЬНОМ ВРЕМЕНИ =====
-    property real brightness: 1.0 // 0.5 - 2.0
-    property real contrast: 1.0 // 0.5 - 2.0
-    property real saturation: 1.0 // 0.0 - 2.0
-    property bool grayscale: false // Чёрно-белое
+    // *** ГЛАВНЫЙ ФИX: isPlaying должен приходить из main.qml! ***
+    // Без него QMediaPlayer никогда не запускается и updateScrubFrame()
+    // вызывается на каждом тике таймера → чёрный экран + спиннер
+    property bool isPlaying: false
+    property real playbackSpeed: 1.0 // ← скорость воспроизведения
+    // Громкость (0.0 – 1.0)
+    property real volume: 1.0
 
-    // *** ИСПРАВЛЕНО: путь к кадру — строка, не QImage ***
-    // QImage нельзя передавать в QML напрямую!
-    // Используем C++ метод getFramePathAt() который возвращает "file:///path/to/frame.png"
-    // ===== ИСТОЧНИК КАДРА =====
+    // ===== ЭФФЕКТЫ =====
+    property real brightness: 1.0
+    property real contrast: 1.0
+    property real saturation: 1.0
+    property bool grayscale: false
+
+    // ===== ВНУТРЕННИЕ ИСТОЧНИКИ =====
+    property string currentClipUrl: ""
     property string currentFrameSource: ""
 
-    // Метаданные текущего клипа (для отображения в UI)
-    property int  videoWidth:  0
-    property int  videoHeight: 0
-    property real videoFps:    0.0
+    // ===== МЕТАДАННЫЕ =====
+    property int videoWidth: 0
+    property int videoHeight: 0
+    property real videoFps: 0.0
 
-    function applyBrightness(value) {
-        brightness = value
+    // Сигнал: QMediaPlayer продвинулся — обновить playhead
+    signal timePositionChanged(real newTime)
+
+    // ===== ПУБЛИЧНЫЕ МЕТОДЫ =====
+    function applyBrightness(v) {
+        brightness = v
     }
-    function applyContrast(value) {
-        contrast = value
+    function applyContrast(v) {
+        contrast = v
     }
-    function applySaturation(value) {
-        saturation = value
+    function applySaturation(v) {
+        saturation = v
     }
-    function applyGrayscale(enabled) {
-        grayscale = enabled
+    function applyGrayscale(v) {
+        grayscale = v
     }
     function resetEffects() {
         brightness = 1.0
@@ -51,39 +64,142 @@ Rectangle {
         grayscale = false
     }
 
-    // ===== ОБНОВЛЕНИЕ КАДРА =====
-    function updateFrame() {
+    // ===== SCRUB FRAME (для паузы/скруббинга) =====
+    function updateScrubFrame() {
         if (!cppTimeline) {
-            console.log("⚠️ cppTimeline не доступен")
             currentFrameSource = ""
             return
         }
 
-        // C++ возвращает путь "file:///C:/temp/frame_xxx.png" или ""
-        var framePath = cppTimeline.getFramePathAt(currentTime, 1)
+        // Статичный кадр через FFmpeg
+        var fp = cppTimeline.getFramePathAt(currentTime, 1)
+        currentFrameSource = (fp && fp !== "") ? fp + "?t=" + Date.now() : ""
 
-        if (framePath && framePath !== "") {
-            // Добавляем "?" + timestamp чтобы QML Image перезагрузил файл
-            // (без этого Image кеширует по пути и не обновляется)
-            currentFrameSource = framePath + "?t=" + Date.now()
-            console.log("✅ Кадр обновлён:", currentTime.toFixed(2), "сек")
-        } else {
-            currentFrameSource = ""
+        // Метаданные (разрешение, FPS) — из кэша, O(1)
+        var info = cppTimeline.getClipInfoAt(currentTime, 1)
+        if (info && info.width > 0) {
+            videoWidth = info.width
+            videoHeight = info.height
+            videoFps = info.fps
+        }
+
+        // Путь для QMediaPlayer (готовим заранее, но play() не вызываем)
+        var cp = cppTimeline.getActiveClipPath(currentTime, 1)
+        if (cp && cp !== "" && currentClipUrl !== cp) {
+            currentClipUrl = cp
+            mediaPlayer.source = cp
         }
     }
 
-    // Авто-обновление при изменении времени
-    onCurrentTimeChanged: {
-        updateFrame()
+    // ===== ВОСПРОИЗВЕДЕНИЕ =====
+    function startPlayback() {
+        // Убеждаемся что файл загружен
+        var cp = cppTimeline ? cppTimeline.getActiveClipPath(currentTime,
+                                                             1) : ""
+        if (cp && cp !== "") {
+            if (currentClipUrl !== cp) {
+                currentClipUrl = cp
+                mediaPlayer.source = cp
+            }
+        } else {
+            return
+            // Нет клипа — нечего играть
+        }
+
+        // Синхронизируем позицию QMediaPlayer с timeline
+        // Синхронизируем позицию внутри файла
+        var info = cppTimeline ? cppTimeline.getClipInfoAt(currentTime,
+                                                           1) : null
+        if (info) {
+            var posMs = (currentTime - (info.startTime || 0) + (info.trimStart
+                                                                || 0)) * 1000
+            mediaPlayer.position = Math.max(0, posMs)
+        }
+
+        // *** Ключевое: применяем скорость воспроизведения ***
+        mediaPlayer.playbackRate = videoPlayer.playbackSpeed
+        mediaPlayer.play()
     }
 
-    // Также обновляемся при добавлении клипов
+    function pausePlayback() {
+        mediaPlayer.pause()
+        updateScrubFrame()
+    }
+
+    // ===== РЕАКЦИИ =====
+    onIsPlayingChanged: {
+        if (isPlaying)
+            startPlayback()
+        else
+            pausePlayback()
+    }
+
+    // *** Скорость: применяем сразу при изменении ***
+    onPlaybackSpeedChanged: {
+        mediaPlayer.playbackRate = playbackSpeed
+    }
+
+    onCurrentTimeChanged: {
+        if (!isPlaying) {
+            updateScrubFrame()
+        } else {
+            // Проверяем drift при scrubbing во время воспроизведения
+            var info = cppTimeline ? cppTimeline.getClipInfoAt(currentTime,
+                                                               1) : null
+            if (info) {
+                var expectedMs = (currentTime - (info.startTime
+                                                 || 0) + (info.trimStart
+                                                          || 0)) * 1000
+                if (Math.abs(expectedMs - mediaPlayer.position) > 1000) {
+                    mediaPlayer.position = Math.max(0, expectedMs)
+                }
+            }
+        }
+    }
+
+    onVolumeChanged: {
+        audioOut.volume = volume
+    }
+
     Connections {
         target: cppTimeline
         function onClipsChanged() {
-            videoPlayer.updateFrame()
+            if (!videoPlayer.isPlaying)
+                videoPlayer.updateScrubFrame()
         }
-        function onTotalDurationChanged() {// duration пересчитается автоматически через binding
+    }
+
+    // ===== QMEDIAPLAYER =====
+    MediaPlayer {
+        id: mediaPlayer
+        videoOutput: videoOutput
+        audioOutput: AudioOutput {
+            id: audioOut
+            volume: videoPlayer.volume
+        }
+
+        onErrorOccurred: function (err, str) {
+            console.log("❌ MediaPlayer error:", str)
+        }
+
+        // Двигаем playhead за QMediaPlayer
+        onPositionChanged: {
+            if (videoPlayer.isPlaying && mediaPlayer.source !== "") {
+                var info = cppTimeline ? cppTimeline.getClipInfoAt(
+                                             videoPlayer.currentTime, 1) : null
+                if (info) {
+                    var timelineTime = (mediaPlayer.position / 1000.0)
+                            + (info.startTime || 0) - (info.trimStart || 0)
+                    videoPlayer.timePositionChanged(timelineTime)
+                }
+            }
+        }
+
+        onPlaybackStateChanged: {
+            if (mediaPlayer.playbackState === MediaPlayer.StoppedState
+                    && videoPlayer.isPlaying) {
+                videoPlayer.isPlaying = false
+            }
         }
     }
 
@@ -114,7 +230,7 @@ Rectangle {
         anchors.margins: Theme.spacingLarge
         spacing: Theme.spacing
 
-        // Область видео
+        // ===== ОБЛАСТЬ ВИДЕО =====
         Rectangle {
             id: videoArea
             Layout.fillWidth: true
@@ -123,58 +239,89 @@ Rectangle {
             radius: Theme.borderRadius
             clip: true
 
-            // ===== ОТОБРАЖЕНИЕ КАДРА =====
-            Image {
-                id: videoFrame
-                anchors.centerIn: parent
-                width: parent.width
-                height: parent.height
-                source: videoPlayer.currentFrameSource
-                fillMode: Image.PreserveAspectFit
-                // *** ИСПРАВЛЕНО: cache: false чтобы Image всегда перезагружал файл ***
-                cache: false
-                asynchronous: true
-                visible: videoPlayer.currentFrameSource !== ""
+            // Режим воспроизведения: QMediaPlayer
+            VideoOutput {
+                id: videoOutput
+                anchors.fill: parent
+                visible: videoPlayer.isPlaying && mediaPlayer.source !== ""
 
-                // ===== SHADER EFFECTS =====
                 layer.enabled: videoPlayer.brightness !== 1.0
                                || videoPlayer.contrast !== 1.0
                                || videoPlayer.saturation !== 1.0
                                || videoPlayer.grayscale
-
                 layer.effect: ShaderEffect {
                     property real brightness: videoPlayer.brightness
                     property real contrast: videoPlayer.contrast
                     property real saturation: videoPlayer.saturation
                     property bool grayscale: videoPlayer.grayscale
-
                     fragmentShader: "
 uniform lowp sampler2D source;
-uniform lowp float brightness;
-uniform lowp float contrast;
-uniform lowp float saturation;
-uniform bool grayscale;
+uniform lowp float brightness; uniform lowp float contrast;
+uniform lowp float saturation; uniform bool grayscale;
 varying highp vec2 qt_TexCoord0;
-
 void main() {
-vec4 color = texture2D(source, qt_TexCoord0);
-color.rgb *= brightness;
-color.rgb = (color.rgb - 0.5) * contrast + 0.5;
-float gray = dot(color.rgb, vec3(0.299, 0.587, 0.114));
-color.rgb = mix(vec3(gray), color.rgb, saturation);
-if (grayscale) { color.rgb = vec3(gray); }
-gl_FragColor = vec4(clamp(color.rgb, 0.0, 1.0), 1.0);
-}
-"
+vec4 c = texture2D(source, qt_TexCoord0);
+c.rgb *= brightness;
+c.rgb = (c.rgb - 0.5) * contrast + 0.5;
+float g = dot(c.rgb, vec3(0.299, 0.587, 0.114));
+c.rgb = mix(vec3(g), c.rgb, saturation);
+if (grayscale) c.rgb = vec3(g);
+gl_FragColor = vec4(clamp(c.rgb, 0.0, 1.0), 1.0);
+}"
                 }
             }
 
-            // Placeholder когда нет видео
+            // Режим паузы: FFmpeg кадр
+            Image {
+                id: scrubFrame
+                anchors.fill: parent
+                source: videoPlayer.currentFrameSource
+                fillMode: Image.PreserveAspectFit
+                cache: false
+                asynchronous: true
+                visible: !videoPlayer.isPlaying
+                         && videoPlayer.currentFrameSource !== ""
+
+                BusyIndicator {
+                    anchors.centerIn: parent
+                    running: scrubFrame.status === Image.Loading
+                    visible: running
+                    width: 32
+                    height: 32
+                    palette.dark: Theme.rubyPrimary
+                }
+
+                layer.enabled: videoPlayer.brightness !== 1.0
+                               || videoPlayer.contrast !== 1.0
+                               || videoPlayer.saturation !== 1.0
+                               || videoPlayer.grayscale
+                layer.effect: ShaderEffect {
+                    property real brightness: videoPlayer.brightness
+                    property real contrast: videoPlayer.contrast
+                    property real saturation: videoPlayer.saturation
+                    property bool grayscale: videoPlayer.grayscale
+                    fragmentShader: "
+uniform lowp sampler2D source;
+uniform lowp float brightness; uniform lowp float contrast;
+uniform lowp float saturation; uniform bool grayscale;
+varying highp vec2 qt_TexCoord0;
+void main() {
+vec4 c = texture2D(source, qt_TexCoord0);
+c.rgb *= brightness;
+c.rgb = (c.rgb - 0.5) * contrast + 0.5;
+float g = dot(c.rgb, vec3(0.299, 0.587, 0.114));
+c.rgb = mix(vec3(g), c.rgb, saturation);
+if (grayscale) c.rgb = vec3(g);
+gl_FragColor = vec4(clamp(c.rgb, 0.0, 1.0), 1.0);
+}"
+                }
+            }
+
+            // Placeholder
             ColumnLayout {
                 anchors.centerIn: parent
                 spacing: Theme.spacingLarge
-                visible: !videoFrame.visible
-
+                visible: !videoOutput.visible && !scrubFrame.visible
                 Text {
                     text: "▶"
                     color: Theme.rubyPrimary
@@ -182,7 +329,6 @@ gl_FragColor = vec4(clamp(color.rgb, 0.0, 1.0), 1.0);
                     opacity: 0.3
                     Layout.alignment: Qt.AlignHCenter
                 }
-
                 Text {
                     text: "Видеоплеер"
                     color: Theme.textDisabled
@@ -190,7 +336,6 @@ gl_FragColor = vec4(clamp(color.rgb, 0.0, 1.0), 1.0);
                     font.pixelSize: Theme.fontSizeLarge
                     Layout.alignment: Qt.AlignHCenter
                 }
-
                 Text {
                     text: "Добавьте видео на таймлайн"
                     color: Theme.textDisabled
@@ -209,7 +354,6 @@ gl_FragColor = vec4(clamp(color.rgb, 0.0, 1.0), 1.0);
                 height: timecodeText.height + Theme.spacingSmall * 2
                 color: Qt.rgba(0, 0, 0, 0.7)
                 radius: Theme.borderRadius
-
                 Text {
                     id: timecodeText
                     anchors.centerIn: parent
@@ -222,13 +366,34 @@ gl_FragColor = vec4(clamp(color.rgb, 0.0, 1.0), 1.0);
                     font.bold: true
                 }
             }
+
+            // Индикатор скорости (если не 1.0x)
+            Rectangle {
+                anchors.left: parent.left
+                anchors.top: parent.top
+                anchors.margins: Theme.spacing
+                width: speedLabel.width + 12
+                height: speedLabel.height + 6
+                radius: Theme.borderRadius
+                color: Qt.rgba(0, 0, 0, 0.7)
+                visible: videoPlayer.playbackSpeed !== 1.0
+                Text {
+                    id: speedLabel
+                    anchors.centerIn: parent
+                    text: videoPlayer.playbackSpeed + "x"
+                    color: Theme.rubyPrimary
+                    font.pixelSize: Theme.fontSize
+                    font.bold: true
+                }
+            }
         }
 
-        // ===== МЕТАДАННЫЕ (разрешение / FPS) =====
+        // ===== МЕТАДАННЫЕ + ГРОМКОСТЬ =====
         RowLayout {
             Layout.fillWidth: true
             spacing: Theme.spacingLarge
 
+            // Разрешение
             Rectangle {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 60
@@ -236,11 +401,9 @@ gl_FragColor = vec4(clamp(color.rgb, 0.0, 1.0), 1.0);
                 radius: Theme.borderRadius
                 border.color: Theme.rubyPrimary
                 border.width: 1
-
                 ColumnLayout {
                     anchors.centerIn: parent
                     spacing: Theme.spacingSmall
-
                     Text {
                         text: "Разрешение"
                         color: Theme.rubyLight
@@ -249,13 +412,9 @@ gl_FragColor = vec4(clamp(color.rgb, 0.0, 1.0), 1.0);
                         font.bold: true
                         Layout.alignment: Qt.AlignHCenter
                     }
-
                     Text {
-                        text: videoFrame.visible
-                                                     ? (videoPlayer.videoWidth > 0
-                                                        ? videoPlayer.videoWidth + " × " + videoPlayer.videoHeight
-                                                        : "— × —")
-                                                     : "— × —"
+                        text: videoPlayer.videoWidth > 0 ? videoPlayer.videoWidth + " × "
+                                                           + videoPlayer.videoHeight : "— × —"
                         color: Theme.textPrimary
                         font.family: Theme.fontFamily
                         font.pixelSize: Theme.fontSize
@@ -265,6 +424,7 @@ gl_FragColor = vec4(clamp(color.rgb, 0.0, 1.0), 1.0);
                 }
             }
 
+            // FPS
             Rectangle {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 60
@@ -272,11 +432,9 @@ gl_FragColor = vec4(clamp(color.rgb, 0.0, 1.0), 1.0);
                 radius: Theme.borderRadius
                 border.color: Theme.rubyPrimary
                 border.width: 1
-
                 ColumnLayout {
                     anchors.centerIn: parent
                     spacing: Theme.spacingSmall
-
                     Text {
                         text: "Частота кадров"
                         color: Theme.rubyLight
@@ -285,13 +443,9 @@ gl_FragColor = vec4(clamp(color.rgb, 0.0, 1.0), 1.0);
                         font.bold: true
                         Layout.alignment: Qt.AlignHCenter
                     }
-
                     Text {
-                        text: videoFrame.visible
-                                                      ? (videoPlayer.videoFps > 0
-                                                         ? videoPlayer.videoFps.toFixed(3) + " FPS"
-                                                         : "— FPS")
-                                                      : "— FPS"
+                        text: videoPlayer.videoFps > 0 ? videoPlayer.videoFps.toFixed(
+                                                             3) + " FPS" : "— FPS"
                         color: Theme.textPrimary
                         font.family: Theme.fontFamily
                         font.pixelSize: Theme.fontSize
@@ -300,19 +454,96 @@ gl_FragColor = vec4(clamp(color.rgb, 0.0, 1.0), 1.0);
                     }
                 }
             }
+
+            // Громкость
+            Rectangle {
+                Layout.preferredWidth: 160
+                Layout.preferredHeight: 60
+                color: Theme.backgroundDark
+                radius: Theme.borderRadius
+                border.color: Theme.rubyPrimary
+                border.width: 1
+                ColumnLayout {
+                    anchors.fill: parent
+                    anchors.margins: 8
+                    spacing: 4
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 6
+                        Text {
+                            text: videoPlayer.volume
+                                  === 0 ? "🔇" : (videoPlayer.volume < 0.5 ? "🔉" : "🔊")
+                            font.pixelSize: 16
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: videoPlayer.volume = videoPlayer.volume > 0 ? 0 : 1.0
+                            }
+                        }
+                        Text {
+                            text: "Громкость"
+                            color: Theme.rubyLight
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.fontSizeSmall
+                            font.bold: true
+                        }
+                        Text {
+                            text: Math.round(videoPlayer.volume * 100) + "%"
+                            color: Theme.textPrimary
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.fontSizeSmall
+                        }
+                    }
+                    Slider {
+                        id: volumeSlider
+                        Layout.fillWidth: true
+                        from: 0.0
+                        to: 1.0
+                        value: videoPlayer.volume
+                        stepSize: 0.01
+                        onValueChanged: videoPlayer.volume = value
+                        background: Rectangle {
+                            x: volumeSlider.leftPadding
+                            y: volumeSlider.topPadding + (volumeSlider.availableHeight - height) / 2
+                            width: volumeSlider.availableWidth
+                            height: 4
+                            radius: 2
+                            color: Theme.backgroundDark
+                            border.color: Theme.borderLight
+                            border.width: 1
+                            Rectangle {
+                                width: volumeSlider.visualPosition * parent.width
+                                height: parent.height
+                                radius: parent.radius
+                                color: Theme.rubyPrimary
+                            }
+                        }
+                        handle: Rectangle {
+                            x: volumeSlider.leftPadding + volumeSlider.visualPosition
+                               * (volumeSlider.availableWidth - width)
+                            y: volumeSlider.topPadding + (volumeSlider.availableHeight - height) / 2
+                            width: 14
+                            height: 14
+                            radius: 7
+                            color: Theme.rubyLight
+                            border.color: Theme.rubyPrimary
+                            border.width: 1
+                        }
+                    }
+                }
+            }
         }
     }
 
     function formatTime(seconds) {
-        var hours = Math.floor(seconds / 3600)
-        var mins = Math.floor((seconds % 3600) / 60)
-        var secs = Math.floor(seconds % 60)
-        if (hours > 0)
-            return pad(hours) + ":" + pad(mins) + ":" + pad(secs)
-        return pad(mins) + ":" + pad(secs)
+        var h = Math.floor(seconds / 3600)
+        var m = Math.floor((seconds % 3600) / 60)
+        var s = Math.floor(seconds % 60)
+        if (h > 0)
+            return pad(h) + ":" + pad(m) + ":" + pad(s)
+        return pad(m) + ":" + pad(s)
     }
-
-    function pad(num) {
-        return num < 10 ? "0" + num : String(num)
+    function pad(n) {
+        return n < 10 ? "0" + n : String(n)
     }
 }

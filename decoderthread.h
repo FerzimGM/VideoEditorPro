@@ -34,11 +34,18 @@ public:
         m_condition.wakeAll();  // Будим поток если он спал
     }
 
+    // Остановить поток (блокирует до завершения, макс 2с)
     void stop() {
-        m_running = false;
+        {
+            QMutexLocker lock(&m_mutex);
+            m_running = false;
+        }
         m_condition.wakeAll();
-        wait(2000);  // Ждём завершения максимум 2 сек
+        wait(2000);
     }
+
+    // Нужен Timeline::getCurrentFrameAt для вычисления frameNum
+    double getFps() const { return m_fps; }
 
 signals:
     // Испускается когда новый кадр готов в кэше
@@ -55,7 +62,7 @@ protected:
         {
             QMutexLocker lock(&m_mutex);
             m_running = true;
-        }//32423fwee4g434
+        }
 
         double currentTime = 0.0;
         // Декодируем на 3 секунды вперёд от текущей позиции
@@ -66,11 +73,13 @@ protected:
             // Проверяем запрос перемотки
             {
                 QMutexLocker lock(&m_mutex);
+                if (!m_running) break;
+
+                // Проверяем seek запрос
                 if (m_seekRequested) {
-                    currentTime = m_seekTime;
+                    currentTime     = m_seekTime;
                     m_seekRequested = false;
-                    // Очищаем кэш — старые кадры больше не нужны
-                    m_cache->clear();
+                    m_cache->clear();   // Старые кадры больше не нужны
                 }
             }
 
@@ -92,12 +101,15 @@ protected:
             // Проверяем: не ушли ли слишком далеко вперёд?
             {
                 QMutexLocker lock(&m_mutex);
+                if (!m_running) break;
+
                 double aheadOf = currentTime - m_seekTime;
                 if (!m_seekRequested && aheadOf > PREFETCH_AHEAD) {
                     m_condition.wait(&m_mutex, 50);
                 }
             }
         }
+        decoder.closeFile();
     }
 
 private:

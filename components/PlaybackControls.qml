@@ -13,21 +13,27 @@ Rectangle {
     property real playbackSpeed: 1.0
     property bool snapEnabled: true
 
-    signal playPauseClicked()
-    signal stopClicked()
+    signal playPauseClicked
+    signal stopClicked
     signal seek(real time)
     signal speedChanged(real speed)
-    signal snapToggled()
-    signal cutClicked()
-    signal clearEffectsClicked()
+    signal snapToggled
+    signal cutClicked
+    signal clearEffectsClicked
 
     Rectangle {
         anchors.top: parent.top
         width: parent.width
         height: 2
         gradient: Gradient {
-            GradientStop { position: 0.0; color: Theme.rubyGradientStart }
-            GradientStop { position: 1.0; color: Theme.rubyGradientEnd }
+            GradientStop {
+                position: 0.0
+                color: Theme.rubyGradientStart
+            }
+            GradientStop {
+                position: 1.0
+                color: Theme.rubyGradientEnd
+            }
         }
     }
 
@@ -35,44 +41,45 @@ Rectangle {
         anchors.fill: parent
         anchors.margins: Theme.spacing
         spacing: Theme.spacing
+    }
 
-        // Кнопки воспроизведения
-        RowLayout {
-            spacing: Theme.spacingSmall
+    // Кнопки воспроизведения
+    RowLayout {
+        spacing: Theme.spacingSmall
 
-            ControlButton {
-                icon: "⏮"
-                tooltip: "Назад на " + (5 * root.playbackSpeed).toFixed(1) + " сек"
-                size: 38
-                onClicked: {
-                    var rewindAmount = 5 * root.playbackSpeed  // 5 сек × скорость
-                    root.seek(Math.max(0, root.currentTime - rewindAmount))
-                }
+        ControlButton {
+            icon: "⏮"
+            tooltip: "Назад на " + (5 * root.playbackSpeed).toFixed(1) + " сек"
+            size: 38
+            onClicked: {
+                var rewindAmount = 5 * root.playbackSpeed // 5 сек × скорость
+                root.seek(Math.max(0, root.currentTime - rewindAmount))
             }
+        }
 
-            ControlButton {
-                icon: root.isPlaying ? "⏸" : "▶"
-                tooltip: root.isPlaying ? "Пауза (K)" : "Воспроизведение (K)"
-                highlighted: true
-                size: 46
-                onClicked: root.playPauseClicked()
-            }
+        ControlButton {
+            icon: root.isPlaying ? "⏸" : "▶"
+            tooltip: root.isPlaying ? "Пауза (K)" : "Воспроизведение (K)"
+            highlighted: true
+            size: 46
+            onClicked: root.playPauseClicked()
+        }
 
-            ControlButton {
-                icon: "⏹"
-                tooltip: "Стоп"
-                size: 38
-                onClicked: root.stopClicked()
-            }
+        ControlButton {
+            icon: "⏹"
+            tooltip: "Стоп"
+            size: 38
+            onClicked: root.stopClicked()
+        }
 
-            ControlButton {
-                icon: "⏭"
-                tooltip: "Вперёд на " + (5 * root.playbackSpeed).toFixed(1) + " сек"
-                size: 38
-                onClicked: {
-                    var fastForwardAmount = 5 * root.playbackSpeed  // 5 сек × скорость
-                    root.seek(Math.min(root.duration, root.currentTime + fastForwardAmount))
-                }
+        ControlButton {
+            icon: "⏭"
+            tooltip: "Вперёд на " + (5 * root.playbackSpeed).toFixed(1) + " сек"
+            size: 38
+            onClicked: {
+                var fastForwardAmount = 5 * root.playbackSpeed // 5 сек × скорость
+                root.seek(Math.min(root.duration,
+                                   root.currentTime + fastForwardAmount))
             }
         }
 
@@ -82,8 +89,14 @@ Rectangle {
             Layout.topMargin: Theme.spacing
             Layout.bottomMargin: Theme.spacing
             gradient: Gradient {
-                GradientStop { position: 0.0; color: Theme.rubyGradientStart }
-                GradientStop { position: 1.0; color: Theme.rubyGradientEnd }
+                GradientStop {
+                    position: 0.0
+                    color: Theme.rubyGradientStart
+                }
+                GradientStop {
+                    position: 1.0
+                    color: Theme.rubyGradientEnd
+                }
             }
         }
 
@@ -112,8 +125,14 @@ Rectangle {
             Layout.topMargin: Theme.spacing
             Layout.bottomMargin: Theme.spacing
             gradient: Gradient {
-                GradientStop { position: 0.0; color: Theme.rubyGradientStart }
-                GradientStop { position: 1.0; color: Theme.rubyGradientEnd }
+                GradientStop {
+                    position: 0.0
+                    color: Theme.rubyGradientStart
+                }
+                GradientStop {
+                    position: 1.0
+                    color: Theme.rubyGradientEnd
+                }
             }
         }
 
@@ -154,7 +173,7 @@ Rectangle {
 
                 delegate: ItemDelegate {
                     width: speedCombo.width
-                    
+
                     contentItem: Text {
                         text: modelData
                         color: highlighted ? Theme.rubyLight : Theme.textPrimary
@@ -196,7 +215,9 @@ Rectangle {
             }
         }
 
-        Item { Layout.fillWidth: true }
+        Item {
+            Layout.fillWidth: true
+        }
 
         // Дополнительные настройки
         RowLayout {
@@ -239,27 +260,33 @@ Rectangle {
         property bool checkable: false
         property bool checked: false
         property int size: 38
-        signal clicked()
+        signal clicked
 
         implicitWidth: size
         implicitHeight: size
         radius: size / 2
 
         color: {
-            if (mouseArea.pressed) return highlighted ? Theme.rubyDark : Theme.buttonPressed
-            if (mouseArea.containsMouse) return highlighted ? Theme.rubyLight : Theme.hoverColor
-            if (checked) return Theme.rubyPrimary
-            if (highlighted) return Theme.rubyPrimary
+            if (mouseArea.pressed)
+                return highlighted ? Theme.rubyDark : Theme.buttonPressed
+            if (mouseArea.containsMouse)
+                return highlighted ? Theme.rubyLight : Theme.hoverColor
+            if (checked)
+                return Theme.rubyPrimary
+            if (highlighted)
+                return Theme.rubyPrimary
             return Theme.buttonBackground
         }
 
-        border.color: (highlighted || checked) ? "transparent" : (mouseArea.containsMouse ? Theme.rubyPrimary : Theme.borderLight)
+        border.color: (highlighted
+                       || checked) ? "transparent" : (mouseArea.containsMouse ? Theme.rubyPrimary : Theme.borderLight)
         border.width: 1
 
         Text {
             anchors.centerIn: parent
             text: icon
-            color: (highlighted || checked) ? "#FFFFFF" : (mouseArea.containsMouse ? Theme.textPrimary : Theme.textSecondary)
+            color: (highlighted
+                    || checked) ? "#FFFFFF" : (mouseArea.containsMouse ? Theme.textPrimary : Theme.textSecondary)
             font.pixelSize: size * 0.45
             font.bold: highlighted || checked || mouseArea.containsMouse
         }
@@ -297,12 +324,16 @@ Rectangle {
         }
 
         Behavior on color {
-            ColorAnimation { duration: Theme.animationDuration }
+            ColorAnimation {
+                duration: Theme.animationDuration
+            }
         }
 
         scale: mouseArea.pressed ? 0.9 : 1.0
         Behavior on scale {
-            NumberAnimation { duration: 100 }
+            NumberAnimation {
+                duration: 100
+            }
         }
     }
 
@@ -310,7 +341,7 @@ Rectangle {
         var hours = Math.floor(seconds / 3600)
         var mins = Math.floor((seconds % 3600) / 60)
         var secs = Math.floor(seconds % 60)
-        
+
         if (hours > 0) {
             return pad(hours) + ":" + pad(mins) + ":" + pad(secs)
         }

@@ -9,42 +9,34 @@ import "theme.js" as Theme
 QtObject {
     id: appRoot
 
-    // ===== ОКНО 1: SPLASH SCREEN (показывается первым) =====
+    // ===== ОКНО 1: SPLASH SCREEN =====
     property var splashWindow: Window {
         id: splashWin
-        visible: true // Показываем сразу!
+        visible: true
         width: 800
         height: 435
         color: "transparent"
         flags: Qt.SplashScreen | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint
-
-        // Центрируем на экране
         Component.onCompleted: {
             x = (Screen.width - width) / 2
             y = (Screen.height - height) / 2
         }
 
-        // Затемнённый фон
         Rectangle {
             anchors.fill: parent
             color: "#000000"
             opacity: 0.95
             radius: Theme.borderRadius
         }
-
-        // SplashScreen компонент
         Rectangle {
             anchors.fill: parent
             color: Theme.backgroundColor
             radius: Theme.borderRadius
             border.color: Theme.rubyPrimary
             border.width: 2
-
             SplashScreen {
                 anchors.fill: parent
-
                 onLoaded: {
-                    // Закрываем splash и показываем главное окно
                     splashWin.close()
                     mainWindow.visible = true
                 }
@@ -52,10 +44,10 @@ QtObject {
         }
     }
 
-    // ===== ОКНО 2: ГЛАВНОЕ ОКНО (скрыто до окончания загрузки) =====
+    // ===== ГЛАВНОЕ ОКНО =====
     property var mainWindow: Window {
         id: root
-        visible: false // Скрыто пока идёт загрузка!
+        visible: false
         width: 1600
         height: 900
         minimumWidth: 1280
@@ -63,10 +55,12 @@ QtObject {
         title: "VideoEditor Pro"
         color: Theme.backgroundColor
         flags: Qt.Window | Qt.FramelessWindowHint
+
+        // *** ВАЖНО: cutKeyPressed объявлен здесь, в Window root ***
+        // Shortcuts тоже в Window root → доступ без проблем
         property bool cutKeyPressed: false
 
-        // Resize handles для frameless окна
-        // Правый край
+        // Resize handles
         MouseArea {
             anchors.right: parent.right
             anchors.top: parent.top
@@ -74,25 +68,19 @@ QtObject {
             width: 5
             cursorShape: Qt.SizeHorCursor
             z: 1000
-
-            property real startMouseX: 0
-            property real startWidth: 0
-
+            property real sx: 0
+            property real sw: 0
             onPressed: mouse => {
-                           startMouseX = mouseX + root.x + root.width - 5
-                           startWidth = root.width
+                           sx = mouseX + root.x + root.width - 5
+                           sw = root.width
                        }
-
             onMouseXChanged: {
-                if (pressed) {
-                    var currentMouseX = mouseX + root.x + root.width - 5
-                    var delta = currentMouseX - startMouseX
-                    root.width = Math.max(root.minimumWidth, startWidth + delta)
-                }
+                if (pressed)
+                    root.width = Math.max(
+                                root.minimumWidth,
+                                sw + (mouseX + root.x + root.width - 5 - sx))
             }
         }
-
-        // Нижний край
         MouseArea {
             anchors.bottom: parent.bottom
             anchors.left: parent.left
@@ -100,26 +88,19 @@ QtObject {
             height: 5
             cursorShape: Qt.SizeVerCursor
             z: 1000
-
-            property real startMouseY: 0
-            property real startHeight: 0
-
+            property real sy: 0
+            property real sh: 0
             onPressed: mouse => {
-                           startMouseY = mouseY + root.y + root.height - 5
-                           startHeight = root.height
+                           sy = mouseY + root.y + root.height - 5
+                           sh = root.height
                        }
-
             onMouseYChanged: {
-                if (pressed) {
-                    var currentMouseY = mouseY + root.y + root.height - 5
-                    var delta = currentMouseY - startMouseY
-                    root.height = Math.max(root.minimumHeight,
-                                           startHeight + delta)
-                }
+                if (pressed)
+                    root.height = Math.max(
+                                root.minimumHeight,
+                                sh + (mouseY + root.y + root.height - 5 - sy))
             }
         }
-
-        // Правый нижний угол
         MouseArea {
             anchors.right: parent.right
             anchors.bottom: parent.bottom
@@ -127,55 +108,42 @@ QtObject {
             height: 10
             cursorShape: Qt.SizeFDiagCursor
             z: 1001
-
-            property real startMouseX: 0
-            property real startMouseY: 0
-            property real startWidth: 0
-            property real startHeight: 0
-
+            property real sx: 0
+            property real sy: 0
+            property real sw: 0
+            property real sh: 0
             onPressed: mouse => {
-                           startMouseX = mouseX + root.x + root.width - 10
-                           startMouseY = mouseY + root.y + root.height - 10
-                           startWidth = root.width
-                           startHeight = root.height
+                           sx = mouseX + root.x + root.width - 10
+                           sy = mouseY + root.y + root.height - 10
+                           sw = root.width
+                           sh = root.height
                        }
-
             onPositionChanged: mouse => {
                                    if (pressed) {
-                                       var currentMouseX = mouse.x + root.x + root.width - 10
-                                       var currentMouseY = mouse.y + root.y + root.height - 10
-                                       var deltaX = currentMouseX - startMouseX
-                                       var deltaY = currentMouseY - startMouseY
                                        root.width = Math.max(
                                            root.minimumWidth,
-                                           startWidth + deltaX)
+                                           sw + (mouse.x + root.x + root.width - 10 - sx))
                                        root.height = Math.max(
                                            root.minimumHeight,
-                                           startHeight + deltaY)
+                                           sh + (mouse.y + root.y + root.height - 10 - sy))
                                    }
                                }
         }
 
-        // Менеджер проекта
+        // Менеджеры
         QtObject {
             id: projectManager
             property string currentProjectPath: ""
             property bool isProjectModified: false
-            property var clips: []
         }
 
-        // Менеджер клипов (пока фронтенд, позже подключим к C++)
         ClipManager {
             id: clipManager
-            // Сигналы
-            signal clipAdded(string filepath, int trackNumber, double startTime)
         }
 
-        // Менеджер воспроизведения
         QtObject {
             id: playbackManager
             property real currentTime: 0
-            // *** ИСПРАВЛЕНО: duration из C++, хардкод 100 = стоп на 1:40! ***
             property real duration: cppTimeline ? Math.max(
                                                       60,
                                                       cppTimeline.totalDuration) : 60
@@ -185,35 +153,48 @@ QtObject {
             property bool snapEnabled: true
         }
 
-        // Обновляем duration при добавлении клипов
         Connections {
             target: cppTimeline
             function onTotalDurationChanged() {
-                // playbackManager.duration пересчитается автоматически через binding
-                console.log("⏱️ Duration обновлена:", cppTimeline.totalDuration)
+                console.log("⏱️ Duration:", cppTimeline.totalDuration)
             }
         }
 
-        // Диалог открытия видео
+        // ===== ДИАЛОГИ =====
         FileDialog {
             id: openVideoDialog
             title: "Открыть видео"
             nameFilters: ["Video files (*.mp4 *.avi *.mov *.mkv)", "All files (*)"]
             onAccepted: {
                 var filepath = selectedFile.toString()
-                // Убираем file:/// prefix если есть
                 filepath = filepath.replace(/^file:\/\/\//, "")
-                // Windows: /C:/path → C:/path
                 if (filepath.match(/^\/[A-Za-z]:\//))
                     filepath = filepath.substring(1)
-                console.log("Выбрано видео:", filepath)
-                // Добавляем клип на первую дорожку в текущую позицию playhead
-                clipManager.addClip(filepath, 1,
-                                    playbackManager.currentTime, 10.0)
+
+                // *** ИСПРАВЛЕНО: добавляем в конец последнего клипа, не на текущее время ***
+                // Если видеофайлы уже есть — ставим новый после них
+                // Если нет — ставим на 0
+                var startTime = 0
+                if (cppTimeline) {
+                    var trackEnd = cppTimeline.getTrackEndTime(1)
+                    // Если playhead стоит ДО конца клипов — добавляем в конец клипов
+                    // Если playhead стоит ПОСЛЕ — добавляем на playhead (ручное позиционирование)
+                    startTime = Math.max(
+                                trackEnd,
+                                playbackManager.currentTime === 0 ? 0 : playbackManager.currentTime)
+                    // Если нет клипов — добавляем на 0
+                    if (trackEnd === 0)
+                        startTime = 0
+                    else
+                        startTime = trackEnd // всегда в конец для простоты
+                }
+
+                console.log("Добавляю видео:", filepath, "startTime:",
+                            startTime)
+                clipManager.addClip(filepath, 1, startTime)
             }
         }
 
-        // Диалог открытия проекта
         FileDialog {
             id: openProjectDialog
             title: "Открыть проект"
@@ -223,13 +204,11 @@ QtObject {
                 filepath = filepath.replace(/^file:\/\/\//, "")
                 if (filepath.match(/^\/[A-Za-z]:\//))
                     filepath = filepath.substring(1)
-                console.log("Открыт проект:", filepath)
                 projectManager.currentProjectPath = filepath
                 cppTimeline.loadProject(filepath)
             }
         }
 
-        // Диалог сохранения проекта
         FileDialog {
             id: saveProjectDialog
             fileMode: FileDialog.SaveFile
@@ -237,28 +216,20 @@ QtObject {
             nameFilters: ["Project files (*.vep)", "All files (*)"]
             defaultSuffix: "vep"
             onAccepted: {
-                // *** ИСПРАВЛЕНО: было `path = path.replace(...)` — path не существует!
-                //     selectedFile — это URL объект, нужно .toString() ***
                 var path = selectedFile.toString()
                 path = path.replace(/^file:\/\/\//, "")
                 if (path.match(/^\/[A-Za-z]:\//))
                     path = path.substring(1)
-                console.log("Сохранен проект:", path)
                 projectManager.currentProjectPath = path
                 projectManager.isProjectModified = false
                 cppTimeline.saveProject(path)
-
-                //var path = selectedFile.toString()
-                //projectManager.isProjectModified = false
-                //cppTimeline.saveProject(selectedFile)
             }
         }
 
-        // Диалог выбора пути экспорта
         FileDialog {
             id: exportFileDialog
             fileMode: FileDialog.SaveFile
-            title: "Экспорт видео — выберите путь"
+            title: "Экспорт видео"
             nameFilters: ["MP4 (*.mp4)", "AVI (*.avi)", "MOV (*.mov)", "MKV (*.mkv)"]
             defaultSuffix: "mp4"
             onAccepted: {
@@ -266,21 +237,13 @@ QtObject {
                 filepath = filepath.replace(/^file:\/\/\//, "")
                 if (filepath.match(/^\/[A-Za-z]:\//))
                     filepath = filepath.substring(1)
-
-                // Получаем разрешение из выбора
-                var resolutions = [[1920, 1080], [1280, 720], [3840, 2160], [2560, 1440]]
-                var res = resolutions[resolutionCombo.currentIndex]
-                        || [1920, 1080]
-
                 exportDialog.isRendering = true
                 exportDialog.renderProgress = 0
                 exportDialog.open()
-
                 cppTimeline.renderToFile(filepath)
             }
         }
 
-        // ===== ДИАЛОГ ЭКСПОРТА ВИДЕО =====
         Dialog {
             id: exportDialog
             title: "Экспорт видео"
@@ -288,7 +251,6 @@ QtObject {
             height: 400
             anchors.centerIn: parent
             modal: true
-
             property int renderProgress: 0
             property bool isRendering: false
 
@@ -304,7 +266,6 @@ QtObject {
                 anchors.margins: Theme.spacingLarge
                 spacing: Theme.spacingLarge
 
-                // Заголовок
                 Text {
                     text: exportDialog.isRendering ? "Рендеринг..." : "Настройки экспорта"
                     color: Theme.textPrimary
@@ -314,240 +275,95 @@ QtObject {
                     Layout.alignment: Qt.AlignHCenter
                 }
 
-                // Настройки (показываем только когда НЕ рендерим)
                 ColumnLayout {
                     Layout.fillWidth: true
                     spacing: Theme.spacing
                     visible: !exportDialog.isRendering
-
-                    Text {
-                        text: "Формат"
-                        color: Theme.textSecondary
-                        font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fontSize
-                    }
-
-                    ComboBox {
-                        id: formatCombo
-                        Layout.fillWidth: true
-                        model: ["MP4 (H.264)", "AVI", "MOV", "MKV", "WebM"]
-                        currentIndex: 0
-
-                        contentItem: Text {
-                            text: parent.displayText
-                            color: Theme.textPrimary
-                            font.family: Theme.fontFamily
-                            font.pixelSize: Theme.fontSize
-                            verticalAlignment: Text.AlignVCenter
-                            leftPadding: Theme.spacing
-                        }
-
-                        background: Rectangle {
-                            color: parent.down ? Theme.buttonPressed : (parent.hovered ? Theme.buttonHover : Theme.buttonBackground)
-                            radius: Theme.borderRadius
-                            border.color: Theme.rubyPrimary
-                            border.width: 1
-                        }
-                    }
-
                     Text {
                         text: "Разрешение"
                         color: Theme.textSecondary
                         font.family: Theme.fontFamily
                         font.pixelSize: Theme.fontSize
                     }
-
                     ComboBox {
                         id: resolutionCombo
                         Layout.fillWidth: true
                         model: ["1920×1080 (Full HD)", "1280×720 (HD)", "3840×2160 (4K)", "2560×1440 (2K)"]
-                        currentIndex: 0
-
                         contentItem: Text {
                             text: parent.displayText
                             color: Theme.textPrimary
                             font.family: Theme.fontFamily
                             font.pixelSize: Theme.fontSize
                             verticalAlignment: Text.AlignVCenter
-                            leftPadding: Theme.spacing
+                            leftPadding: 8
                         }
-
-                        background: Rectangle {
-                            color: parent.down ? Theme.buttonPressed : (parent.hovered ? Theme.buttonHover : Theme.buttonBackground)
-                            radius: Theme.borderRadius
-                            border.color: Theme.rubyPrimary
-                            border.width: 1
-                        }
-                    }
-
-                    Text {
-                        text: "Качество"
-                        color: Theme.textSecondary
-                        font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fontSize
-                    }
-
-                    Slider {
-                        id: qualitySlider
-                        Layout.fillWidth: true
-                        from: 1
-                        to: 10
-                        value: 7
-                        stepSize: 1
-                        snapMode: Slider.SnapAlways
-
-                        background: Rectangle {
-                            x: parent.leftPadding
-                            y: parent.topPadding + parent.availableHeight / 2 - height / 2
-                            width: parent.availableWidth
-                            height: 4
-                            radius: 2
-                            color: Theme.backgroundDark
-
-                            Rectangle {
-                                width: parent.parent.visualPosition * parent.width
-                                height: parent.height
-                                color: Theme.rubyPrimary
-                                radius: 2
-                            }
-                        }
-
-                        handle: Rectangle {
-                            x: parent.leftPadding + parent.visualPosition
-                               * parent.availableWidth - width / 2
-                            y: parent.topPadding + parent.availableHeight / 2 - height / 2
-                            width: 18
-                            height: 18
-                            radius: 9
-                            color: parent.pressed ? Theme.rubyLight : Theme.rubyPrimary
-                        }
-                    }
-
-                    Text {
-                        text: "Качество: " + qualitySlider.value + "/10"
-                        color: Theme.textSecondary
-                        font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fontSizeSmall
-                        Layout.alignment: Qt.AlignHCenter
-                    }
-                }
-
-                // Прогресс бар (показываем при рендеринге)
-                ColumnLayout {
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
-                    spacing: Theme.spacingLarge
-                    visible: exportDialog.isRendering
-
-                    Text {
-                        text: exportDialog.renderProgress + "%"
-                        color: Theme.rubyPrimary
-                        font.family: Theme.fontFamily
-                        font.pixelSize: 48
-                        font.bold: true
-                        Layout.alignment: Qt.AlignHCenter
-                    }
-
-                    ProgressBar {
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: 20
-                        value: exportDialog.renderProgress / 100
-
                         background: Rectangle {
                             color: Theme.backgroundDark
-                            radius: Theme.borderRadius
-                            border.color: Theme.rubyPrimary
-                            border.width: 1
-                        }
-
-                        contentItem: Item {
-                            Rectangle {
-                                width: parent.parent.visualPosition * parent.width
-                                height: parent.height
-                                radius: Theme.borderRadius
-                                color: Theme.rubyPrimary
-                            }
-                        }
-                    }
-
-                    Text {
-                        text: "Рендеринг видео..."
-                        color: Theme.textSecondary
-                        font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fontSize
-                        Layout.alignment: Qt.AlignHCenter
-                    }
-                }
-
-                Item {
-                    Layout.fillHeight: true
-                }
-
-                // Кнопки
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: Theme.spacing
-
-                    Button {
-                        text: exportDialog.isRendering ? "Отмена" : "Закрыть"
-                        Layout.fillWidth: true
-
-                        onClicked: {
-                            if (exportDialog.isRendering) {
-                                cppTimeline.cancelRender()
-                                console.log("Отмена рендеринга")
-                            }
-                            exportDialog.close()
-                        }
-
-                        contentItem: Text {
-                            text: parent.text
-                            color: Theme.textPrimary
-                            font.family: Theme.fontFamily
-                            font.pixelSize: Theme.fontSize
-                            horizontalAlignment: Text.AlignHCenter
-                            verticalAlignment: Text.AlignVCenter
-                        }
-
-                        background: Rectangle {
-                            color: parent.down ? Theme.backgroundDark : (parent.hovered ? Theme.buttonHover : Theme.buttonBackground)
-                            radius: Theme.borderRadius
                             border.color: Theme.borderLight
                             border.width: 1
-                        }
-                    }
-
-                    Button {
-                        text: "Экспорт"
-                        Layout.fillWidth: true
-                        visible: !exportDialog.isRendering
-
-                        onClicked: {
-                            // *** ИСПРАВЛЕНО: сначала закрываем диалог настроек,
-                            //     потом открываем FileDialog для выбора пути ***
-                            exportDialog.close()
-                            exportFileDialog.open()
-                        }
-
-                        contentItem: Text {
-                            text: parent.text
-                            color: Theme.textPrimary
-                            font.family: Theme.fontFamily
-                            font.pixelSize: Theme.fontSize
-                            font.bold: true
-                            horizontalAlignment: Text.AlignHCenter
-                            verticalAlignment: Text.AlignVCenter
-                        }
-
-                        background: Rectangle {
-                            color: parent.down ? Theme.rubyDark : (parent.hovered ? Theme.rubyLight : Theme.rubyPrimary)
                             radius: Theme.borderRadius
                         }
+                    }
+                }
+
+                ProgressBar {
+                    Layout.fillWidth: true
+                    visible: exportDialog.isRendering
+                    value: exportDialog.renderProgress / 100.0
+                    background: Rectangle {
+                        color: Theme.backgroundDark
+                        radius: Theme.borderRadius
+                    }
+                    contentItem: Item {
+                        Rectangle {
+                            width: parent.width * exportDialog.renderProgress / 100.0
+                            height: parent.height
+                            radius: Theme.borderRadius
+                            gradient: Gradient {
+                                orientation: Gradient.Horizontal
+                                GradientStop {
+                                    position: 0.0
+                                    color: Theme.rubyGradientStart
+                                }
+                                GradientStop {
+                                    position: 1.0
+                                    color: Theme.rubyGradientEnd
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Text {
+                    visible: exportDialog.isRendering
+                    text: exportDialog.renderProgress + "%"
+                    color: Theme.rubyLight
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontSize
+                    Layout.alignment: Qt.AlignHCenter
+                }
+
+                Button {
+                    text: exportDialog.isRendering ? "Отмена" : "Экспортировать"
+                    Layout.alignment: Qt.AlignHCenter
+                    onClicked: exportDialog.isRendering ? exportDialog.close(
+                                                              ) : exportFileDialog.open()
+                    contentItem: Text {
+                        text: parent.text
+                        color: Theme.textPrimary
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontSize
+                        font.bold: true
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                    }
+                    background: Rectangle {
+                        color: parent.down ? Theme.rubyDark : (parent.hovered ? Theme.rubyLight : Theme.rubyPrimary)
+                        radius: Theme.borderRadius
                     }
                 }
             }
 
-            // Подключение к C++
             Connections {
                 target: cppTimeline
                 function onRenderProgress(percent) {
@@ -555,35 +371,12 @@ QtObject {
                 }
                 function onRenderFinished(success) {
                     exportDialog.isRendering = false
-                    if (success)
-                        console.log("✅ Экспорт успешен!")
-                    else
-                        console.log("❌ Ошибка экспорта")
+                    console.log(success ? "✅ Экспорт OK" : "❌ Ошибка")
                 }
             }
         }
 
-        // Таймер для воспроизведения
-        Timer {
-            id: playbackTimer
-            interval: 33 // ~30 FPS
-            running: playbackManager.isPlaying
-            repeat: true
-            onTriggered: {
-                // *** ИСПРАВЛЕНО: останавливаемся по реальной duration из C++,
-                //     не по хардкоду 100 ***
-                var newTime = playbackManager.currentTime + (interval / 1000.0)
-                        * playbackManager.playbackSpeed
-                if (newTime >= playbackManager.duration) {
-                    newTime = playbackManager.duration
-                    playbackManager.isPlaying = false
-                }
-                playbackManager.currentTime = newTime
-                cppTimeline.currentTime = newTime  // через property binding, не функцию
-            }
-        }
-
-        // Верхняя панель меню
+        // Верхняя панель
         TopMenuBar {
             id: menuBar
             anchors.top: parent.top
@@ -591,20 +384,18 @@ QtObject {
             anchors.right: parent.right
             height: Theme.panelHeight
             z: 100
-
             targetWindow: root
-
             onOpenVideo: openVideoDialog.open()
             onOpenProject: openProjectDialog.open()
             onSaveProject: saveProjectDialog.open()
-            onExportVideo: exportDialog.open() // Открываем диалог экспорта!
+            onExportVideo: exportDialog.open()
             onMinimize: root.showMinimized()
             onMaximize: root.visibility === Window.Maximized ? root.showNormal(
                                                                    ) : root.showMaximized()
             onClose: Qt.quit()
         }
 
-        // Главный layout
+        // ===== ГЛАВНЫЙ LAYOUT =====
         ColumnLayout {
             anchors.top: menuBar.bottom
             anchors.left: parent.left
@@ -612,47 +403,41 @@ QtObject {
             anchors.bottom: parent.bottom
             spacing: 0
 
-            // Основная рабочая область
+            // Рабочая область
             RowLayout {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 spacing: 0
 
-                // Левая панель с эффектами
                 LeftSidebar {
                     id: leftSidebar
                     Layout.preferredWidth: Theme.sidebarWidth
                     Layout.fillHeight: true
-                    videoPlayer: videoPlayer // Связываем с VideoPlayer!
+                    videoPlayer: videoPlayer
                 }
 
-                // Центральная область
+                // Центральная колонка
                 ColumnLayout {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     spacing: 0
 
-                    // Область просмотра и управления
+                    // Верхний ряд: ModeSwitcher + VideoPlayer
                     RowLayout {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
-                        Layout.maximumHeight: root.height - Theme.timelineHeight
-                                              - Theme.panelHeight - 20
                         spacing: Theme.spacing
 
-                        // Переключатель режимов
                         ModeSwitcher {
                             id: modeSwitcher
                             Layout.preferredWidth: 180
                             Layout.fillHeight: true
                             Layout.margins: Theme.spacing
-
                             onModeChanged: mode => {
                                                leftSidebar.currentMode = mode
                                            }
                         }
 
-                        // Видеоплеер
                         VideoPlayer {
                             id: videoPlayer
                             Layout.fillWidth: true
@@ -660,159 +445,171 @@ QtObject {
                             Layout.margins: Theme.spacing
 
                             currentTime: playbackManager.currentTime
-                            // *** ИСПРАВЛЕНО: duration из playbackManager (который теперь из C++) ***
                             duration: playbackManager.duration
+                            isPlaying: playbackManager.isPlaying
+                            // *** Передаём скорость → QMediaPlayer.playbackRate ***
+                            playbackSpeed: playbackManager.playbackSpeed
+                            volume: 1.0
+
+                            // Обновляем playhead из QMediaPlayer
+                            onTimePositionChanged: time => {
+                                                       if (Math.abs(
+                                                               playbackManager.currentTime
+                                                               - time) > 0.05) {
+                                                           playbackManager.currentTime = time
+                                                           // *** ИСПРАВЛЕНО: cppTimeline.currentTime, не setCurrentTime ***
+                                                           cppTimeline.currentTime = time
+                                                       }
+                                                   }
                         }
                     }
 
-                    // Панель управления воспроизведением
+                    // PlaybackControls — НИЖЕ видеоплеера
                     PlaybackControls {
                         id: playbackControls
                         Layout.fillWidth: true
                         Layout.preferredHeight: Theme.toolbarHeight
+
                         isPlaying: playbackManager.isPlaying
                         currentTime: playbackManager.currentTime
                         duration: playbackManager.duration
                         playbackSpeed: playbackManager.playbackSpeed
                         snapEnabled: playbackManager.snapEnabled
+
                         onPlayPauseClicked: playbackManager.isPlaying = !playbackManager.isPlaying
+
                         onStopClicked: {
                             playbackManager.isPlaying = false
                             playbackManager.currentTime = 0
-                            cppTimeline.setCurrentTime=0
+                            // *** ИСПРАВЛЕНО: cppTimeline.currentTime, не setCurrentTime ***
+                            cppTimeline.currentTime = 0
                         }
+
                         onSeek: time => {
                                     playbackManager.currentTime = time
-                                    cppTimeline.setCurrentTime=time
+                                    cppTimeline.currentTime = time
                                 }
-                        onSpeedChanged: speed => playbackManager.playbackSpeed = speed
+
+                        onSpeedChanged: speed => {
+                                            playbackManager.playbackSpeed = speed
+                                        }
                         onSnapToggled: playbackManager.snapEnabled = !playbackManager.snapEnabled
+
                         onCutClicked: {
-                            if (!cutKeyPressed) {
-                                cutKeyPressed = true
-                                console.log("✂ Разрезать клип в позиции:",
+                            // *** ИСПРАВЛЕНО: root.cutKeyPressed через явную ссылку на Window ***
+                            if (!root.cutKeyPressed) {
+                                root.cutKeyPressed = true
+                                console.log("✂ Разрезать в позиции:",
                                             playbackManager.currentTime)
-                                cppTimeline.splitClipAt(
-                                            playbackManager.currentTime)
+                                if (cppTimeline)
+                                    cppTimeline.splitClipAt(
+                                                playbackManager.currentTime, 1)
                                 cutDebounceTimer.restart()
                             }
                         }
-                        onClearEffectsClicked: console.log(
-                                                   "Удалить эффекты с выбранного клипа")
+
+                        onClearEffectsClicked: console.log("Удалить эффекты")
                     }
 
-                    // Таймлайн
+                    // Timeline — НИЖЕ PlaybackControls
                     Timeline {
                         id: timeline
                         Layout.fillWidth: true
                         Layout.preferredHeight: Theme.timelineHeight
+
                         currentTime: playbackManager.currentTime
-                        // *** ИСПРАВЛЕНО: duration из playbackManager (который из C++) ***
                         duration: playbackManager.duration
                         zoomLevel: playbackManager.zoomLevel
                         snapEnabled: playbackManager.snapEnabled
+
                         onTimeChanged: time => {
                                            playbackManager.currentTime = time
-                                           cppTimeline.setCurrentTime=time
+                                           cppTimeline.currentTime = time
                                        }
-                        onZoomChanged: zoom => playbackManager.zoomLevel = zoom
+                        onZoomChanged: zoom => {
+                                           playbackManager.zoomLevel = zoom
+                                       }
                     }
                 }
             }
-        } // ColumnLayout
+        }
 
-        // ===== ГОРЯЧИЕ КЛАВИШИ (как в Adobe Premiere Pro) =====
-
-        // Воспроизведение
+        // ===== ГОРЯЧИЕ КЛАВИШИ =====
+        // Все Shortcut находятся в Window root → cutKeyPressed доступен без проблем
         Shortcut {
             sequence: "Space"
             onActivated: playbackManager.isPlaying = !playbackManager.isPlaying
         }
-
         Shortcut {
             sequence: "K"
-            onActivated: playbackManager.isPlaying = false // Пауза
+            onActivated: playbackManager.isPlaying = false
         }
 
         Shortcut {
             sequence: "J"
             onActivated: {
-                // Перемотка назад (5 сек × скорость)
                 var rewind = 5 * playbackManager.playbackSpeed
                 playbackManager.currentTime = Math.max(
                             0, playbackManager.currentTime - rewind)
+                cppTimeline.currentTime = playbackManager.currentTime
             }
         }
-
         Shortcut {
             sequence: "L"
             onActivated: {
-                // Перемотка вперёд (5 сек × скорость)
-                var forward = 5 * playbackManager.playbackSpeed
+                var fwd = 5 * playbackManager.playbackSpeed
                 playbackManager.currentTime = Math.min(
                             playbackManager.duration,
-                            playbackManager.currentTime + forward)
+                            playbackManager.currentTime + fwd)
+                cppTimeline.currentTime = playbackManager.currentTime
             }
         }
 
-        // Файлы
         Shortcut {
             sequence: "Ctrl+O"
             onActivated: openVideoDialog.open()
         }
-
         Shortcut {
             sequence: "Ctrl+S"
             onActivated: saveProjectDialog.open()
         }
-
-        Shortcut {
-            sequence: "Ctrl+Shift+S"
-            onActivated: {
-                // TODO: Save As
-                console.log("Save As...")
-            }
-        }
-
         Shortcut {
             sequence: "Ctrl+E"
             onActivated: exportDialog.open()
         }
 
-        // Навигация
         Shortcut {
             sequence: "Home"
-            onActivated: playbackManager.currentTime = 0
+            onActivated: {
+                playbackManager.currentTime = 0
+                cppTimeline.currentTime = 0
+            }
         }
-
         Shortcut {
             sequence: "End"
             onActivated: {
                 playbackManager.currentTime = playbackManager.duration
-                cppTimeline.setCurrentTime = playbackManager.duration
+                cppTimeline.currentTime = playbackManager.duration
             }
         }
-
         Shortcut {
             sequence: "Left"
             onActivated: {
-                // Покадровая перемотка назад
                 playbackManager.currentTime = Math.max(
-                            0, playbackManager.currentTime - 0.033) // ~1 кадр
+                            0, playbackManager.currentTime - 0.033)
+                cppTimeline.currentTime = playbackManager.currentTime
             }
         }
-
         Shortcut {
             sequence: "Right"
             onActivated: {
-                // Покадровая перемотка вперёд
                 playbackManager.currentTime = Math.min(
                             playbackManager.duration,
-                            playbackManager.currentTime + 0.033) // ~1 кадр
+                            playbackManager.currentTime + 0.033)
+                cppTimeline.currentTime = playbackManager.currentTime
             }
         }
 
-        // Редактирование (подготовка под C++)
         Shortcut {
             sequence: "Ctrl+Z"
             onActivated: console.log("Undo")
@@ -826,26 +623,22 @@ QtObject {
             onActivated: console.log("Delete selected clip")
         }
 
+        // *** Клавиша C — разрезать клип ***
+        // cutKeyPressed объявлен в root (Window) — здесь доступен без root.
         Shortcut {
             sequence: "C"
             onActivated: {
-                // *** ИСПРАВЛЕНО: cutKeyPressed теперь объявлен как property ***
-                if (!cutKeyPressed) {
-                    cutKeyPressed = true
-                    console.log("Разрезать клип в позиции:",
+                if (!root.cutKeyPressed) {
+                    root.cutKeyPressed = true
+                    console.log("✂ Разрезать (C) в позиции:",
                                 playbackManager.currentTime)
-                    cppTimeline.splitClipAt(playbackManager.currentTime)
+                    if (cppTimeline)
+                        cppTimeline.splitClipAt(playbackManager.currentTime, 1)
                     cutDebounceTimer.restart()
                 }
             }
         }
-        Timer {
-            id: cutDebounceTimer
-            interval: 200
-            onTriggered: root.cutKeyPressed = false // ← через root., не просто cutKeyPressed
-        }
 
-        // Маркеры (подготовка)
         Shortcut {
             sequence: "M"
             onActivated: console.log("Add marker at",
@@ -853,7 +646,7 @@ QtObject {
         }
         Shortcut {
             sequence: "Shift+M"
-            onActivated: console.log("Go to next marker")
+            onActivated: console.log("Next marker")
         }
         Shortcut {
             sequence: "+"
@@ -865,5 +658,13 @@ QtObject {
             onActivated: playbackManager.zoomLevel = Math.max(
                              10, playbackManager.zoomLevel - 20)
         }
-    } // Window (mainWindow)
-} // QtObject (appRoot)
+
+        // Дебаунс для клавиши C
+        Timer {
+            id: cutDebounceTimer
+            interval: 200
+            // *** ИСПРАВЛЕНО: root.cutKeyPressed — явная ссылка на Window property ***
+            onTriggered: root.cutKeyPressed = false
+        }
+    } // Window
+} // QtObject

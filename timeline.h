@@ -59,6 +59,23 @@ public:
     // QML не умеет работать с QImage напрямую — нужен путь к файлу
     Q_INVOKABLE QString getFramePathAt(double time, int trackIndex = 1);
 
+    // И метод для запроса кадра:
+    Q_INVOKABLE void requestFrame(double time, int trackIndex = 1);
+
+    // ===== МЕТАДАННЫЕ КЛИПА =====
+    // Возвращает QVariantMap:
+    //   { "width": int, "height": int, "fps": double,
+    //     "startTime": double, "trimStart": double }
+    // Нужно VideoPlayer для отображения разрешения/FPS и
+    // для синхронизации QMediaPlayer при старте воспроизведения.
+    Q_INVOKABLE QVariantMap getClipInfoAt(double time, int trackIndex = 1);
+
+    // Путь к файлу активного клипа (для QMediaPlayer.source)
+    // Возвращает "file:///C:/path/video.mp4" или ""
+    Q_INVOKABLE QString getActiveClipPath(double time, int trackIndex = 1);
+
+    // ===== УПРАВЛЕНИЕ КЛИПАМИ =====
+
     // Добавить клип (возвращает true, если успешно)
     Q_INVOKABLE bool addClip(const QString& filepath, int trackIndex, double startTime);
 
@@ -67,6 +84,9 @@ public:
 
     // Переместить клип на новую позицию/дорожку
     Q_INVOKABLE bool moveClip(int index, int newTrackIndex, double newStartTime);
+
+    // Разрезать клип по абсолютному времени таймлайна (удобно из QML)
+    Q_INVOKABLE bool splitClipAt(double time, int trackIndex = 1);
 
     // Разрезать клип в указанной позиции (создаёт два новых клипа)
     Q_INVOKABLE bool splitClip(int index, double splitTime);
@@ -77,8 +97,11 @@ public:
     // Применить эффект к клипу
     Q_INVOKABLE bool applyEffect(int index, const QString& effectName, double value);
 
-    // И метод для запроса кадра:
-    Q_INVOKABLE void requestFrame(double time, int trackIndex = 1);
+    // Включить/выключить звук клипа
+    Q_INVOKABLE bool setClipMuted(int index, bool muted);
+
+    // Получить время конца последнего клипа на дорожке (для добавления "в конец")
+    Q_INVOKABLE double getTrackEndTime(int trackIndex) const;
 
     // ===== ПОЛУЧЕНИЕ КЛИПОВ ДЛЯ QML =====
 
@@ -121,12 +144,23 @@ private:
     QMap<QString, FrameCache*>    m_frameCaches;
     QMap<QString, DecoderThread*> m_decoderThreads;
 
+    // Кэш метаданных (заполняется в addClip, не требует открывать файл повторно)
+    struct ClipMeta {
+        int    width  = 0;
+        int    height = 0;
+        double fps    = 0.0;
+    };
+    QMap<QString, ClipMeta> m_clipMeta;
+
     QList<TimelineClip> m_clips;
     double m_currentTime;
 
     // Вспомогательные методы
     void sortClips();  // Сортировать клипы по startTime
     double getClipSourceDuration(const QString& filepath);  // Узнать длину видео через FFmpeg
+
+    // Запустить поток декодирования для файла
+    void startDecoderThread(const QString& filepath, double fps);
 };
 
 #endif // TIMELINE_H

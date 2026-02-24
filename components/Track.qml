@@ -6,7 +6,10 @@ import "../theme.js" as Theme
 Rectangle {
     id: root
     color: Theme.trackBackground
-    height: Theme.trackHeight //??
+    // Высота = видео-полоска (50) + аудио-полоска (30) + зазор (2) + отступы (10)
+    // Должна совпадать с VideoClip.videoH + VideoClip.audioH + 2
+    // Theme.trackHeight * 2 из Timeline.qml — задаётся снаружи, не трогаем
+    height: Theme.trackHeight * 2
 
     property int trackNumber: 1
     property double pixelsPerSecond: 10
@@ -52,48 +55,7 @@ Rectangle {
         color: Theme.dividerColor
     }
 
-    // Иконки дорожки
-    Row {
-        x: 10
-        y: (root.height - height) / 2
-        spacing: 5
-
-        Rectangle {
-            width: 20
-            height: 20
-            radius: 3
-            color: Theme.rubyPrimary
-            opacity: 0.3
-
-            Text {
-                anchors.centerIn: parent
-                text: "V"
-                color: "white"
-                font.family: Theme.fontFamily
-                font.pixelSize: 12
-                font.bold: true
-            }
-        }
-
-        Rectangle {
-            width: 20
-            height: 20
-            radius: 3
-            color: Theme.rubyLight
-            opacity: 0.3
-
-            Text {
-                anchors.centerIn: parent
-                text: "A"
-                color: "white"
-                font.family: Theme.fontFamily
-                font.pixelSize: 12
-                font.bold: true
-            }
-        }
-    }
-
-    // Зона для Drag & Drop
+    // Зона Drag & Drop
     DropArea {
         id: dropArea
         anchors.fill: parent
@@ -108,13 +70,13 @@ Rectangle {
         onDropped: drop => {
                        dropHighlight.visible = false
                        var filepath = drop.getDataAsString("video/filepath")
-                       var time = (drop.x) / root.pixelsPerSecond
-                       console.log("🎬 DropArea drop:", filepath,
-                                   "at time:", time)
+                       var time = drop.x / root.pixelsPerSecond
+                       console.log("🎬 Drop:", filepath, "at", time, "sec")
                        root.clipDropped(filepath, time)
                    }
     }
-    // Подсветка при наведении
+
+    // Подсветка при drag-over
     Rectangle {
         id: dropHighlight
         anchors.fill: parent
@@ -123,6 +85,7 @@ Rectangle {
         border.color: Theme.rubyPrimary
         border.width: 2
         visible: false
+        z: 5
     }
 
     // ===== REPEATER ДЛЯ КЛИПОВ (из C++!) =====
@@ -136,14 +99,14 @@ Rectangle {
             // *** КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ: Qt.binding() делает привязки динамическими ***
             // Без этого x и width устанавливаются ОДИН РАЗ и не обновляются при зуме
             x: modelData.startTime * root.pixelsPerSecond
-            y: 5
+            y: (root.height - height) / 2 // вертикальное центрирование
             width: modelData.duration * root.pixelsPerSecond
-            height: root.height - 10
 
+            // height — не задаём! VideoClip сам знает свою высоту (videoH+audioH+2)
             clipName: modelData.filename
             clipId: modelData.id
             selected: modelData.selected || false
-            thumbnailPath: modelData.thumbnailPath || ""
+            isMuted: modelData.isMuted || false
 
             Component.onCompleted: {
                 console.log("🎬 VideoClip создан:", modelData.filename, "x:",
@@ -159,6 +122,7 @@ Rectangle {
                 }
             }
 
+            // ─── СИГНАЛЫ ОТ VideoClip ─────────────────────────────────
             onMoved: newX => {
                          var newTime = newX / root.pixelsPerSecond
 
@@ -208,6 +172,25 @@ Rectangle {
                                    cppTimeline.removeClip(id)
                                    root.clipDeleted(id)
                                }
+            onSplitRequested: id => {
+                                  // Разрезаем по текущему времени воспроизведения
+                                  // currentTime доступен через глобальный playbackManager или cppTimeline
+                                  var splitTime = cppTimeline ? cppTimeline.currentTime : 0
+                                  console.log("✂ Split clip", id, "at",
+                                              splitTime)
+                                  cppTimeline.splitClipAt(splitTime,
+                                                          root.trackNumber)
+                              }
+
+            onMuteToggled: (id, muted) => {
+                               console.log("🔇 Mute clip", id, "→", muted)
+                               cppTimeline.setClipMuted(id, muted)
+                           }
+
+            onEffectsRequested: id => {
+                                    // TODO: открыть панель эффектов
+                                    console.log("✨ Effects for clip", id)
+                                }
         }
     }
 }

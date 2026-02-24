@@ -33,6 +33,24 @@ Timeline::~Timeline() {
     qDebug() << "🔚 Timeline деструктор вызван";
 }
 
+// ===== ВСПОМОГАТЕЛЬНЫЙ: запустить поток декодирования =====
+void Timeline::startDecoderThread(const QString& filepath, double fps) {
+    if (m_decoderThreads.contains(filepath)) return;  // уже запущен
+
+    auto* cache  = new FrameCache();
+    auto* thread = new DecoderThread(filepath, fps, cache, this);
+
+    m_frameCaches[filepath]    = cache;
+    m_decoderThreads[filepath] = thread;
+
+    connect(thread, &DecoderThread::frameReady, this, [this](int /*frameNum*/) {
+        emit frameReady(QImage(), m_currentTime);
+    });
+
+    thread->start();
+    qDebug() << "🎬 DecoderThread запущен для:" << filepath << "FPS:" << fps;
+}
+
 // ===== ПОЛУЧИТЬ КЛИПЫ ДЛЯ ДОРОЖКИ (для QML) =====
 QVariantList Timeline::getClipsForTrack(int trackIndex) {
     QVariantList result;
@@ -648,3 +666,105 @@ bool Timeline::renderToFile(const QString& outputPath) {
     qDebug() << "✅ Рендеринг завершён (DEMO)";
     return true;
 }
+
+// ============================================================
+// Эти два метода объявлены в timeline.h через Q_INVOKABLE,
+// но отсутствуют в .cpp → LNK2019.
+// ============================================================
+
+// ===== МЕТАДАННЫЕ КЛИПА (разрешение + FPS) =====
+// Возвращает QVariantMap { "width", "height", "fps", "startTime", "trimStart" }
+// VideoPlayer использует это для отображения разрешения/FPS
+// и для синхронизации QMediaPlayer при старте воспроизведения.
+QVariantMap Timeline::getClipInfoAt(double time, int trackIndex) {
+    QVariantMap info;
+    // Значения по умолчанию (ничего не найдено)
+    info["width"]     = 0;
+    info["height"]    = 0;
+    info["fps"]       = 0.0;
+    info["startTime"] = 0.0;
+    info["trimStart"] = 0.0;
+
+    TimelineClip* clip = getClipAt(time, trackIndex);
+    if (!clip) return info;
+
+    info["startTime"] = clip->startTime;
+    info["trimStart"] = clip->trimStart;
+
+    // Открываем декодер чтобы получить метаданные
+    // (Медленно — TODO: кэшировать в m_clipMeta при addClip)
+    MediaDecoder decoder;
+    if (decoder.openFile(clip->filepath)) {
+        info["width"]  = decoder.getVideoWidth();
+        info["height"] = decoder.getVideoHeight();
+        info["fps"]    = decoder.getFrameRate();
+        decoder.closeFile();
+    }
+
+    return info;
+}
+
+// ===== ПУТЬ К ФАЙЛУ ДЛЯ QMEDIAPLAYER =====
+// QMediaPlayer принимает URI вида "file:///C:/path/video.mp4"
+// Возвращает пустую строку если в данной позиции нет клипа.
+QString Timeline::getActiveClipPath(double time, int trackIndex) {
+    TimelineClip* clip = getClipAt(time, trackIndex);
+    if (!clip) return QString();
+
+    // На Windows нужно три слеша: file:///C:/...
+    // На Linux два: file:///home/...
+    // Qt это обрабатывает автоматически через QUrl::fromLocalFile,
+    // но мы возвращаем строку напрямую для простоты
+    return "file:///" + clip->filepath;
+}
+
+// ============================================================
+// Три новых метода: splitClipAt, setClipMuted, getTrackEndTime
+// ============================================================
+
+// ===== РАЗРЕЗАТЬ ПО АБСОЛЮТНОМУ ВРЕМЕНИ ТАЙМЛАЙНА =====
+// QML вызывает: cppTimeline.splitClipAt(playbackManager.currentTime)
+// Удобнее чем splitClip(index, time) — не нужно знать индекс
+bool Timeline::splitClipAt(double time, int trackIndex) {
+    for (int i = 0; i < m_clips.size(); ++i) {
+        const TimelineClip& c = m_clips[i];
+        if (c.trackIndex == trackIndex
+            && time > c.startTime
+            && time < c.endTime())
+        {
+            qDebug() << "✂️ splitClipAt: нашёл клип" << i << "time=" << time;
+            return splitClip(i, time);
+        }
+    }
+    qWarning() << "⚠️ splitClipAt: нет клипа в time=" << time << "track=" << trackIndex;
+    return false;
+}
+
+// ===== ВКЛЮЧИТЬ / ВЫКЛЮЧИТЬ ЗВУК =====
+// Track.qml вызывает: cppTimeline.setClipMuted(id, muted)
+bool Timeline::setClipMuted(int index, bool muted) {
+    if (index < 0 || index >= m_clips.size()) {
+        qWarning() << "❌ setClipMuted: неверный индекс" << index;
+        return false;
+    }
+    m_clips[index].isMuted = muted;
+    emit clipModified(index);
+    qDebug() << (muted ? "🔇" : "🔊") << "Клип" << index << (muted ? "заглушён" : "включён");
+    return true;
+}
+
+// ===== ПОЛУЧИТЬ ВРЕМЯ КОНЦА ПОСЛЕДНЕГО КЛИПА НА ДОРОЖКЕ =====
+// QML использует для добавления нового видео "в конец":
+//   var endTime = cppTimeline.getTrackEndTime(1)
+//   cppTimeline.addClip(filepath, 1, endTime)
+double Timeline::getTrackEndTime(int trackIndex) const {
+    double maxEnd = 0.0;
+    for (const TimelineClip& c : m_clips) {
+        if (c.trackIndex == trackIndex) {
+            double e = c.endTime();
+            if (e > maxEnd) maxEnd = e;
+        }
+    }
+    return maxEnd;  // 0.0 если дорожка пуста
+}
+
