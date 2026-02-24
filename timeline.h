@@ -9,6 +9,17 @@
 #include <QVariantList>
 #include <QVariantMap>
 #include "timelineclip.h"
+#include <QMap>
+
+// *** ВАЖНО: НЕ включаем FrameCache.h и DecoderThread.h здесь!
+// Это тяжёлые хедеры (QHash+QImage+FFmpeg). Если включить их в .h,
+// каждый .cpp файл проекта будет компилировать их снова и снова →
+// MSVC C1060 "not enough heap space".
+//
+// Решение: forward declaration здесь, полные include ТОЛЬКО в timeline.cpp
+
+struct FrameCache;      // forward declaration
+class DecoderThread;    // forward declaration
 
 class Timeline : public QObject
 {
@@ -106,6 +117,10 @@ signals:
     void frameReady(const QImage &frame, double time);
 
 private:
+    // Кэш и поток декодирования — по одному на каждый уникальный filepath
+    QMap<QString, FrameCache*>    m_frameCaches;
+    QMap<QString, DecoderThread*> m_decoderThreads;
+
     QList<TimelineClip> m_clips;
     double m_currentTime;
 

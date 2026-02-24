@@ -1,5 +1,11 @@
 #include "timeline.h"
+
+// *** ВСЕ ТЯЖЁЛЫЕ INCLUDE ТОЛЬКО ЗДЕСЬ, не в timeline.h! ***
+// Так каждый .cpp файл проекта не будет тянуть FFmpeg хедеры.
+#include "FrameCache.h"
+#include "decoderthread.h"
 #include "mediadecoder.h"
+
 #include <QFile>
 #include <QJsonDocument>
 #include <QJsonArray>
@@ -17,6 +23,13 @@ Timeline::Timeline(QObject *parent)
 }
 
 Timeline::~Timeline() {
+    // Останавливаем потоки декодирования
+    for (auto* thread : m_decoderThreads) {
+        thread->stop();
+        delete thread;
+    }
+    qDeleteAll(m_frameCaches);
+
     qDebug() << "🔚 Timeline деструктор вызван";
 }
 
@@ -93,6 +106,8 @@ bool Timeline::addClip(const QString& filepath, int trackIndex, double startTime
 
     // 2. Получить длительность исходного видео через FFmpeg
     double sourceDuration = decoder.getDuration();
+    double fps = decoder.getFrameRate();
+
     if (sourceDuration <= 0) {
         qWarning() << "Не возможно получить длительность видео:" << filepath;
         decoder.closeFile();
@@ -122,6 +137,24 @@ bool Timeline::addClip(const QString& filepath, int trackIndex, double startTime
 
     // 5. Добавить клип в список
     m_clips.append(newClip);
+
+    // Запустить поток декодирования для нового файла (если ещё не запущен)
+    if (!m_decoderThreads.contains(filepath)) {
+        auto* cache = new FrameCache();
+        auto* thread = new DecoderThread(filepath, fps, cache, this);
+
+        m_frameCaches[filepath] = cache;
+        m_decoderThreads[filepath] = thread;
+
+        // Когда кадр готов — говорим Timeline обновить превью
+        connect(thread, &DecoderThread::frameReady, this, [this](int /*frameNum*/) {
+            emit frameReady(QImage(), m_currentTime);  // сигнал VideoPlayer-у
+        });
+
+        thread->start();
+        qDebug() << "🎬 DecoderThread запущен для:" << filepath;
+    }
+
     sortClips();  // Отсортировать по startTime для удобства
 
     // 6. Уведомить UI
@@ -329,8 +362,12 @@ void Timeline::setCurrentTime(double time) {
     if (qAbs(m_currentTime - time) < 0.01) {
         return;  // Не изменилось
     }
-
     m_currentTime = time;
+    // Уведомляем все потоки декодирования
+    for (auto* thread : m_decoderThreads) {
+        thread->seekTo(time);
+    }
+
     emit currentTimeChanged();
 }
 
@@ -358,11 +395,6 @@ TimelineClip* Timeline::getClipAt(double time, int trackIndex) {
     return nullptr;
 }
 
-void Timeline::requestFrame(double time, int trackIndex) {
-    QImage frame = getCurrentFrameAt(time, trackIndex);
-    emit frameReady(frame, time);
-}
-
 // ===== ПОЛУЧИТЬ КАДР ДЛЯ PREVIEW =====
 QImage Timeline::getCurrentFrameAt(double time, int trackIndex) {
     // Найти активный клип на этом времени
@@ -371,25 +403,47 @@ QImage Timeline::getCurrentFrameAt(double time, int trackIndex) {
         return QImage();  // Нет клипа
     }
 
-    // Открыть декодер
-    MediaDecoder decoder;
-    if (!decoder.openFile(clip->filepath)) {
-        qWarning() << "❌ Не могу открыть файл для preview:" << clip->filepath;
-        return QImage();
+    double clipTime = time - clip->startTime + clip->trimStart;
+    double fps = 25.0;  // fallback
+
+    // Берём fps из потока если он запущен
+    if (m_decoderThreads.contains(clip->filepath)) {
+        // fps хранится в DecoderThread — можно добавить геттер
     }
 
-    // Вычислить время внутри клипа (с учётом trim)
-    double clipTime = time - clip->startTime + clip->trimStart;
+    int frameNum = (int)(clipTime * fps);
 
-    // Декодировать кадр
+    // 1. Пробуем кэш
+    if (m_frameCaches.contains(clip->filepath)) {
+        QImage cached;
+        if (m_frameCaches[clip->filepath]->getNearest(frameNum, cached)) {
+            // Здесь можно применить эффекты перед возвратом:
+            // return applyEffects(cached, clip->effects);
+            return cached;
+        }
+    }
+
+    // 2. Промах кэша — декодируем синхронно (медленно, но надёжно)
+    qDebug() << "⚠️ Cache miss для time=" << clipTime << "— синхронное декодирование";
+    MediaDecoder decoder;
+    if (!decoder.openFile(clip->filepath)) return QImage();
     QImage frame = decoder.getFrameAt(clipTime);
     decoder.closeFile();
 
     // TODO: Применить эффекты через RenderEngine
     // RenderEngine engine;
     // frame = engine.applyEffects(frame, clip->effects);
+    // Сохраняем в кэш чтобы следующий раз был быстрее
+    if (!frame.isNull() && m_frameCaches.contains(clip->filepath)) {
+        m_frameCaches[clip->filepath]->put(frameNum, frame);
+    }
 
     return frame;
+}
+
+void Timeline::requestFrame(double time, int trackIndex) {
+    QImage frame = getCurrentFrameAt(time, trackIndex);
+    emit frameReady(frame, time);
 }
 
 // *** КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ ***
@@ -476,9 +530,32 @@ bool Timeline::loadProject(const QString& filepath) {
     bool success = fromJson(doc.object());
 
     if (success) {
+        for (const TimelineClip& clip : m_clips) {
+            if (!m_decoderThreads.contains(clip.filepath) && QFile::exists(clip.filepath)) {
+                MediaDecoder dec;
+                double fps = 25.0;
+                if (dec.openFile(clip.filepath)) {
+                    fps = dec.getFrameRate();
+                    dec.closeFile();
+                }
+
+                auto* cache  = new FrameCache();
+                auto* thread = new DecoderThread(clip.filepath, fps, cache, this);
+                m_frameCaches[clip.filepath]    = cache;
+                m_decoderThreads[clip.filepath] = thread;
+
+                connect(thread, &DecoderThread::frameReady, this, [this](int) {
+                    emit frameReady(QImage(), m_currentTime);
+                });
+
+                thread->start();
+                qDebug() << "🎬 DecoderThread запущен для:" << clip.filepath;
+            }
+        }
+
         emit clipsChanged();
         emit totalDurationChanged();
-        qDebug() << "✅ Проект загружен:" << filepath;
+        qDebug() << "✅ Проект загружен:" << cleanPath;
     }
 
     return success;
@@ -555,9 +632,6 @@ bool Timeline::fromJson(const QJsonObject& json) {
 bool Timeline::renderToFile(const QString& outputPath) {
     qDebug() << "🎬 renderToFile:" << outputPath;
     qDebug() << "⚠️ Делегируем в RenderEngine!";
-
-    // ПРАВИЛЬНО: Timeline НЕ делает рендеринг сам!
-    // Он делегирует это RenderEngine
 
     // TODO: Создать RenderEngine и запустить
     // RenderEngine engine;

@@ -63,6 +63,7 @@ QtObject {
         title: "VideoEditor Pro"
         color: Theme.backgroundColor
         flags: Qt.Window | Qt.FramelessWindowHint
+        property bool cutKeyPressed: false
 
         // Resize handles для frameless окна
         // Правый край
@@ -192,9 +193,6 @@ QtObject {
                 console.log("⏱️ Duration обновлена:", cppTimeline.totalDuration)
             }
         }
-
-        // *** FIX: cutKeyPressed нужно объявить как property ***
-        property bool cutKeyPressed: false
 
         // Диалог открытия видео
         FileDialog {
@@ -581,11 +579,7 @@ QtObject {
                     playbackManager.isPlaying = false
                 }
                 playbackManager.currentTime = newTime
-
-                // Синхронизируем C++ timeline
-                if (cppTimeline) {
-                    cppTimeline.setCurrentTime = newTime
-                }
+                cppTimeline.currentTime = newTime  // через property binding, не функцию
             }
         }
 
@@ -848,7 +842,7 @@ QtObject {
         Timer {
             id: cutDebounceTimer
             interval: 200
-            onTriggered: cutKeyPressed = false
+            onTriggered: root.cutKeyPressed = false // ← через root., не просто cutKeyPressed
         }
 
         // Маркеры (подготовка)

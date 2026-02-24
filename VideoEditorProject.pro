@@ -49,7 +49,9 @@ else: unix:!android: target.path = /opt/$${TARGET}/bin
 DISTFILES +=
 
 HEADERS += \
+    FrameCache.h \
     TimelineClip.h \
+    decoderthread.h \
     mediadecoder.h \
     mediaencoder.h \
     renderengine.h \

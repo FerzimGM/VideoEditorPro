@@ -27,6 +27,11 @@ Rectangle {
     // ===== ИСТОЧНИК КАДРА =====
     property string currentFrameSource: ""
 
+    // Метаданные текущего клипа (для отображения в UI)
+    property int  videoWidth:  0
+    property int  videoHeight: 0
+    property real videoFps:    0.0
+
     function applyBrightness(value) {
         brightness = value
     }
@@ -60,7 +65,7 @@ Rectangle {
         if (framePath && framePath !== "") {
             // Добавляем "?" + timestamp чтобы QML Image перезагрузил файл
             // (без этого Image кеширует по пути и не обновляется)
-            currentFrameSource = framePath + "?" + Date.now()
+            currentFrameSource = framePath + "?t=" + Date.now()
             console.log("✅ Кадр обновлён:", currentTime.toFixed(2), "сек")
         } else {
             currentFrameSource = ""
@@ -124,7 +129,7 @@ Rectangle {
                 anchors.centerIn: parent
                 width: parent.width
                 height: parent.height
-                source: root.currentFrameSource
+                source: videoPlayer.currentFrameSource
                 fillMode: Image.PreserveAspectFit
                 // *** ИСПРАВЛЕНО: cache: false чтобы Image всегда перезагружал файл ***
                 cache: false
@@ -219,7 +224,7 @@ gl_FragColor = vec4(clamp(color.rgb, 0.0, 1.0), 1.0);
             }
         }
 
-        // Информация о видео
+        // ===== МЕТАДАННЫЕ (разрешение / FPS) =====
         RowLayout {
             Layout.fillWidth: true
             spacing: Theme.spacingLarge
@@ -246,7 +251,11 @@ gl_FragColor = vec4(clamp(color.rgb, 0.0, 1.0), 1.0);
                     }
 
                     Text {
-                        text: videoFrame.visible ? "720 × 1280" : "— × —"
+                        text: videoFrame.visible
+                                                     ? (videoPlayer.videoWidth > 0
+                                                        ? videoPlayer.videoWidth + " × " + videoPlayer.videoHeight
+                                                        : "— × —")
+                                                     : "— × —"
                         color: Theme.textPrimary
                         font.family: Theme.fontFamily
                         font.pixelSize: Theme.fontSize
@@ -278,7 +287,11 @@ gl_FragColor = vec4(clamp(color.rgb, 0.0, 1.0), 1.0);
                     }
 
                     Text {
-                        text: videoFrame.visible ? "23.976 FPS" : "— FPS"
+                        text: videoFrame.visible
+                                                      ? (videoPlayer.videoFps > 0
+                                                         ? videoPlayer.videoFps.toFixed(3) + " FPS"
+                                                         : "— FPS")
+                                                      : "— FPS"
                         color: Theme.textPrimary
                         font.family: Theme.fontFamily
                         font.pixelSize: Theme.fontSize
