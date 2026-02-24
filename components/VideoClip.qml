@@ -19,8 +19,12 @@ Item {
     // ===== СВОЙСТВА =====
     property string clipName: "Clip"
     property int clipId: -1
-    property bool selected: false
     property bool isMuted: false
+
+    // *** ИСПРАВЛЕНО: selected теперь привязан к глобальному selectionManager ***
+    // Раньше брался из modelData.selected который всегда false в C++
+    readonly property bool selected: (typeof selectionManager !== "undefined")
+                                     && selectionManager.selectedClipId === clipId
 
     // Высоты полос — должны совпадать с тем, что ожидает Track.qml
     readonly property real videoH: 50
@@ -67,8 +71,7 @@ Item {
                     color: root.selected ? "#1E88E5" : "#1565C0"
                 }
             }
-            border.color: root.selected ? Theme.rubyPrimary : Qt.darker(color,
-                                                                        1.4)
+            border.color: root.selected ? Theme.rubyPrimary : "#0D47A1"
             border.width: root.selected ? 2 : 1
 
             // Метка "V"
@@ -213,6 +216,7 @@ Item {
 
                 onPressed: function (mouse) {
                     if (mouse.button === Qt.RightButton) {
+                        root.clicked()
                         videoMenu.popup()
                     } else {
                         root._startX = root.x
@@ -315,7 +319,7 @@ Item {
                 }
             }
 
-            // Drag (аудио двигает весь клип вместе с видео) + контекстное меню
+            // Drag + контекстное меню аудио
             MouseArea {
                 anchors.fill: parent
                 hoverEnabled: true
@@ -324,6 +328,7 @@ Item {
 
                 onPressed: function (mouse) {
                     if (mouse.button === Qt.RightButton) {
+                        root.clicked()
                         audioMenu.popup()
                     } else {
                         root._startX = root.x

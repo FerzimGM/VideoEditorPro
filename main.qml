@@ -544,27 +544,24 @@ QtObject {
             sequence: "K"
             onActivated: playbackManager.isPlaying = false
         }
-
         Shortcut {
             sequence: "J"
             onActivated: {
-                var rewind = 5 * playbackManager.playbackSpeed
                 playbackManager.currentTime = Math.max(
-                            0, playbackManager.currentTime - rewind)
+                            0,
+                            playbackManager.currentTime - 5 * playbackManager.playbackSpeed)
                 cppTimeline.currentTime = playbackManager.currentTime
             }
         }
         Shortcut {
             sequence: "L"
             onActivated: {
-                var fwd = 5 * playbackManager.playbackSpeed
                 playbackManager.currentTime = Math.min(
                             playbackManager.duration,
-                            playbackManager.currentTime + fwd)
+                            playbackManager.currentTime + 5 * playbackManager.playbackSpeed)
                 cppTimeline.currentTime = playbackManager.currentTime
             }
         }
-
         Shortcut {
             sequence: "Ctrl+O"
             onActivated: openVideoDialog.open()
@@ -577,7 +574,6 @@ QtObject {
             sequence: "Ctrl+E"
             onActivated: exportDialog.open()
         }
-
         Shortcut {
             sequence: "Home"
             onActivated: {
@@ -610,6 +606,42 @@ QtObject {
             }
         }
 
+        // *** Delete — удалить выделенный клип ***
+        Shortcut {
+            sequence: "Delete"
+            onActivated: {
+                var id = selectionManager.selectedClipId
+                if (id >= 0 && cppTimeline) {
+                    console.log("🗑️ Delete выделенного клипа", id)
+                    selectionManager.selectedClipId = -1
+                    cppTimeline.removeClip(id)
+                } else {
+                    console.log("ℹ️ Ничего не выделено для удаления")
+                }
+            }
+        }
+
+        // *** C — разрезать клип по playhead ***
+        Shortcut {
+            sequence: "C"
+            onActivated: {
+                if (!root.cutKeyPressed) {
+                    root.cutKeyPressed = true
+                    var t = playbackManager.currentTime
+                    console.log("✂ Разрезать (C) at", t)
+                    if (cppTimeline)
+                        cppTimeline.splitClipAt(t, 1)
+                    cutDebounceTimer.restart()
+                }
+            }
+        }
+
+        // *** Escape — снять выделение ***
+        Shortcut {
+            sequence: "Escape"
+            onActivated: selectionManager.clearSelection()
+        }
+
         Shortcut {
             sequence: "Ctrl+Z"
             onActivated: console.log("Undo")
@@ -619,34 +651,8 @@ QtObject {
             onActivated: console.log("Redo")
         }
         Shortcut {
-            sequence: "Delete"
-            onActivated: console.log("Delete selected clip")
-        }
-
-        // *** Клавиша C — разрезать клип ***
-        // cutKeyPressed объявлен в root (Window) — здесь доступен без root.
-        Shortcut {
-            sequence: "C"
-            onActivated: {
-                if (!root.cutKeyPressed) {
-                    root.cutKeyPressed = true
-                    console.log("✂ Разрезать (C) в позиции:",
-                                playbackManager.currentTime)
-                    if (cppTimeline)
-                        cppTimeline.splitClipAt(playbackManager.currentTime, 1)
-                    cutDebounceTimer.restart()
-                }
-            }
-        }
-
-        Shortcut {
             sequence: "M"
-            onActivated: console.log("Add marker at",
-                                     playbackManager.currentTime)
-        }
-        Shortcut {
-            sequence: "Shift+M"
-            onActivated: console.log("Next marker")
+            onActivated: console.log("Marker at", playbackManager.currentTime)
         }
         Shortcut {
             sequence: "+"
@@ -659,12 +665,11 @@ QtObject {
                              10, playbackManager.zoomLevel - 20)
         }
 
-        // Дебаунс для клавиши C
         Timer {
             id: cutDebounceTimer
             interval: 200
-            // *** ИСПРАВЛЕНО: root.cutKeyPressed — явная ссылка на Window property ***
             onTriggered: root.cutKeyPressed = false
         }
-    } // Window
+    }// Window
 } // QtObject
+
