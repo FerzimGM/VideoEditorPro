@@ -531,6 +531,11 @@ QtObject {
                         zoomLevel: playbackManager.zoomLevel
                         snapEnabled: playbackManager.snapEnabled
 
+                        // *** КЛЮЧЕВОЕ: пробрасываем selectedClipId вниз по цепочке ***
+                        // main → Timeline.selectedClipId → Track.selectedClipId
+                        //   → VideoClip.selected = (root.selectedClipId === modelData.id)
+                        selectedClipId: selectionManager.selectedClipId
+
                         onTimeChanged: time => {
                                            playbackManager.currentTime = time
                                            cppTimeline.currentTime = time
@@ -538,6 +543,14 @@ QtObject {
                         onZoomChanged: zoom => {
                                            playbackManager.zoomLevel = zoom
                                        }
+
+                        // *** Получаем выбор клипа снизу вверх: VideoClip → Track → Timeline → main ***
+                        onClipSelected: id => {
+                                            selectionManager.selectedClipId = id
+                                            console.log(
+                                                id >= 0 ? "✅ Выделен клип "
+                                                          + id : "❌ Выделение снято")
+                                        }
                     }
                 }
             }

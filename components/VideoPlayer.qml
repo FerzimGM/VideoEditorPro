@@ -17,13 +17,8 @@ Rectangle {
     property real duration: cppTimeline ? Math.max(
                                               60,
                                               cppTimeline.totalDuration) : 60
-
-    // *** ГЛАВНЫЙ ФИX: isPlaying должен приходить из main.qml! ***
-    // Без него QMediaPlayer никогда не запускается и updateScrubFrame()
-    // вызывается на каждом тике таймера → чёрный экран + спиннер
     property bool isPlaying: false
-    property real playbackSpeed: 1.0 // ← скорость воспроизведения
-    // Громкость (0.0 – 1.0)
+    property real playbackSpeed: 1.0
     property real volume: 1.0
 
     // ===== ЭФФЕКТЫ =====
@@ -32,7 +27,7 @@ Rectangle {
     property real saturation: 1.0
     property bool grayscale: false
 
-    // ===== ВНУТРЕННИЕ ИСТОЧНИКИ =====
+    // ===== ВНУТРЕННИЕ =====
     property string currentClipUrl: ""
     property string currentFrameSource: ""
 
@@ -41,10 +36,14 @@ Rectangle {
     property int videoHeight: 0
     property real videoFps: 0.0
 
-    // Сигнал: QMediaPlayer продвинулся — обновить playhead
+    // Кэш текущего клипа (обновляется в startPlayback / tryPlayNextClip)
+    property real _clipStartTime: 0.0
+    property real _clipTrimStart: 0.0
+
+    // Сигнал: обновить playhead
     signal timePositionChanged(real newTime)
 
-    // ===== ПУБЛИЧНЫЕ МЕТОДЫ =====
+    // ===== ЭФФЕКТЫ API =====
     function applyBrightness(v) {
         brightness = v
     }
@@ -64,7 +63,7 @@ Rectangle {
         grayscale = false
     }
 
-    // ===== SCRUB FRAME (пауза/скруббинг) =====
+    // ===== SCRUB FRAME =====
     function updateScrubFrame() {
         if (!cppTimeline) {
             currentFrameSource = ""
@@ -80,86 +79,83 @@ Rectangle {
             videoHeight = info.height
             videoFps = info.fps
         }
-
-        var cp = cppTimeline.getActiveClipPath(currentTime, 1)
-        if (cp && cp !== "" && currentClipUrl !== cp) {
-            currentClipUrl = cp
-            mediaPlayer.source = cp
-        }
     }
 
     // ===== ВОСПРОИЗВЕДЕНИЕ =====
     function startPlayback() {
-        var cp = cppTimeline ? cppTimeline.getActiveClipPath(currentTime,
-                                                             1) : ""
+        if (!cppTimeline) {
+            isPlaying = false
+            return
+        }
 
-        // *** ИСПРАВЛЕНО: если нет клипа в currentTime (например стоим в конце),
-        // ищем первый клип с начала таймлайна ***
+        var cp = cppTimeline.getActiveClipPath(currentTime, 1)
         if (!cp || cp === "") {
-            var firstPath = cppTimeline ? cppTimeline.getActiveClipPath(0.0,
-                                                                        1) : ""
-            if (firstPath && firstPath !== "") {
-                console.log("⚠️ Нет клипа в позиции", currentTime,
-                            "— стартуем с 0")
-                videoPlayer.timePositionChanged(0)
-                cp = firstPath
-            } else {
-                console.log("⚠️ На таймлайне нет клипов")
+            // Нет клипа под playhead → пробуем с начала таймлайна
+            var first = cppTimeline.getActiveClipPath(0.0, 1)
+            if (!first || first === "") {
+                console.log("⚠️ Нет клипов на таймлайне")
+                isPlaying = false
                 return
             }
+            console.log("⚠️ Нет клипа в", currentTime, "→ старт с 0")
+            videoPlayer.timePositionChanged(0)
+            cp = first
         }
 
-        if (currentClipUrl !== cp) {
-            currentClipUrl = cp
-            mediaPlayer.source = cp
+        // Кэшируем метаданные клипа
+        var info = cppTimeline.getClipInfoAt(currentTime, 1)
+        if (info && info.startTime !== undefined) {
+            _clipStartTime = info.startTime || 0.0
+            _clipTrimStart = info.trimStart || 0.0
         }
 
-        var info = cppTimeline ? cppTimeline.getClipInfoAt(currentTime,
-                                                           1) : null
-        if (info) {
-            var posMs = (currentTime - (info.startTime || 0) + (info.trimStart
-                                                                || 0)) * 1000
-            mediaPlayer.position = Math.max(0, posMs)
-        }
+        // Всегда останавливаем и сбрасываем источник —
+        // это гарантирует чистый старт после паузы или конца таймлайна
+        mediaPlayer.stop()
+        currentClipUrl = cp
+        mediaPlayer.source = cp
 
+        var posMs = (currentTime - _clipStartTime + _clipTrimStart) * 1000
+        mediaPlayer.position = Math.max(0, posMs)
         mediaPlayer.playbackRate = videoPlayer.playbackSpeed
         mediaPlayer.play()
-        console.log("▶ play() pos=", mediaPlayer.position, "ms url=", cp)
+        console.log("▶ play() clip:", cp, "clipStart:", _clipStartTime, "pos:",
+                    posMs, "ms")
     }
 
-    // *** Переключиться на следующий клип (автоматически при конце текущего) ***
+    // ===== ПЕРЕХОД К СЛЕДУЮЩЕМУ КЛИПУ =====
     function tryPlayNextClip() {
         if (!cppTimeline || !videoPlayer.isPlaying)
             return
 
-        // Ищем клип чуть дальше текущей позиции
-        var lookAhead = videoPlayer.currentTime + 0.08
-        var nextPath = cppTimeline.getActiveClipPath(lookAhead, 1)
+        var lookAt = videoPlayer.currentTime + 0.08
+        var nextPath = cppTimeline.getActiveClipPath(lookAt, 1)
 
         if (nextPath && nextPath !== "") {
-            var info = cppTimeline.getClipInfoAt(lookAhead, 1)
-            var startPosMs = info ? Math.max(0,
-                                             (info.trimStart || 0) * 1000) : 0
+            var info = cppTimeline.getClipInfoAt(lookAt, 1)
+            if (info && info.startTime !== undefined) {
+                _clipStartTime = info.startTime || 0.0
+                _clipTrimStart = info.trimStart || 0.0
+            }
 
-            console.log("⏭ Следующий клип:", nextPath, "startPos:",
-                        startPosMs, "ms")
+            console.log("⏭ Следующий клип:", nextPath, "start:", _clipStartTime)
 
-            // *** Сначала обновляем playhead до начала нового клипа ***
-            // Это убирает рассинхрон "таймлайн в начале, видео новое"
-            var newTime = info ? (info.startTime || lookAhead) : lookAhead
-            videoPlayer.timePositionChanged(newTime)
+            // Уведомляем об обновлении playhead
+            videoPlayer.timePositionChanged(_clipStartTime)
 
+            mediaPlayer.stop()
             currentClipUrl = nextPath
             mediaPlayer.source = nextPath
-            mediaPlayer.position = startPosMs
+            mediaPlayer.position = Math.max(0, _clipTrimStart * 1000)
             mediaPlayer.playbackRate = videoPlayer.playbackSpeed
             mediaPlayer.play()
         } else {
-            // *** ИСПРАВЛЕНО: сбрасываем в начало чтобы следующий Play работал ***
-            console.log("⏹ Конец всех клипов, сброс в начало")
+            // ===== КОНЕЦ ТАЙМЛАЙНА =====
+            // Важно: не вызывать несуществующий resetTimer!
+            console.log("⏹ Конец таймлайна")
             videoPlayer.isPlaying = false
-            // Небольшая задержка — дать isPlaying сработать, потом сбросить время
-            resetTimer.restart()
+            // Сбрасываем позицию в начало чтобы следующее нажатие Play работало
+            endOfTimelineTimer.restart()
         }
     }
 
@@ -170,10 +166,15 @@ Rectangle {
 
     // ===== РЕАКЦИИ =====
     onIsPlayingChanged: {
-        if (isPlaying)
+        if (isPlaying) {
+            // ОБЯЗАТЕЛЬНО сбрасываем currentClipUrl перед стартом —
+            // иначе startPlayback() пропустит переустановку source,
+            // и MediaPlayer останется в Stopped без возможности play()
+            currentClipUrl = ""
             startPlayback()
-        else
+        } else {
             pausePlayback()
+        }
     }
 
     onPlaybackSpeedChanged: {
@@ -184,7 +185,7 @@ Rectangle {
         if (!isPlaying) {
             updateScrubFrame()
         } else {
-            // Пользователь вручную scrubbed → пересинхронизируем
+            // Пользователь вручную перемотал во время воспроизведения
             var info = cppTimeline ? cppTimeline.getClipInfoAt(currentTime,
                                                                1) : null
             if (info) {
@@ -192,9 +193,10 @@ Rectangle {
                                                  || 0) + (info.trimStart
                                                           || 0)) * 1000
                 if (Math.abs(expectedMs - mediaPlayer.position) > 1500) {
-                    console.log("🔄 Пересинхронизация, drift:",
+                    console.log("🔄 Ресинхронизация, drift:",
                                 Math.abs(expectedMs - mediaPlayer.position),
                                 "мс")
+                    currentClipUrl = ""
                     startPlayback()
                 }
             }
@@ -223,35 +225,30 @@ Rectangle {
         }
 
         onErrorOccurred: function (err, str) {
-            console.log("❌ MediaPlayer:", str)
+            console.log("❌ MediaPlayer error:", str)
         }
 
-        // *** Двигаем playhead за QMediaPlayer ***
+        // Обновляем playhead — используем кэш, НЕ вызываем C++ 30 раз/сек
         onPositionChanged: {
             if (videoPlayer.isPlaying && mediaPlayer.source !== "") {
-                var info = cppTimeline ? cppTimeline.getClipInfoAt(
-                                             videoPlayer.currentTime, 1) : null
-                if (info) {
-                    var t = (mediaPlayer.position / 1000.0) + (info.startTime
-                                                               || 0) - (info.trimStart
-                                                                        || 0)
-                    videoPlayer.timePositionChanged(t)
-                }
+                // timeline_time = media_pos_sec + clip_start_on_timeline - clip_trim_from_start
+                var t = (mediaPlayer.position / 1000.0)
+                        + videoPlayer._clipStartTime - videoPlayer._clipTrimStart
+                videoPlayer.timePositionChanged(t)
             }
         }
 
-        // *** Конец клипа → переход к следующему ***
+        // Конец клипа → переход к следующему
         onPlaybackStateChanged: {
             if (mediaPlayer.playbackState === MediaPlayer.StoppedState
                     && videoPlayer.isPlaying) {
-                console.log("📼 Клип закончился, ищем следующий...")
-                // Небольшая задержка чтобы currentTime успел обновиться
+                console.log("📼 Клип завершён, ищем следующий...")
                 nextClipTimer.restart()
             }
         }
     }
 
-    // Таймер для перехода к следующему клипу
+    // Таймер перехода к следующему клипу (даём 50мс на обновление позиции)
     Timer {
         id: nextClipTimer
         interval: 50
@@ -259,17 +256,17 @@ Rectangle {
         onTriggered: videoPlayer.tryPlayNextClip()
     }
 
-    // Таймер для сброса в начало после окончания всех клипов
-    // Задержка 200мс: ждём пока isPlaying=false обработается, потом сбрасываем время
+    // Таймер сброса позиции после конца таймлайна
+    // Через 200мс после окончания перематываем в начало — пользователь может
+    // сразу нажать Play и воспроизведение начнётся сначала
     Timer {
-        id: resetTimer
+        id: endOfTimelineTimer
         interval: 200
         repeat: false
         onTriggered: {
             videoPlayer.timePositionChanged(0)
-            videoPlayer.currentClipUrl = ""
-            videoPlayer.currentFrameSource = ""
-            console.log("🔁 Сброшено в начало — готово к следующему Play")
+            videoPlayer.updateScrubFrame()
+            console.log("⏮ Позиция сброшена в начало")
         }
     }
 
@@ -309,7 +306,6 @@ Rectangle {
             radius: Theme.borderRadius
             clip: true
 
-            // Режим воспроизведения
             VideoOutput {
                 id: videoOutput
                 anchors.fill: parent
@@ -339,7 +335,6 @@ gl_FragColor = vec4(clamp(c.rgb,0.0,1.0),1.0);
                 }
             }
 
-            // Режим паузы / скруббинг
             Image {
                 id: scrubFrame
                 anchors.fill: parent
@@ -382,7 +377,7 @@ gl_FragColor = vec4(clamp(c.rgb,0.0,1.0),1.0);
                 }
             }
 
-            // Placeholder
+            // Плейсхолдер
             ColumnLayout {
                 anchors.centerIn: parent
                 spacing: Theme.spacingLarge

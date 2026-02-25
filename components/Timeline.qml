@@ -312,17 +312,11 @@ Rectangle {
                            }
             }
 
-            // Кнопочная область ниже линейки (клики в пустоту = снять выделение)
-            MouseArea {
-                anchors.top: parent.top
-                anchors.topMargin: 40
-                anchors.left: parent.left
-                anchors.right: parent.right
-                anchors.bottom: parent.bottom
-                z: 0 // Ниже клипов — срабатывает только в пустом месте
-                acceptedButtons: Qt.LeftButton
-                onClicked: root.clipSelected(-1) // Снять выделение
-            }
+            // *** УДАЛЕНО: MouseArea ниже линейки ***
+            // ПРИЧИНА УДАЛЕНИЯ: в QML при одинаковом z побеждает тот, кто объявлен ПОЗЖЕ.
+            // Эта MouseArea была объявлена ПОСЛЕ ColumnLayout с клипами → перехватывала
+            // ВСЕ клики на клипы, VideoClip никогда не получал события мыши.
+            // Снятие выделения — через Escape (Shortcut в main.qml).
         }
     }
 

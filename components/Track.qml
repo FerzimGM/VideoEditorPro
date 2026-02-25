@@ -6,52 +6,36 @@ import "../theme.js" as Theme
 Rectangle {
     id: root
     color: Theme.trackBackground
-    // Высота = видео-полоска (50) + аудио-полоска (30) + зазор (2) + отступы (10)
-    // Должна совпадать с VideoClip.videoH + VideoClip.audioH + 2
-    // Theme.trackHeight * 2 из Timeline.qml — задаётся снаружи, не трогаем
     height: Theme.trackHeight * 2
 
     property int trackNumber: 1
     property double pixelsPerSecond: 10
     property bool snapEnabled: true
     property var clips: []
-    // *** Получаем от Timeline, передаём в VideoClip ***
     property int selectedClipId: -1
 
     signal clipClicked(int clipId)
     signal clipSelected(int clipId)
-    // ← новый: пробрасывается вверх в Timeline
     signal clipDeleted(int clipId)
     signal clipDropped(string filepath, real time)
     signal clipMoved(int clipId, real newTime)
 
     // ===== ОБНОВИТЬ КЛИПЫ ИЗ C++ =====
     function updateClipsFromCpp() {
-        console.log("🔄 Track.updateClipsFromCpp track:", root.trackNumber)
-
-        // Получить клипы для этой дорожки из C++
         root.clips = cppTimeline.getClipsForTrack(root.trackNumber)
-
-        console.log("   Получено клипов:", root.clips.length)
+        console.log("🔄 Track", root.trackNumber, "клипов:", root.clips.length)
     }
 
-    // ===== СЛУШАЕМ ИЗМЕНЕНИЯ ОТ C++ =====
     Connections {
         target: cppTimeline
-
         function onClipsChanged() {
-            console.log("📡 Track", root.trackNumber, "получил clipsChanged")
-            root.updateClipsFromCpp() // ← Обновляем!
+            root.updateClipsFromCpp()
         }
     }
 
-    // ===== ИНИЦИАЛИЗАЦИЯ =====
-    Component.onCompleted: {
-        console.log("✅ Track", root.trackNumber, "создан")
-        updateClipsFromCpp() // Загружаем клипы при создании
-    }
+    Component.onCompleted: updateClipsFromCpp()
 
-    // Фоновые полосы
+    // Разделитель снизу
     Rectangle {
         anchors.bottom: parent.bottom
         width: parent.width
@@ -59,28 +43,88 @@ Rectangle {
         color: Theme.dividerColor
     }
 
-    // Зона Drag & Drop
+    // ─────────────────────────────────────────────────────────
+    // DROP AREA 1: файлы из файлового менеджера (LeftSidebar)
+    // ─────────────────────────────────────────────────────────
     DropArea {
-        id: dropArea
+        id: fileDropArea
         anchors.fill: parent
         keys: ["video/filepath"]
+        z: 5
 
-        onEntered: drag => {
-                       dropHighlight.visible = true
-                   }
-        onExited: {
-            dropHighlight.visible = false
-        }
+        onEntered: dropHighlight.visible = true
+        onExited: dropHighlight.visible = false
         onDropped: drop => {
                        dropHighlight.visible = false
                        var filepath = drop.getDataAsString("video/filepath")
                        var time = drop.x / root.pixelsPerSecond
-                       console.log("🎬 Drop:", filepath, "at", time, "sec")
+                       console.log("🎬 File Drop:", filepath, "at", time,
+                                   "sec on track", root.trackNumber)
                        root.clipDropped(filepath, time)
                    }
     }
 
-    // Подсветка при drag-over
+    // ─────────────────────────────────────────────────────────
+    // DROP AREA 2: перенос клипов между дорожками
+    // keys["clip/move"] генерирует VideoClip через Drag API
+    // ─────────────────────────────────────────────────────────
+    DropArea {
+        id: clipMoveDropArea
+        anchors.fill: parent
+        keys: ["clip/move"]
+        z: 6 // Выше fileDropArea
+
+        onEntered: clipMoveHighlight.visible = true
+        onExited: clipMoveHighlight.visible = false
+
+        onDropped: drop => {
+                       clipMoveHighlight.visible = false
+                       var clipId = parseInt(drop.getDataAsString("clip/id"))
+                       if (isNaN(clipId) || clipId < 0)
+                       return
+
+                       var time = Math.max(0, drop.x / root.pixelsPerSecond)
+
+                       // Snap
+                       if (root.snapEnabled && root.clips) {
+                           var threshold = 0.5
+                           for (var i = 0; i < root.clips.length; i++) {
+                               var c = root.clips[i]
+                               if (c.id === clipId)
+                               continue
+                               if (Math.abs(time - c.startTime) < threshold) {
+                                   time = c.startTime
+                                   break
+                               }
+                               if (Math.abs(
+                                       time - (c.startTime + c.duration)) < threshold) {
+                                   time = c.startTime + c.duration
+                                   break
+                               }
+                           }
+                       }
+
+                       console.log("📦 Cross-track drop: clip", clipId,
+                                   "→ track", root.trackNumber, "@ time", time)
+                       if (cppTimeline)
+                       cppTimeline.moveClip(clipId, root.trackNumber, time)
+
+                       drop.accept(Qt.MoveAction)
+                   }
+
+        // Подсветка при перетаскивании клипа
+        Rectangle {
+            id: clipMoveHighlight
+            anchors.fill: parent
+            color: Qt.rgba(0.2, 0.8, 0.4, 0.12)
+            border.color: "#43A047"
+            border.width: 2
+            visible: false
+            z: 1
+        }
+    }
+
+    // Подсветка при дропе файла
     Rectangle {
         id: dropHighlight
         anchors.fill: parent
@@ -92,37 +136,39 @@ Rectangle {
         z: 5
     }
 
-    // ===== REPEATER ДЛЯ КЛИПОВ (из C++!) =====
+    // ===== REPEATER ДЛЯ КЛИПОВ =====
     Repeater {
         id: clipsRepeater
-        model: root.clips // ← РЕАЛЬНЫЕ клипы из C++!
+        model: root.clips
 
         delegate: VideoClip {
             id: clipItem
 
-            // *** КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ: Qt.binding() делает привязки динамическими ***
-            // Без этого x и width устанавливаются ОДИН РАЗ и не обновляются при зуме
             x: modelData.startTime * root.pixelsPerSecond
-            y: (root.height - height) / 2 // вертикальное центрирование
+            y: (root.height - height) / 2
             width: modelData.duration * root.pixelsPerSecond
 
             clipName: modelData.filename
             clipId: modelData.id
-            // *** selected привязан к selectedClipId от Track ***
             selected: root.selectedClipId === modelData.id
             isMuted: modelData.isMuted || false
 
+            // Максимальная ширина = оригинальная длина клипа * текущий масштаб
+            // Запрещает растягивать клип длиннее исходного видео
+            clipMaxWidth: modelData.duration * root.pixelsPerSecond
+
             Component.onCompleted: {
-                console.log("🎬 VideoClip создан:", modelData.filename, "x:",
-                            x, "width:", width)
+                console.log("🎬 Clip создан:", modelData.filename, "track:",
+                            root.trackNumber, "x:", x)
             }
 
-            // Привязка к изменению pixelsPerSecond — x и width обновляются при зуме
+            // Обновляем x, width И clipMaxWidth при изменении зума
             Connections {
                 target: root
                 function onPixelsPerSecondChanged() {
                     clipItem.x = modelData.startTime * root.pixelsPerSecond
                     clipItem.width = modelData.duration * root.pixelsPerSecond
+                    clipItem.clipMaxWidth = modelData.duration * root.pixelsPerSecond
                 }
             }
 
@@ -151,9 +197,9 @@ Rectangle {
                                      newTime = otherEnd
                                      break
                                  }
-                                 var currentEnd = newTime + modelData.duration
+                                 var curEnd = newTime + modelData.duration
                                  if (Math.abs(
-                                         currentEnd - otherStart) < snapThreshold) {
+                                         curEnd - otherStart) < snapThreshold) {
                                      newTime = otherStart - modelData.duration
                                      break
                                  }
@@ -161,28 +207,25 @@ Rectangle {
                          }
 
                          newTime = Math.max(0, newTime)
-                         console.log("📍 Клип перемещён. ID:", modelData.id,
-                                     "newTime:", newTime)
+                         console.log("📍 Move clip", modelData.id, "→",
+                                     newTime, "sec on track", root.trackNumber)
                          root.clipMoved(modelData.id, newTime)
                      }
 
             onClicked: {
-                // *** Выделяем клип через сигнал вверх по цепочке ***
                 root.clipSelected(modelData.id)
                 root.clipClicked(modelData.id)
             }
 
             onDeleteRequested: id => {
                                    console.log("🗑️ Delete clip", id)
-                                   // Снимаем выделение если удаляем выделенный
                                    if (root.selectedClipId === id)
                                    root.clipSelected(-1)
                                    cppTimeline.removeClip(id)
                                    root.clipDeleted(id)
                                }
+
             onSplitRequested: id => {
-                                  // Разрезаем по текущему времени воспроизведения
-                                  // currentTime доступен через глобальный playbackManager или cppTimeline
                                   var splitTime = cppTimeline ? cppTimeline.currentTime : 0
                                   console.log("✂ Split clip", id, "at",
                                               splitTime)
@@ -196,7 +239,6 @@ Rectangle {
                            }
 
             onEffectsRequested: id => {
-                                    // TODO: открыть панель эффектов
                                     console.log("✨ Effects for clip", id)
                                 }
         }
