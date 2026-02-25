@@ -1,5 +1,4 @@
 import QtQuick
-//import QtQuick.Window
 import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.Dialogs
@@ -56,7 +55,7 @@ QtObject {
         color: Theme.backgroundColor
         flags: Qt.Window | Qt.FramelessWindowHint
 
-        // *** ВАЖНО: cutKeyPressed объявлен здесь, в Window root ***
+        // *** cutKeyPressed объявлен здесь, в Window root ***
         // Shortcuts тоже в Window root → доступ без проблем
         property bool cutKeyPressed: false
 
@@ -153,6 +152,16 @@ QtObject {
             property bool snapEnabled: true
         }
 
+        // ===== МЕНЕДЖЕР ВЫДЕЛЕНИЯ =====
+        // selectionManager доступен из VideoClip.qml и Track.qml по id
+        QtObject {
+            id: selectionManager
+            property int selectedClipId: -1
+            function clearSelection() {
+                selectedClipId = -1
+            }
+        }
+
         Connections {
             target: cppTimeline
             function onTotalDurationChanged() {
@@ -171,7 +180,7 @@ QtObject {
                 if (filepath.match(/^\/[A-Za-z]:\//))
                     filepath = filepath.substring(1)
 
-                // *** ИСПРАВЛЕНО: добавляем в конец последнего клипа, не на текущее время ***
+                // ***  добавляем в конец последнего клипа, не на текущее время ***
                 // Если видеофайлы уже есть — ставим новый после них
                 // Если нет — ставим на 0
                 var startTime = 0
@@ -457,7 +466,7 @@ QtObject {
                                                                playbackManager.currentTime
                                                                - time) > 0.05) {
                                                            playbackManager.currentTime = time
-                                                           // *** ИСПРАВЛЕНО: cppTimeline.currentTime, не setCurrentTime ***
+                                                           // *** cppTimeline.currentTime, не setCurrentTime ***
                                                            cppTimeline.currentTime = time
                                                        }
                                                    }
@@ -481,7 +490,7 @@ QtObject {
                         onStopClicked: {
                             playbackManager.isPlaying = false
                             playbackManager.currentTime = 0
-                            // *** ИСПРАВЛЕНО: cppTimeline.currentTime, не setCurrentTime ***
+                            // ***  cppTimeline.currentTime, не setCurrentTime ***
                             cppTimeline.currentTime = 0
                         }
 
@@ -496,7 +505,7 @@ QtObject {
                         onSnapToggled: playbackManager.snapEnabled = !playbackManager.snapEnabled
 
                         onCutClicked: {
-                            // *** ИСПРАВЛЕНО: root.cutKeyPressed через явную ссылку на Window ***
+                            // ***  root.cutKeyPressed через явную ссылку на Window ***
                             if (!root.cutKeyPressed) {
                                 root.cutKeyPressed = true
                                 console.log("✂ Разрезать в позиции:",
@@ -670,6 +679,5 @@ QtObject {
             interval: 200
             onTriggered: root.cutKeyPressed = false
         }
-    }// Window
+    } // Window
 } // QtObject
-

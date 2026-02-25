@@ -92,9 +92,21 @@ Rectangle {
     function startPlayback() {
         var cp = cppTimeline ? cppTimeline.getActiveClipPath(currentTime,
                                                              1) : ""
+
+        // *** ИСПРАВЛЕНО: если нет клипа в currentTime (например стоим в конце),
+        // ищем первый клип с начала таймлайна ***
         if (!cp || cp === "") {
-            console.log("⚠️ Нет клипа в позиции", currentTime)
-            return
+            var firstPath = cppTimeline ? cppTimeline.getActiveClipPath(0.0,
+                                                                        1) : ""
+            if (firstPath && firstPath !== "") {
+                console.log("⚠️ Нет клипа в позиции", currentTime,
+                            "— стартуем с 0")
+                videoPlayer.timePositionChanged(0)
+                cp = firstPath
+            } else {
+                console.log("⚠️ На таймлайне нет клипов")
+                return
+            }
         }
 
         if (currentClipUrl !== cp) {
@@ -120,23 +132,34 @@ Rectangle {
         if (!cppTimeline || !videoPlayer.isPlaying)
             return
 
-        // currentTime стоит в конце текущего клипа → смотрим чуть дальше
-        var lookAhead = videoPlayer.currentTime + 0.05
+        // Ищем клип чуть дальше текущей позиции
+        var lookAhead = videoPlayer.currentTime + 0.08
         var nextPath = cppTimeline.getActiveClipPath(lookAhead, 1)
 
         if (nextPath && nextPath !== "") {
-            console.log("⏭ Переходим к следующему клипу:", nextPath)
+            var info = cppTimeline.getClipInfoAt(lookAhead, 1)
+            var startPosMs = info ? Math.max(0,
+                                             (info.trimStart || 0) * 1000) : 0
+
+            console.log("⏭ Следующий клип:", nextPath, "startPos:",
+                        startPosMs, "ms")
+
+            // *** Сначала обновляем playhead до начала нового клипа ***
+            // Это убирает рассинхрон "таймлайн в начале, видео новое"
+            var newTime = info ? (info.startTime || lookAhead) : lookAhead
+            videoPlayer.timePositionChanged(newTime)
+
             currentClipUrl = nextPath
             mediaPlayer.source = nextPath
-
-            var info = cppTimeline.getClipInfoAt(lookAhead, 1)
-            mediaPlayer.position = info ? Math.max(0, (info.trimStart
-                                                       || 0) * 1000) : 0
+            mediaPlayer.position = startPosMs
             mediaPlayer.playbackRate = videoPlayer.playbackSpeed
             mediaPlayer.play()
         } else {
-            console.log("⏹ Конец таймлайна")
+            // *** ИСПРАВЛЕНО: сбрасываем в начало чтобы следующий Play работал ***
+            console.log("⏹ Конец всех клипов, сброс в начало")
             videoPlayer.isPlaying = false
+            // Небольшая задержка — дать isPlaying сработать, потом сбросить время
+            resetTimer.restart()
         }
     }
 
@@ -231,9 +254,23 @@ Rectangle {
     // Таймер для перехода к следующему клипу
     Timer {
         id: nextClipTimer
-        interval: 50 // 50мс хватит чтобы playhead обновился
+        interval: 50
         repeat: false
         onTriggered: videoPlayer.tryPlayNextClip()
+    }
+
+    // Таймер для сброса в начало после окончания всех клипов
+    // Задержка 200мс: ждём пока isPlaying=false обработается, потом сбрасываем время
+    Timer {
+        id: resetTimer
+        interval: 200
+        repeat: false
+        onTriggered: {
+            videoPlayer.timePositionChanged(0)
+            videoPlayer.currentClipUrl = ""
+            videoPlayer.currentFrameSource = ""
+            console.log("🔁 Сброшено в начало — готово к следующему Play")
+        }
     }
 
     // Градиентная рамка

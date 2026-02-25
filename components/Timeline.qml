@@ -15,6 +15,11 @@ Rectangle {
     property real pixelsPerSecond: 10
     property bool snapEnabled: true // Snap включён
 
+    // *** Выделение клипов через property-цепочку (main → Timeline → Track → VideoClip) ***
+    // Прямой доступ по ID между компонентами в QML не работает!
+    property int selectedClipId: -1
+    signal clipSelected(int clipId)
+
     signal timeChanged(real time)
     signal zoomChanged(int zoom)
 
@@ -165,7 +170,7 @@ Rectangle {
                     currentTime: root.currentTime
                 }
 
-                // *** ИСПРАВЛЕНО: используем root.pixelsPerSecond и root.snapEnabled (не timeline.*) ***
+                // ***  используем root.pixelsPerSecond и root.snapEnabled (не timeline.*) ***
                 Repeater {
                     model: 2
 
@@ -173,10 +178,17 @@ Rectangle {
                         trackNumber: index + 1
                         Layout.fillWidth: true
                         Layout.preferredHeight: Theme.trackHeight * 2
-                        // ПРАВИЛЬНО: root.pixelsPerSecond (не timeline.pixelsPerSeconde — опечатка!)
+                        //  root.pixelsPerSecond (не timeline.pixelsPerSeconde — опечатка!)
                         pixelsPerSecond: root.pixelsPerSecond
-                        // ПРАВИЛЬНО: root.snapEnabled (не timeline.snapEnabled)
+                        //  root.snapEnabled (не timeline.snapEnabled)
                         snapEnabled: root.snapEnabled
+                        // *** Передаём выделение вниз по цепочке ***
+                        selectedClipId: root.selectedClipId
+
+                        // Когда пользователь кликнул по клипу внутри Track
+                        onClipSelected: id => {
+                                            root.clipSelected(id)
+                                        }
 
                         // Когда видео дропнули на дорожку
                         onClipDropped: (filepath, time) => {
@@ -185,7 +197,7 @@ Rectangle {
                                            console.log("filepath:", filepath)
                                            console.log("time:", time)
                                            console.log("track:", index + 1)
-                                           // ПРАВИЛЬНО: используем глобальный cppTimeline (не timeline.cppTimeline)
+                                           //  используем глобальный cppTimeline (не timeline.cppTimeline)
                                            if (cppTimeline) {
                                                console.log(
                                                    "Calling cppTimeline.addClip...")
@@ -200,7 +212,7 @@ Rectangle {
 
                         // Когда клип подвинули
                         onClipMoved: (clipId, newTime) => {
-                                         // ПРАВИЛЬНО: используем глобальный cppTimeline (не root.cppTimeline)
+                                         //  используем глобальный cppTimeline (не root.cppTimeline)
                                          if (cppTimeline) {
                                              cppTimeline.moveClip(clipId,
                                                                   index + 1,
@@ -218,7 +230,7 @@ Rectangle {
             // *** Линия воспроизведения (Playhead) ***
             Rectangle {
                 id: playhead
-                // ПРАВИЛЬНО: x привязан к currentTime * pixelsPerSecond
+                //  x привязан к currentTime * pixelsPerSecond
                 x: root.currentTime * root.pixelsPerSecond
                 y: 0
                 width: 2
@@ -280,10 +292,15 @@ Rectangle {
                 }
             }
 
-            // MouseArea для клика по таймлайну — перемещаем playhead
+            // *** ИСПРАВЛЕНО: MouseArea только над TimeRuler (высота 40px) ***
+            // Раньше anchors.fill покрывал весь flickable (z:999) и перехватывал
+            // все клики на клипы — они никогда не доходили до VideoClip.
             MouseArea {
                 id: playheadMouseArea
-                anchors.fill: parent
+                anchors.top: parent.top
+                anchors.left: parent.left
+                anchors.right: parent.right
+                height: 40 // Только зона линейки
                 z: 999
                 acceptedButtons: Qt.LeftButton
 
@@ -293,6 +310,18 @@ Rectangle {
                                root.timeChanged(
                                    Math.max(0, Math.min(root.duration, time)))
                            }
+            }
+
+            // Кнопочная область ниже линейки (клики в пустоту = снять выделение)
+            MouseArea {
+                anchors.top: parent.top
+                anchors.topMargin: 40
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.bottom: parent.bottom
+                z: 0 // Ниже клипов — срабатывает только в пустом месте
+                acceptedButtons: Qt.LeftButton
+                onClicked: root.clipSelected(-1) // Снять выделение
             }
         }
     }

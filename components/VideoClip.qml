@@ -21,10 +21,9 @@ Item {
     property int clipId: -1
     property bool isMuted: false
 
-    // *** ИСПРАВЛЕНО: selected теперь привязан к глобальному selectionManager ***
-    // Раньше брался из modelData.selected который всегда false в C++
-    readonly property bool selected: (typeof selectionManager !== "undefined")
-                                     && selectionManager.selectedClipId === clipId
+    //  selected привязан к selectionManager (объявлен в main.qml)
+    // selectionManager.selectedClipId === clipId → этот клип выделен ,,,
+    readonly property bool selected: selectionManager.selectedClipId === clipId
 
     // Высоты полос — должны совпадать с тем, что ожидает Track.qml
     readonly property real videoH: 50

@@ -14,9 +14,13 @@ Rectangle {
     property int trackNumber: 1
     property double pixelsPerSecond: 10
     property bool snapEnabled: true
-    property var clips: [] // ← Получаем из C++!
+    property var clips: []
+    // *** Получаем от Timeline, передаём в VideoClip ***
+    property int selectedClipId: -1
 
     signal clipClicked(int clipId)
+    signal clipSelected(int clipId)
+    // ← новый: пробрасывается вверх в Timeline
     signal clipDeleted(int clipId)
     signal clipDropped(string filepath, real time)
     signal clipMoved(int clipId, real newTime)
@@ -102,10 +106,10 @@ Rectangle {
             y: (root.height - height) / 2 // вертикальное центрирование
             width: modelData.duration * root.pixelsPerSecond
 
-            // height — не задаём! VideoClip сам знает свою высоту (videoH+audioH+2)
             clipName: modelData.filename
             clipId: modelData.id
-            selected: modelData.selected || false
+            // *** selected привязан к selectedClipId от Track ***
+            selected: root.selectedClipId === modelData.id
             isMuted: modelData.isMuted || false
 
             Component.onCompleted: {
@@ -163,12 +167,16 @@ Rectangle {
                      }
 
             onClicked: {
+                // *** Выделяем клип через сигнал вверх по цепочке ***
+                root.clipSelected(modelData.id)
                 root.clipClicked(modelData.id)
             }
 
             onDeleteRequested: id => {
-                                   console.log("🗑️ Delete requested for clip",
-                                               id)
+                                   console.log("🗑️ Delete clip", id)
+                                   // Снимаем выделение если удаляем выделенный
+                                   if (root.selectedClipId === id)
+                                   root.clipSelected(-1)
                                    cppTimeline.removeClip(id)
                                    root.clipDeleted(id)
                                }
