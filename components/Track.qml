@@ -44,20 +44,71 @@ Rectangle {
     }
 
     // ─────────────────────────────────────────────────────────
-    // DROP AREA 1: файлы из файлового менеджера (LeftSidebar)
+    // DROP AREA 1: файлы из проводника Windows / LeftSidebar
+    // ВАЖНО: keys: [] (пустой) — принимаем ВСЕ drag-события.
+    // Windows Explorer кидает "text/uri-list", а не "video/filepath".
+    // Если указать keys: ["video/filepath"], дропы из проводника
+    // никогда не принимались — DropArea их просто игнорировала.
+    // Клипы ("clip/move") перехватывает clipMoveDropArea (z:6 > z:5),
+    // поэтому конфликта нет.
     // ─────────────────────────────────────────────────────────
     DropArea {
         id: fileDropArea
         anchors.fill: parent
-        keys: ["video/filepath"]
+        keys: [] // пустой = принимать любые drag-данные
         z: 5
 
-        onEntered: dropHighlight.visible = true
+        onEntered: {
+            // Подсветка только для файлов, не для клипов
+            if (!drag.keys.includes("clip/move")) {
+                dropHighlight.visible = true
+            }
+        }
         onExited: dropHighlight.visible = false
+
         onDropped: drop => {
                        dropHighlight.visible = false
-                       var filepath = drop.getDataAsString("video/filepath")
+
+                       // Клипы обрабатывает clipMoveDropArea — не трогаем
+                       if (drop.keys.includes("clip/move")) {
+                           drop.accepted = false
+                           return
+                       }
+
+                       var filepath = ""
                        var time = drop.x / root.pixelsPerSecond
+
+                       // Вариант 1: drag из LeftSidebar (кастомный ключ)
+                       if (drop.keys.includes("video/filepath")) {
+                           filepath = drop.getDataAsString("video/filepath")
+                       } // Вариант 2: drag из проводника Windows (text/uri-list)
+                       else if (drop.hasUrls && drop.urls.length > 0) {
+                           var url = drop.urls[0].toString()
+                           filepath = url.replace(/^file:\/\/\//, "")
+                           // Windows: /C:/path → C:/path
+                           if (filepath.match(/^\/[A-Za-z]:\//)) {
+                               filepath = filepath.substring(1)
+                           }
+                       } // Вариант 3: текст с путём
+                       else if (drop.hasText) {
+                           filepath = drop.text.trim().replace(/^file:\/\/\//,
+                                                               "")
+                       }
+
+                       if (filepath === "") {
+                           console.log(
+                               "⚠️ Drop: не удалось получить путь к файлу")
+                           return
+                       }
+
+                       // Фильтр по расширению
+                       var ext = filepath.split(".").pop().toLowerCase()
+                       var videoExts = ["mp4", "avi", "mov", "mkv", "webm", "flv", "wmv", "m4v", "ts"]
+                       if (!videoExts.includes(ext)) {
+                           console.log("⚠️ Drop: не видеофайл:", filepath)
+                           return
+                       }
+
                        console.log("🎬 File Drop:", filepath, "at", time,
                                    "sec on track", root.trackNumber)
                        root.clipDropped(filepath, time)

@@ -31,13 +31,13 @@ Rectangle {
     Connections {
         target: cppTimeline
         function onTotalDurationChanged() {
-            // duration пересчитывается автоматически через binding выше
-            console.log("📏 Общая длительность:", cppTimeline.totalDuration,
-                        "→ duration:", root.duration)
+            console.log("📏 Общая длительность:", cppTimeline.totalDuration)
         }
         function onClipsChanged() {
-            console.log("📋 Clips changed, totalDuration:",
-                        cppTimeline ? cppTimeline.totalDuration : "N/A")
+            console.log("📋 Clips changed")
+            // Сбрасываем выделение чтобы не было "призрачного" выделенного клипа
+            root.selectedClipId = -1
+            root.clipSelected(-1)
         }
     }
 

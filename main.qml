@@ -167,6 +167,14 @@ QtObject {
             function onTotalDurationChanged() {
                 console.log("⏱️ Duration:", cppTimeline.totalDuration)
             }
+            // Сбрасываем выделение ТОЛЬКО при удалении клипа,
+            // чтобы при перемещении выделение не слетало
+            function onClipRemoved(index) {
+                if (selectionManager.selectedClipId === index ||
+                    selectionManager.selectedClipId >= cppTimeline.clipCount) {
+                    selectionManager.clearSelection()
+                }
+            }
         }
 
         // ===== ДИАЛОГИ =====

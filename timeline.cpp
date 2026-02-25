@@ -132,6 +132,16 @@ bool Timeline::addClip(const QString& filepath, int trackIndex, double startTime
         return false;
     }
 
+    // КЭШИРУЕМ метаданные — чтобы getClipInfoAt не открывал декодер снова!
+    // Это устраняет спам "MediaDecoder создан/уничтожен" при каждом скруббинге.
+    if (!m_clipMeta.contains(filepath)) {
+        ClipMeta meta;
+        meta.width  = decoder.getVideoWidth();
+        meta.height = decoder.getVideoHeight();
+        meta.fps    = fps;
+        m_clipMeta[filepath] = meta;
+    }
+
     // Закрыть декодер - метаданные получены
     decoder.closeFile();
 
@@ -424,9 +434,13 @@ QImage Timeline::getCurrentFrameAt(double time, int trackIndex) {
     double clipTime = time - clip->startTime + clip->trimStart;
     double fps = 25.0;  // fallback
 
-    // Берём fps из потока если он запущен
+    // FIX: берём реальный fps из DecoderThread (у него есть геттер getFps())
+    // Раньше здесь стоял TODO-комментарий, fps всегда был 25.0 → неправильный frameNum
+    // → постоянные cache miss для видео с нестандартным fps (например 23.976)
     if (m_decoderThreads.contains(clip->filepath)) {
-        // fps хранится в DecoderThread — можно добавить геттер
+        fps = m_decoderThreads[clip->filepath]->getFps();
+    } else if (m_clipMeta.contains(clip->filepath) && m_clipMeta[clip->filepath].fps > 0) {
+        fps = m_clipMeta[clip->filepath].fps;
     }
 
     int frameNum = (int)(clipTime * fps);
@@ -678,7 +692,6 @@ bool Timeline::renderToFile(const QString& outputPath) {
 // и для синхронизации QMediaPlayer при старте воспроизведения.
 QVariantMap Timeline::getClipInfoAt(double time, int trackIndex) {
     QVariantMap info;
-    // Значения по умолчанию (ничего не найдено)
     info["width"]     = 0;
     info["height"]    = 0;
     info["fps"]       = 0.0;
@@ -691,14 +704,29 @@ QVariantMap Timeline::getClipInfoAt(double time, int trackIndex) {
     info["startTime"] = clip->startTime;
     info["trimStart"] = clip->trimStart;
 
-    // Открываем декодер чтобы получить метаданные
-    // (Медленно — TODO: кэшировать в m_clipMeta при addClip)
-    MediaDecoder decoder;
-    if (decoder.openFile(clip->filepath)) {
-        info["width"]  = decoder.getVideoWidth();
-        info["height"] = decoder.getVideoHeight();
-        info["fps"]    = decoder.getFrameRate();
-        decoder.closeFile();
+    // FIX: Используем кэш метаданных вместо открытия нового MediaDecoder!
+    // Кэш заполняется в addClip() — один раз при добавлении клипа.
+    // Раньше здесь открывался новый MediaDecoder при КАЖДОМ скруббинге → спам.
+    if (m_clipMeta.contains(clip->filepath)) {
+        const ClipMeta& meta = m_clipMeta[clip->filepath];
+        info["width"]  = meta.width;
+        info["height"] = meta.height;
+        info["fps"]    = meta.fps;
+    } else {
+        // Фоллбэк: открываем декодер только если кэша нет (например, после loadProject)
+        MediaDecoder decoder;
+        if (decoder.openFile(clip->filepath)) {
+            ClipMeta meta;
+            meta.width  = decoder.getVideoWidth();
+            meta.height = decoder.getVideoHeight();
+            meta.fps    = decoder.getFrameRate();
+            m_clipMeta[clip->filepath] = meta;  // кэшируем на будущее
+
+            info["width"]  = meta.width;
+            info["height"] = meta.height;
+            info["fps"]    = meta.fps;
+            decoder.closeFile();
+        }
     }
 
     return info;
@@ -767,4 +795,3 @@ double Timeline::getTrackEndTime(int trackIndex) const {
     }
     return maxEnd;  // 0.0 если дорожка пуста
 }
-
