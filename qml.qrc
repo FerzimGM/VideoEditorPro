@@ -14,5 +14,6 @@
         <file>components/VideoClip.qml</file>
         <file>components/SplashScreen.qml</file>
         <file>components/ClipManager.qml</file>
+        <file>components/ClipEffectsDialog.qml</file>
     </qresource>
 </RCC>

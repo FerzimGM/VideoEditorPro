@@ -3,18 +3,6 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import "../theme.js" as Theme
 
-// VideoClip — клип на таймлайне, разбитый на видео и аудио полосы.
-// СТРУКТУРА:
-//   Item (root)
-//   └── Column
-//       ├── Rectangle (синий)  — видео дорожка (50px)
-//       │   ├── Label "V" + имя файла
-//       │   ├── Resize handles (слева/справа)
-//       │   └── MouseArea (drag + контекстное меню)
-//       └── Rectangle (зелёный) — аудио дорожка (30px)
-//           ├── Label "A" + псевдо-осциллограмма
-//           └── MouseArea (mute + контекстное меню)
-// VideoClip — клип на таймлайне, разбитый на видео и аудио полосы.
 Item {
     id: root
 
@@ -23,7 +11,6 @@ Item {
     property int clipId: -1
     property bool isMuted: false
     property bool selected: false
-
     property real clipMaxWidth: 0
 
     readonly property real videoH: 50

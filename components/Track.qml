@@ -19,6 +19,7 @@ Rectangle {
     signal clipDeleted(int clipId)
     signal clipDropped(string filepath, real time)
     signal clipMoved(int clipId, real newTime)
+    signal effectsRequested(int clipId)
 
     // ===== ОБНОВИТЬ КЛИПЫ ИЗ C++ =====
     function updateClipsFromCpp() {
@@ -290,7 +291,7 @@ Rectangle {
                            }
 
             onEffectsRequested: id => {
-                                    console.log("✨ Effects for clip", id)
+                                    root.effectsRequested(id)
                                 }
         }
     }

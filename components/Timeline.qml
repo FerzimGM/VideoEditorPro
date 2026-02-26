@@ -22,6 +22,7 @@ Rectangle {
 
     signal timeChanged(real time)
     signal zoomChanged(int zoom)
+    signal effectsRequested(int clipId)
 
     onZoomLevelChanged: {
         pixelsPerSecond = zoomLevel / 10
@@ -219,6 +220,7 @@ Rectangle {
                                                                   newTime)
                                          }
                                      }
+                        onEffectsRequested: id => root.effectsRequested(id)
                     }
                 }
 

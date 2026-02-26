@@ -30,11 +30,24 @@ Rectangle {
     // ===== ВНУТРЕННИЕ =====
     property string currentClipUrl: ""
     property string currentFrameSource: ""
+    property bool _resyncing: false // guard против binding loop
 
     // ===== МЕТАДАННЫЕ =====
     property int videoWidth: 0
     property int videoHeight: 0
     property real videoFps: 0.0
+
+    // Кэш метаданных по дорожкам
+    QtObject {
+        id: track1Cache
+        property real clipStartTime: 0.0
+        property real clipTrimStart: 0.0
+    }
+    QtObject {
+        id: track2Cache
+        property real clipStartTime: 0.0
+        property real clipTrimStart: 0.0
+    }
 
     // Сигнал: обновить playhead
     signal timePositionChanged(real newTime)
@@ -65,12 +78,10 @@ Rectangle {
             currentFrameSource = ""
             return
         }
-        // Дорожка 1 приоритетнее для превью
         var fp = cppTimeline.getFramePathAt(currentTime, 1)
         if (!fp || fp === "")
             fp = cppTimeline.getFramePathAt(currentTime, 2)
         currentFrameSource = (fp && fp !== "") ? fp + "?t=" + Date.now() : ""
-
         var info = cppTimeline.getClipInfoAt(currentTime, 1)
         if (!info || !info.width)
             info = cppTimeline.getClipInfoAt(currentTime, 2)
@@ -82,16 +93,14 @@ Rectangle {
     }
 
     // ===== ХЕЛПЕРЫ =====
-    function getClipPathAt(t, track) {
+    function clipPathAt(t, track) {
         var p = cppTimeline.getActiveClipPath(t, track)
         return (p && p !== "") ? p : ""
     }
-    function getClipInfoAt(t, track) {
-        var info = cppTimeline.getClipInfoAt(t, track)
-        return (info && info.startTime !== undefined) ? info : null
+    function clipInfoAt(t, track) {
+        var i = cppTimeline.getClipInfoAt(t, track)
+        return (i && i.startTime !== undefined) ? i : null
     }
-
-    // Найти следующий клип на дорожке после fromTime (сканирует вперёд до конца)
     function findNextOnTrack(fromTime, track) {
         if (!cppTimeline)
             return null
@@ -99,17 +108,16 @@ Rectangle {
         var step = 0.25
         var t = fromTime + step
         while (t <= maxT) {
-            var p = getClipPathAt(t, track)
+            var p = clipPathAt(t, track)
             if (p !== "") {
-                var info = getClipInfoAt(t, track)
-                if (info && info.startTime > fromTime - 0.05) {
+                var info = clipInfoAt(t, track)
+                if (info && info.startTime > fromTime - 0.05)
                     return {
                         "path": p,
                         "startTime": info.startTime,
                         "trimStart": info.trimStart || 0.0,
                         "duration": info.duration || 0.0
                     }
-                }
                 t += (info && info.duration) ? info.duration : 1.0
             } else {
                 t += step
@@ -118,31 +126,39 @@ Rectangle {
         return null
     }
 
-    // ===== ЗАПУСК ДОРОЖКИ =====
-    // Запускает MediaPlayer для конкретной дорожки в позиции t
+    // ===== ЗАПУСК ОДНОЙ ДОРОЖКИ =====
     function startTrack(track, t) {
         var mp = (track === 1) ? mediaPlayer1 : mediaPlayer2
         var cache = (track === 1) ? track1Cache : track2Cache
 
-        var p = getClipPathAt(t, track)
+        var p = clipPathAt(t, track)
         if (p === "") {
-            // Нет клипа — останавливаем дорожку
             mp.stop()
             mp.source = ""
             return
         }
 
-        var info = getClipInfoAt(t, track)
-        cache.clipStartTime = info ? (info.startTime || 0.0) : 0.0
-        cache.clipTrimStart = info ? (info.trimStart || 0.0) : 0.0
+        var info = clipInfoAt(t, track)
+        var st = info ? (info.startTime || 0.0) : 0.0
+        var trim = info ? (info.trimStart || 0.0) : 0.0
+        var posMs = Math.max(0, (t - st + trim) * 1000)
 
-        var posMs = (t - cache.clipStartTime + cache.clipTrimStart) * 1000
+        // Не перезапускаем если уже играем тот же клип примерно в той же позиции
+        if (mp.source.toString() === p
+                && mp.playbackState === MediaPlayer.PlayingState && Math.abs(
+                    mp.position - posMs) < 1500) {
+            return
+        }
+
+        cache.clipStartTime = st
+        cache.clipTrimStart = trim
         mp.stop()
         mp.source = p
-        mp.position = Math.max(0, posMs)
+        mp.position = posMs
         mp.playbackRate = videoPlayer.playbackSpeed
         mp.play()
-        console.log("▶ Track", track, ":", p, "pos:", posMs.toFixed(0), "ms")
+        console.log("▶ Track", track, ":", p.split("/").pop(), "pos:",
+                    posMs.toFixed(0), "ms")
     }
 
     // ===== ВОСПРОИЗВЕДЕНИЕ =====
@@ -152,34 +168,29 @@ Rectangle {
             return
         }
 
-        // Останавливаем все таймеры ДО mediaPlayer.stop() — иначе stop()
-        // триггерит onPlaybackStateChanged → таймер убивает новое воспроизведение
+        // Останавливаем таймеры ПЕРЕД stop() чтобы избежать каскада
         nextClipTimer1.stop()
         nextClipTimer2.stop()
+        _resyncing = false // сбрасываем флаг
 
-        // Если playhead стоит в пустоте и нет клипов совсем → старт с 0
-        var p1 = getClipPathAt(currentTime, 1)
-        var p2 = getClipPathAt(currentTime, 2)
-        if (p1 === "" && p2 === "") {
-            var anyFirst1 = findNextOnTrack(-0.1, 1)
-            var anyFirst2 = findNextOnTrack(-0.1, 2)
-            if (!anyFirst1 && !anyFirst2) {
-                console.log("⚠️ Нет клипов на таймлайне")
+        var t = currentTime
+        // Если под playhead совсем нет клипов — ищем первый
+        if (clipPathAt(t, 1) === "" && clipPathAt(t, 2) === "") {
+            var n1 = findNextOnTrack(-0.1, 1)
+            var n2 = findNextOnTrack(-0.1, 2)
+            if (!n1 && !n2) {
+                console.log("⚠️ Нет клипов")
                 isPlaying = false
                 return
             }
-            // Прыгаем к первому клипу
-            var firstT = 999999
-            if (anyFirst1)
-                firstT = Math.min(firstT, anyFirst1.startTime)
-            if (anyFirst2)
-                firstT = Math.min(firstT, anyFirst2.startTime)
-            console.log("⏭ Нет клипа под playhead → прыгаем к", firstT)
+            var firstT = Math.min(n1 ? n1.startTime : 999,
+                                  n2 ? n2.startTime : 999)
             videoPlayer.timePositionChanged(firstT)
+            t = firstT
         }
 
-        startTrack(1, currentTime)
-        startTrack(2, currentTime)
+        startTrack(1, t)
+        startTrack(2, t)
     }
 
     function pausePlayback() {
@@ -190,27 +201,19 @@ Rectangle {
         updateScrubFrame()
     }
 
-    function stopAll() {
-        nextClipTimer1.stop()
-        nextClipTimer2.stop()
-        mediaPlayer1.stop()
-        mediaPlayer2.stop()
-    }
-
-    // ===== ПЕРЕХОД К СЛЕДУЮЩЕМУ КЛИПУ НА ДОРОЖКЕ =====
+    // ===== ПЕРЕХОД К СЛЕДУЮЩЕМУ КЛИПУ =====
     function tryNextOnTrack(track) {
         if (!cppTimeline || !videoPlayer.isPlaying)
             return
 
         var mp = (track === 1) ? mediaPlayer1 : mediaPlayer2
         var cache = (track === 1) ? track1Cache : track2Cache
-
-        var lookAt = videoPlayer.currentTime + 20
-        var p = getClipPathAt(lookAt, track)
+        var t = videoPlayer.currentTime + 0.08
+        var p = clipPathAt(t, track)
 
         if (p !== "") {
-            // Следующий клип сразу
-            var info = getClipInfoAt(lookAt, track)
+            // Следующий клип сразу после текущего
+            var info = clipInfoAt(t, track)
             cache.clipStartTime = info ? (info.startTime || 0.0) : 0.0
             cache.clipTrimStart = info ? (info.trimStart || 0.0) : 0.0
             mp.stop()
@@ -218,52 +221,46 @@ Rectangle {
             mp.position = Math.max(0, cache.clipTrimStart * 1000)
             mp.playbackRate = videoPlayer.playbackSpeed
             mp.play()
-            console.log("⏭ Track", track, "next clip:", p)
+            console.log("⏭ Track", track, "next:", p.split("/").pop())
         } else {
-            // Нет клипа сразу — ищем дальше на этой дорожке
+            // Нет клипа сразу — есть ли дальше?
             var next = findNextOnTrack(videoPlayer.currentTime, track)
-            if (next) {
-                console.log("⏸ Track", track, "gap → next clip at",
-                            next.startTime)
-                // Клип придёт позже, ждём — дорожка просто молчит
-                // (playhead двигает дорожка 1 через onPositionChanged)
-                mp.stop()
-                mp.source = ""
-            } else {
-                // На этой дорожке больше нет клипов
-                mp.stop()
-                mp.source = ""
-                console.log("⏹ Track", track, "конец")
+            mp.stop()
+            mp.source = ""
 
-                // Проверяем закончился ли ВЕСЬ таймлайн (обе дорожки пусты впереди)
-                if (track === 1) {
-                    var next2 = findNextOnTrack(videoPlayer.currentTime, 2)
-                    var mp2busy = mediaPlayer2.playbackState === MediaPlayer.PlayingState
-                    if (!next2 && !mp2busy) {
-                        console.log("⏹ Конец таймлайна — обе дорожки завершены")
-                        nextClipTimer1.stop()
-                        nextClipTimer2.stop()
-                        videoPlayer.isPlaying = false
-                        // Сброс playhead в начало
-                        Qt.callLater(function () {
-                            videoPlayer.timePositionChanged(0.0)
-                            videoPlayer.updateScrubFrame()
-                        })
-                    }
+            if (!next) {
+                // Эта дорожка закончилась — проверяем обе
+                var other = (track === 1) ? mediaPlayer2 : mediaPlayer1
+                var nextOther = findNextOnTrack(videoPlayer.currentTime,
+                                                track === 1 ? 2 : 1)
+                var otherBusy = other.playbackState === MediaPlayer.PlayingState
+
+                if (!nextOther && !otherBusy) {
+                    console.log("⏹ Конец таймлайна")
+                    nextClipTimer1.stop()
+                    nextClipTimer2.stop()
+                    videoPlayer.isPlaying = false
+                    Qt.callLater(function () {
+                        videoPlayer.timePositionChanged(0.0)
+                        videoPlayer.updateScrubFrame()
+                    })
                 }
+                // Иначе просто ждём — другая дорожка ещё играет
             }
+            // Если next есть — дорожка будет перезапущена через onPositionChanged
+            // когда playhead дойдёт до next.startTime
         }
     }
 
     // ===== РЕАКЦИИ =====
     onIsPlayingChanged: {
         if (isPlaying) {
+            _resyncing = false
             startPlayback()
         } else {
             pausePlayback()
         }
     }
-
     onPlaybackSpeedChanged: {
         mediaPlayer1.playbackRate = playbackSpeed
         mediaPlayer2.playbackRate = playbackSpeed
@@ -274,18 +271,34 @@ Rectangle {
             updateScrubFrame()
             return
         }
-        // Ресинхронизация при ручной перемотке — перезапускаем обе дорожки
-        var t1ok = false
-        var t2ok = false
-        var info1 = getClipInfoAt(currentTime, 1)
-        if (info1) {
-            var exp1 = (currentTime - info1.startTime + (info1.trimStart
-                                                         || 0)) * 1000
-            t1ok = Math.abs(exp1 - mediaPlayer1.position) < 1500
+        if (_resyncing)
+            return
+        // FIX BINDING LOOP: не входим повторно
+
+        // Запуск дорожки 2 если она остановлена, но клип под playhead появился
+        if (mediaPlayer2.playbackState !== MediaPlayer.PlayingState) {
+            var p2 = clipPathAt(currentTime, 2)
+            if (p2 !== "" && mediaPlayer2.source.toString() !== p2)
+                startTrack(2, currentTime)
         }
-        if (!t1ok) {
-            console.log("🔄 Ресинхронизация t=", currentTime)
+
+        // Ресинхронизация дорожки 1 — ТОЛЬКО если она должна играть
+        // и сильно отстала (>2 сек). НЕ resync если дорожка 1 в гэпе.
+        var info1 = clipInfoAt(currentTime, 1)
+        if (!info1)
+            return
+
+        // гэп на дорожке 1 — ресинхронизация не нужна
+        if (mediaPlayer1.playbackState !== MediaPlayer.PlayingState)
+            return
+
+        var exp1 = (currentTime - info1.startTime + (info1.trimStart
+                                                     || 0)) * 1000
+        if (Math.abs(exp1 - mediaPlayer1.position) > 2000) {
+            console.log("🔄 Ресинхронизация t=", currentTime.toFixed(2))
+            _resyncing = true
             startPlayback()
+            resyncClearTimer.restart()
         }
     }
 
@@ -302,19 +315,15 @@ Rectangle {
         }
     }
 
-    // Кэш метаданных клипов (замена property на QtObject)
-    QtObject {
-        id: track1Cache
-        property real clipStartTime: 0.0
-        property real clipTrimStart: 0.0
-    }
-    QtObject {
-        id: track2Cache
-        property real clipStartTime: 0.0
-        property real clipTrimStart: 0.0
+    // Сбрасываем флаг ресинхронизации через 300мс
+    Timer {
+        id: resyncClearTimer
+        interval: 300
+        repeat: false
+        onTriggered: videoPlayer._resyncing = false
     }
 
-    // ===== MEDIAPLAYER 1 — ДОРОЖКА 1 (ОСНОВНАЯ, ПОВЕРХ) =====
+    // ===== MEDIAPLAYER 1 — ДОРОЖКА 1 (основная, поверх) =====
     MediaPlayer {
         id: mediaPlayer1
         videoOutput: videoOutput1
@@ -322,36 +331,34 @@ Rectangle {
             id: audioOut1
             volume: videoPlayer.volume
         }
-
-        onErrorOccurred: function (err, str) {
-            console.log("❌ Track1 error:", str)
+        onErrorOccurred: function (e, s) {
+            console.log("❌ T1:", s)
         }
 
-        // Playhead двигается по дорожке 1 (мастер-тайминг)
         onPositionChanged: {
-            if (videoPlayer.isPlaying && mediaPlayer1.source !== ""
-                    && mediaPlayer1.playbackState === MediaPlayer.PlayingState) {
-                var t = (mediaPlayer1.position / 1000.0)
-                        + track1Cache.clipStartTime - track1Cache.clipTrimStart
-                videoPlayer.timePositionChanged(t)
+            if (!videoPlayer.isPlaying)
+                return
+            if (mediaPlayer1.source === "")
+                return
+            if (mediaPlayer1.playbackState !== MediaPlayer.PlayingState)
+                return
 
-                // Синхронизируем дорожку 2 если она сейчас не играет,
-                // но должна (клип на этой позиции появился)
-                if (mediaPlayer2.playbackState !== MediaPlayer.PlayingState) {
-                    var p2 = videoPlayer.getClipPathAt(t, 2)
-                    if (p2 !== "" && mediaPlayer2.source !== p2) {
-                        videoPlayer.startTrack(2, t)
-                    }
-                }
+            var t = mediaPlayer1.position / 1000.0 + track1Cache.clipStartTime
+                    - track1Cache.clipTrimStart
+            videoPlayer.timePositionChanged(t)
+
+            // Подхватываем дорожку 2 если она ещё не играет, но клип появился
+            if (mediaPlayer2.playbackState !== MediaPlayer.PlayingState) {
+                var p2 = videoPlayer.clipPathAt(t, 2)
+                if (p2 !== "" && mediaPlayer2.source.toString() !== p2)
+                    videoPlayer.startTrack(2, t)
             }
         }
 
         onPlaybackStateChanged: {
             if (mediaPlayer1.playbackState === MediaPlayer.StoppedState
-                    && videoPlayer.isPlaying) {
-                console.log("📼 Track1 завершён")
+                    && videoPlayer.isPlaying)
                 nextClipTimer1.restart()
-            }
         }
     }
 
@@ -361,13 +368,12 @@ Rectangle {
         repeat: false
         onTriggered: {
             if (mediaPlayer1.playbackState === MediaPlayer.StoppedState
-                    && videoPlayer.isPlaying) {
+                    && videoPlayer.isPlaying)
                 videoPlayer.tryNextOnTrack(1)
-            }
         }
     }
 
-    // ===== MEDIAPLAYER 2 — ДОРОЖКА 2 (ФОНОВАЯ, СНИЗУ) =====
+    // ===== MEDIAPLAYER 2 — ДОРОЖКА 2 (фоновая, снизу) =====
     MediaPlayer {
         id: mediaPlayer2
         videoOutput: videoOutput2
@@ -375,30 +381,31 @@ Rectangle {
             id: audioOut2
             volume: videoPlayer.volume
         }
-
-        onErrorOccurred: function (err, str) {
-            console.log("❌ Track2 error:", str)
+        onErrorOccurred: function (e, s) {
+            console.log("❌ T2:", s)
         }
 
-        // Дорожка 2 НЕ двигает playhead — только дорожка 1 мастер
-        // Но если дорожка 1 пустая, дорожка 2 становится временным мастером
+        // Дорожка 2 НЕ двигает playhead — только когда дорожка 1 пустая
         onPositionChanged: {
-            if (videoPlayer.isPlaying && mediaPlayer2.source !== ""
-                    && mediaPlayer2.playbackState === MediaPlayer.PlayingState
-                    && mediaPlayer1.playbackState !== MediaPlayer.PlayingState) {
-                // Дорожка 1 пустая — двигаем playhead по дорожке 2
-                var t = (mediaPlayer2.position / 1000.0)
-                        + track2Cache.clipStartTime - track2Cache.clipTrimStart
-                videoPlayer.timePositionChanged(t)
-            }
+            if (!videoPlayer.isPlaying)
+                return
+            if (mediaPlayer2.source === "")
+                return
+            if (mediaPlayer2.playbackState !== MediaPlayer.PlayingState)
+                return
+            if (mediaPlayer1.playbackState === MediaPlayer.PlayingState)
+                return
+
+            // дорожка 1 — мастер
+            var t = mediaPlayer2.position / 1000.0 + track2Cache.clipStartTime
+                    - track2Cache.clipTrimStart
+            videoPlayer.timePositionChanged(t)
         }
 
         onPlaybackStateChanged: {
             if (mediaPlayer2.playbackState === MediaPlayer.StoppedState
-                    && videoPlayer.isPlaying) {
-                console.log("📼 Track2 завершён")
+                    && videoPlayer.isPlaying)
                 nextClipTimer2.restart()
-            }
         }
     }
 
@@ -408,9 +415,8 @@ Rectangle {
         repeat: false
         onTriggered: {
             if (mediaPlayer2.playbackState === MediaPlayer.StoppedState
-                    && videoPlayer.isPlaying) {
+                    && videoPlayer.isPlaying)
                 videoPlayer.tryNextOnTrack(2)
-            }
         }
     }
 
@@ -450,12 +456,7 @@ Rectangle {
             radius: Theme.borderRadius
             clip: true
 
-            // ===== ВИДЕОВЫХОДЫ =====
-            // Два слоя: дорожка 2 снизу (z:1), дорожка 1 сверху (z:2)
-            // Когда дорожка 1 пустая — видна дорожка 2
-            // Когда обе активны — дорожка 1 перекрывает дорожку 2
-
-            // Дорожка 2 — фоновый слой
+            // Дорожка 2 — фон (z:1)
             VideoOutput {
                 id: videoOutput2
                 anchors.fill: parent
@@ -463,8 +464,7 @@ Rectangle {
                 visible: videoPlayer.isPlaying && mediaPlayer2.source !== ""
                          && mediaPlayer2.playbackState === MediaPlayer.PlayingState
             }
-
-            // Дорожка 1 — основной слой (поверх дорожки 2)
+            // Дорожка 1 — поверх (z:2) + шейдер эффектов
             VideoOutput {
                 id: videoOutput1
                 anchors.fill: parent
@@ -491,8 +491,7 @@ c.rgb *= brightness; c.rgb = (c.rgb - 0.5) * contrast + 0.5;
 float g = dot(c.rgb, vec3(0.299,0.587,0.114));
 c.rgb = mix(vec3(g), c.rgb, saturation);
 if (grayscale) c.rgb = vec3(g);
-gl_FragColor = vec4(clamp(c.rgb,0.0,1.0),1.0);
-}"
+gl_FragColor = vec4(clamp(c.rgb,0.0,1.0),1.0); }"
                 }
             }
 
@@ -539,6 +538,7 @@ gl_FragColor = vec4(clamp(c.rgb,0.0,1.0),1.0);
                 }
             }
 
+            // Плейсхолдер
             ColumnLayout {
                 anchors.centerIn: parent
                 spacing: Theme.spacingLarge

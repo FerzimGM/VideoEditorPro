@@ -139,6 +139,11 @@ QtObject {
         ClipManager {
             id: clipManager
         }
+        ClipEffectsDialog {
+            id: clipEffectsDialog
+            parentWindow: root
+             visible: false
+        }
 
         QtObject {
             id: playbackManager
@@ -170,8 +175,8 @@ QtObject {
             // Сбрасываем выделение ТОЛЬКО при удалении клипа,
             // чтобы при перемещении выделение не слетало
             function onClipRemoved(index) {
-                if (selectionManager.selectedClipId === index ||
-                    selectionManager.selectedClipId >= cppTimeline.clipCount) {
+                if (selectionManager.selectedClipId === index
+                        || selectionManager.selectedClipId >= cppTimeline.clipCount) {
                     selectionManager.clearSelection()
                 }
             }
@@ -559,6 +564,10 @@ QtObject {
                                                 id >= 0 ? "✅ Выделен клип "
                                                           + id : "❌ Выделение снято")
                                         }
+                        onEffectsRequested: id => {
+                                                clipEffectsDialog.openForClip(
+                                                    id)
+                                            }
                     }
                 }
             }
