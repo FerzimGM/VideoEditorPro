@@ -142,7 +142,7 @@ QtObject {
         ClipEffectsDialog {
             id: clipEffectsDialog
             parentWindow: root
-             visible: false
+            visible: false
         }
 
         QtObject {
@@ -559,7 +559,8 @@ QtObject {
 
                         // *** Получаем выбор клипа снизу вверх: VideoClip → Track → Timeline → main ***
                         onClipSelected: id => {
-                                            selectionManager.selectedClipId = id
+                                            selectionManager.selectedClipId
+                                            = (selectionManager.selectedClipId === id) ? -1 : id
                                             console.log(
                                                 id >= 0 ? "✅ Выделен клип "
                                                           + id : "❌ Выделение снято")

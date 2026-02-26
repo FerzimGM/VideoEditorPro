@@ -203,6 +203,7 @@ debug\qrc_qml.cpp: ..\..\qml.qrc \
 		..\..\components\ClipManager.qml \
 		..\..\components\Track.qml \
 		..\..\components\Timeline.qml \
+		..\..\components\ClipEffectsDialog.qml \
 		..\..\components\AudioClip.qml \
 		..\..\components\TimeRuler.qml \
 		..\..\components\TopMenuBar.qml \
@@ -221,6 +222,7 @@ debug\qrc_qml.cpp: ..\..\qml.qrc \
 		..\..\components\ClipManager.qml \
 		..\..\components\Track.qml \
 		..\..\components\Timeline.qml \
+		..\..\components\ClipEffectsDialog.qml \
 		..\..\components\AudioClip.qml \
 		..\..\components\TimeRuler.qml \
 		..\..\components\TopMenuBar.qml \
@@ -239,6 +241,7 @@ debug\qrc_qml.cpp: ..\..\qml.qrc \
 		..\..\components\ClipManager.qml \
 		..\..\components\Track.qml \
 		..\..\components\Timeline.qml \
+		..\..\components\ClipEffectsDialog.qml \
 		..\..\components\AudioClip.qml \
 		..\..\components\TimeRuler.qml \
 		..\..\components\TopMenuBar.qml \
