@@ -192,6 +192,8 @@ Item {
                 }
             }
 
+            // (рамка выделения перенесена на уровень root Item — см. ниже)
+
             // ── ЛЕВЫЙ КЛИК → выделение клипа ──
             // ПОЧЕМУ ОТДЕЛЬНЫЙ TapHandler, а не внутри DragHandler:
             // DragHandler.onActiveChanged срабатывает ТОЛЬКО после реального
@@ -208,11 +210,11 @@ Item {
                 }
             }
 
-            // ── ПРАВЫЙ КЛИК → контекстное меню ──
+            // ── ПРАВЫЙ КЛИК → только меню, БЕЗ выделения ──
             TapHandler {
                 acceptedButtons: Qt.RightButton
                 onTapped: function (eventPoint) {
-                    root.clicked()
+                    // НЕ вызываем root.clicked() — правый клик не должен выделять
                     videoMenu.popup(eventPoint.globalPosition)
                 }
             }
@@ -356,11 +358,11 @@ Item {
                 }
             }
 
-            // ── ПРАВЫЙ КЛИК → контекстное меню аудио ──
+            // ── ПРАВЫЙ КЛИК → только меню, БЕЗ выделения ──
             TapHandler {
                 acceptedButtons: Qt.RightButton
                 onTapped: function (eventPoint) {
-                    root.clicked()
+                    // НЕ вызываем root.clicked() — правый клик не должен выделять
                     audioMenu.popup(eventPoint.globalPosition)
                 }
             }
@@ -420,24 +422,32 @@ Item {
     }
 
     // =========================================================
-    // ── Рамка выделения (уровень root — поверх video И audio) ──
+    // РАМКА ВЫДЕЛЕНИЯ — root уровень (поверх video И audio полос)
+    // =========================================================
+    // КРИТИЧНО: эта рамка должна быть ЗДЕСЬ — прямым потомком root Item,
+    // а НЕ внутри videoStrip. Причина: anchors.fill: parent у потомка Rectangle
+    // заполняет область ВНУТРИ border родителя. Если border рамки и border
+    // videoStrip одного цвета (rubyPrimary) — они сливаются и рамка невидима.
+    // На уровне root: Rectangle покрывает ВСЕ дочерние элементы, z:50 — поверх всего.
     Rectangle {
+        id: selectionBorder
         anchors.fill: parent
         radius: Theme.borderRadius
         color: "transparent"
         border.color: Theme.rubyPrimary
         border.width: root.selected ? 3 : 0
-        z: 100
-        visible: root.selected
-        // Внутренняя рубиновая подсветка
+        z: 50
+        // Лёгкая рубиновая подсветка внутри рамки
         Rectangle {
             anchors.fill: parent
             anchors.margins: 3
             radius: parent.radius - 3
-            color: Qt.rgba(0.87, 0.13, 0.23, 0.10)
+            color: Qt.rgba(0.87, 0.13, 0.23, 0.08)
+            visible: root.selected
         }
     }
 
+    // =========================================================
     // КОНТЕКСТНОЕ МЕНЮ ВИДЕО
     // =========================================================
     Menu {

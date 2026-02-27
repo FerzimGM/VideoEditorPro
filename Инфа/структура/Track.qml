@@ -59,7 +59,7 @@ Rectangle {
         keys: [] // пустой = принимать любые drag-данные
         z: 5
 
-        onEntered: function (drag) {
+        onEntered: {
             // Подсветка только для файлов, не для клипов
             if (!drag.keys.includes("clip/move")) {
                 dropHighlight.visible = true

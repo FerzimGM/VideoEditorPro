@@ -36,11 +36,8 @@ Rectangle {
         }
         function onClipsChanged() {
             console.log("📋 Clips changed")
-            // ВАЖНО: НЕ делаем root.selectedClipId = -1 напрямую!
-            // Прямое JS-присваивание в QML разрушает binding навсегда.
-            // Binding: selectedClipId: selectionManager.selectedClipId (в main.qml)
-            // После прямого присваивания selectionManager больше не обновляет Timeline.
-            // Решение: только сигнал → main.qml сбросит selectionManager → binding сработает.
+            // Сбрасываем выделение чтобы не было "призрачного" выделенного клипа
+            root.selectedClipId = -1
             root.clipSelected(-1)
         }
     }

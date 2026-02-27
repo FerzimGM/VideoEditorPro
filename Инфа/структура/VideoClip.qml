@@ -30,8 +30,6 @@ Item {
     property bool _dragging: false
 
     // ===== DRAG API =====
-    // НЕ используем биндинг Drag.active: ...
-    // Управляем ВРУЧНУЮ: drop() ОБЯЗАТЕЛЬНО до Drag.active = false
     Drag.keys: ["clip/move"]
     Drag.mimeData: {
         "clip/id": String(root.clipId)
@@ -42,12 +40,11 @@ Item {
 
     // ===== COLUMN: ВИДЕО + АУДИО =====
     Column {
+        id: stripsColumn
         anchors.fill: parent
         spacing: 2
 
-        // ─────────────────────────────────────────────
-        // ВИДЕО ПОЛОСА (синяя)
-        // ─────────────────────────────────────────────
+        // ─── ВИДЕО ПОЛОСА (синяя) ─────────────────────────────────
         Rectangle {
             id: videoStrip
             width: parent.width
@@ -64,8 +61,8 @@ Item {
                     color: root.selected ? "#1E88E5" : "#1565C0"
                 }
             }
-            border.color: root.selected ? Theme.rubyPrimary : "#0D47A1"
-            border.width: root.selected ? 2 : 1
+            border.color: "#0D47A1"
+            border.width: 1
 
             // Метка V
             Rectangle {
@@ -192,85 +189,6 @@ Item {
                 }
             }
 
-            // ── ЛЕВЫЙ КЛИК → выделение клипа ──
-            // ПОЧЕМУ ОТДЕЛЬНЫЙ TapHandler, а не внутри DragHandler:
-            // DragHandler.onActiveChanged срабатывает ТОЛЬКО после реального
-            // перетаскивания (~5px threshold). Простой клик → DragHandler
-            // не активируется → clicked никогда не эмитируется → клип не выделяется.
-            // TapHandler(Left) = клик/выделение, DragHandler(Left) = перетаскивание.
-            // Qt 6 корректно разделяет их: тап без движения → TapHandler,
-            // нажатие + движение → DragHandler перехватывает жест.
-            TapHandler {
-                id: videoTapLeft
-                acceptedButtons: Qt.LeftButton
-                onTapped: function (eventPoint) {
-                    root.clicked()
-                }
-            }
-
-            // ── ПРАВЫЙ КЛИК → контекстное меню ──
-            TapHandler {
-                acceptedButtons: Qt.RightButton
-                onTapped: function (eventPoint) {
-                    root.clicked()
-                    videoMenu.popup(eventPoint.globalPosition)
-                }
-            }
-
-            // ── ПЕРЕТАСКИВАНИЕ — только левая кнопка ──
-            DragHandler {
-                id: videoDragHandler
-                target: null
-                acceptedButtons: Qt.LeftButton
-                grabPermissions: PointerHandler.CanTakeOverFromAnything
-
-                onActiveChanged: {
-                    if (active) {
-                        root._startX = root.x
-                        root._dragging = true
-                        // выделяем при начале drag тоже
-                        root.clicked()
-
-                        var lp = videoStrip.mapToItem(root,
-                                                      centroid.position.x,
-                                                      centroid.position.y)
-                        root.Drag.hotSpot.x = lp.x
-                        root.Drag.hotSpot.y = lp.y
-
-                        // Запускаем drag-сессию ВРУЧНУЮ (не через биндинг!)
-                        root.Drag.active = true
-                    } else {
-                        root._dragging = false
-
-                        // КРИТИЧНО: drop() ДО Drag.active = false!
-                        // Если поменять местами — Qt закроет сессию до drop(),
-                        // DropArea на другой дорожке не получит событие.
-                        var result = root.Drag.drop()
-                        root.Drag.active = false
-
-                        if (result === Qt.IgnoreAction) {
-                            // Не попали в DropArea другой дорожки → двигаем внутри своей
-                            root.moved(root.x)
-                        }
-                        // Qt.MoveAction → Track.qml clipMoveDropArea вызвал cppTimeline.moveClip
-                    }
-                }
-
-                onTranslationChanged: {
-                    if (active) {
-                        root.x = Math.max(0, root._startX + translation.x)
-
-                        // mapToGlobal + mapFromGlobal — надёжный способ для Qt 6,
-                        // особенно внутри Flickable с contentX смещением
-                        var gp = videoStrip.mapToGlobal(centroid.position.x,
-                                                        centroid.position.y)
-                        var lp = root.mapFromGlobal(gp.x, gp.y)
-                        root.Drag.hotSpot.x = lp.x
-                        root.Drag.hotSpot.y = lp.y
-                    }
-                }
-            }
-
             Behavior on color {
                 ColorAnimation {
                     duration: 120
@@ -278,9 +196,7 @@ Item {
             }
         }
 
-        // ─────────────────────────────────────────────
-        // АУДИО ПОЛОСА (зелёная)
-        // ─────────────────────────────────────────────
+        // ─── АУДИО ПОЛОСА (зелёная) ───────────────────────────────
         Rectangle {
             id: audioStrip
             width: parent.width
@@ -297,9 +213,8 @@ Item {
                     color: root.isMuted ? "#444" : (root.selected ? "#43A047" : "#2E7D32")
                 }
             }
-            border.color: root.selected ? Theme.rubyPrimary : Qt.darker(color,
-                                                                        1.4)
-            border.width: root.selected ? 2 : 1
+            border.color: Qt.darker(color, 1.4)
+            border.width: 1
 
             Rectangle {
                 id: aLabel
@@ -321,7 +236,6 @@ Item {
                 }
             }
 
-            // Псевдо-осциллограмма
             Row {
                 anchors {
                     left: aLabel.right
@@ -347,70 +261,6 @@ Item {
                 }
             }
 
-            // ── ЛЕВЫЙ КЛИК → выделение ──
-            TapHandler {
-                id: audioTapLeft
-                acceptedButtons: Qt.LeftButton
-                onTapped: function (eventPoint) {
-                    root.clicked()
-                }
-            }
-
-            // ── ПРАВЫЙ КЛИК → контекстное меню аудио ──
-            TapHandler {
-                acceptedButtons: Qt.RightButton
-                onTapped: function (eventPoint) {
-                    root.clicked()
-                    audioMenu.popup(eventPoint.globalPosition)
-                }
-            }
-
-            // ── ПЕРЕТАСКИВАНИЕ аудио полосы ──
-            DragHandler {
-                id: audioDragHandler
-                target: null
-                acceptedButtons: Qt.LeftButton
-                grabPermissions: PointerHandler.CanTakeOverFromAnything
-
-                onActiveChanged: {
-                    if (active) {
-                        root._startX = root.x
-                        root._dragging = true
-                        root.clicked()
-
-                        var lp = audioStrip.mapToItem(root,
-                                                      centroid.position.x,
-                                                      centroid.position.y)
-                        root.Drag.hotSpot.x = lp.x
-                        root.Drag.hotSpot.y = lp.y
-
-                        root.Drag.active = true
-                    } else {
-                        root._dragging = false
-
-                        // КРИТИЧНО: drop() ДО Drag.active = false!
-                        var result = root.Drag.drop()
-                        root.Drag.active = false
-
-                        if (result === Qt.IgnoreAction) {
-                            root.moved(root.x)
-                        }
-                    }
-                }
-
-                onTranslationChanged: {
-                    if (active) {
-                        root.x = Math.max(0, root._startX + translation.x)
-
-                        var gp = audioStrip.mapToGlobal(centroid.position.x,
-                                                        centroid.position.y)
-                        var lp = root.mapFromGlobal(gp.x, gp.y)
-                        root.Drag.hotSpot.x = lp.x
-                        root.Drag.hotSpot.y = lp.y
-                    }
-                }
-            }
-
             Behavior on color {
                 ColorAnimation {
                     duration: 120
@@ -420,24 +270,104 @@ Item {
     }
 
     // =========================================================
-    // ── Рамка выделения (уровень root — поверх video И audio) ──
+    // РАМКА ВЫДЕЛЕНИЯ — root уровень, поверх ОБЕИХ полос
+    // =========================================================
+    // ВАЖНО: НЕ внутри videoStrip — там её border сливается с
+    // border родителя (оба одного цвета). Здесь z:50 → поверх всего.
     Rectangle {
+        id: selectionBorder
         anchors.fill: parent
         radius: Theme.borderRadius
         color: "transparent"
         border.color: Theme.rubyPrimary
         border.width: root.selected ? 3 : 0
-        z: 100
+        z: 50
         visible: root.selected
-        // Внутренняя рубиновая подсветка
+        // Лёгкая рубиновая подсветка внутри
         Rectangle {
             anchors.fill: parent
             anchors.margins: 3
             radius: parent.radius - 3
-            color: Qt.rgba(0.87, 0.13, 0.23, 0.10)
+            color: Qt.rgba(0.87, 0.13, 0.23, 0.08)
         }
     }
 
+    // =========================================================
+    // ОБРАБОТКА КЛИКОВ — root уровень (MouseArea)
+    // =========================================================
+    // MouseArea на root надёжнее вложенных TapHandler в Qt 6:
+    // — Левый клик: выделяет клип
+    // — Правый клик: показывает контекстное меню
+    // — Drag: при движении mouse.accepted=false → DragHandler получает событие
+    MouseArea {
+        id: rootMouseArea
+        anchors.fill: parent
+        // z ниже чем у resize handle (z:10), чтобы handles работали
+        z: 1
+        acceptedButtons: Qt.LeftButton | Qt.RightButton
+        // Пропускаем drag-события дальше к DragHandler
+        propagateComposedEvents: true
+
+        onClicked: function (mouse) {
+            if (mouse.button === Qt.RightButton) {
+                root.clicked()
+                if (mouse.y <= root.videoH) {
+                    videoMenu.popup()
+                } else {
+                    audioMenu.popup()
+                }
+            } else if (mouse.button === Qt.LeftButton) {
+                console.log("🖱️ VideoClip clicked, id:", root.clipId,
+                            "selected:", root.selected)
+                root.clicked()
+            }
+        }
+
+        onPressed: function (mouse) {
+            // Запоминаем позицию — DragHandler сам возьмёт управление при движении
+            if (mouse.button === Qt.LeftButton) {
+                root._startX = root.x
+            }
+            // НЕ делаем mouse.accepted = false !
+            // Если accepted=false → onClicked никогда не вызовется (Qt поведение)
+        }
+    }
+
+    // ── DragHandler ───────────────────────────────────────────
+    DragHandler {
+        id: clipDragHandler
+        target: null
+        acceptedButtons: Qt.LeftButton
+        grabPermissions: PointerHandler.CanTakeOverFromAnything
+
+        onActiveChanged: {
+            if (active) {
+                root._startX = root.x
+                root._dragging = true
+                root.clicked()
+                root.Drag.hotSpot.x = centroid.position.x
+                root.Drag.hotSpot.y = centroid.position.y
+                root.Drag.active = true
+            } else {
+                root._dragging = false
+                var result = root.Drag.drop()
+                root.Drag.active = false
+                if (result === Qt.IgnoreAction) {
+                    root.moved(root.x)
+                }
+            }
+        }
+
+        onTranslationChanged: {
+            if (active) {
+                root.x = Math.max(0, root._startX + translation.x)
+                root.Drag.hotSpot.x = centroid.position.x
+                root.Drag.hotSpot.y = centroid.position.y
+            }
+        }
+    }
+
+    // =========================================================
     // КОНТЕКСТНОЕ МЕНЮ ВИДЕО
     // =========================================================
     Menu {
