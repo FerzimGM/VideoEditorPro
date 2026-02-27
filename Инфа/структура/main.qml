@@ -482,10 +482,15 @@ QtObject {
                                                            cppTimeline.currentTime = time
                                                        }
                                                    }
-                            // VideoPlayer не может писать isPlaying=false напрямую
-                            // (сломает QML binding). Вместо этого — сигнал.
+                            // Конец таймлайна — VideoPlayer не может напрямую
+                            // ставить isPlaying=false (сломает QML binding).
+                            // Он эмитирует playbackStopped() → мы сбрасываем через manager.
                             onPlaybackStopped: {
                                 playbackManager.isPlaying = false
+                                // Обновляем scrub frame после остановки
+                                Qt.callLater(function () {
+                                    cppTimeline.currentTime = playbackManager.currentTime
+                                })
                             }
                         }
                     }

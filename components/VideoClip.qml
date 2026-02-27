@@ -210,14 +210,7 @@ Item {
                 }
             }
 
-            // ── ПРАВЫЙ КЛИК → только меню, БЕЗ выделения ──
-            TapHandler {
-                acceptedButtons: Qt.RightButton
-                onTapped: function (eventPoint) {
-                    // НЕ вызываем root.clicked() — правый клик не должен выделять
-                    videoMenu.popup(eventPoint.globalPosition)
-                }
-            }
+            // Правый клик обрабатывается rootRightClick на уровне root Item
 
             // ── ПЕРЕТАСКИВАНИЕ — только левая кнопка ──
             DragHandler {
@@ -358,14 +351,7 @@ Item {
                 }
             }
 
-            // ── ПРАВЫЙ КЛИК → только меню, БЕЗ выделения ──
-            TapHandler {
-                acceptedButtons: Qt.RightButton
-                onTapped: function (eventPoint) {
-                    // НЕ вызываем root.clicked() — правый клик не должен выделять
-                    audioMenu.popup(eventPoint.globalPosition)
-                }
-            }
+            // Правый клик обрабатывается rootRightClick на уровне root Item
 
             // ── ПЕРЕТАСКИВАНИЕ аудио полосы ──
             DragHandler {
@@ -422,6 +408,27 @@ Item {
     }
 
     // =========================================================
+    // ПРАВЫЙ КЛИК — root уровень, вне конкуренции с DragHandler
+    // =========================================================
+    // ПОЧЕМУ ЗДЕСЬ:
+    // MouseArea внутри videoStrip конкурирует с DragHandler(CanTakeOverFromAnything).
+    // DragHandler в Qt6 получает grab раньше и блокирует onClicked MouseArea.
+    // На root уровне Item — никаких DragHandler-ов, клик гарантированно доходит.
+    // mouse.y определяет: верхняя половина → видео меню, нижняя → аудио меню.
+    MouseArea {
+        id: rootRightClick
+        anchors.fill: parent
+        acceptedButtons: Qt.RightButton
+        z: 100 // Выше Column (z:0) и selectionBorder (z:50)
+        onClicked: function (mouse) {
+            if (mouse.y < root.videoH + 1)
+                videoMenu.popup()
+            else
+                audioMenu.popup()
+        }
+    }
+
+    // =========================================================
     // РАМКА ВЫДЕЛЕНИЯ — root уровень (поверх video И audio полос)
     // =========================================================
     // КРИТИЧНО: эта рамка должна быть ЗДЕСЬ — прямым потомком root Item,
@@ -437,6 +444,7 @@ Item {
         border.color: Theme.rubyPrimary
         border.width: root.selected ? 3 : 0
         z: 50
+        enabled: false // не блокируем клики под собой!
         // Лёгкая рубиновая подсветка внутри рамки
         Rectangle {
             anchors.fill: parent
@@ -458,8 +466,26 @@ Item {
             border.color: Theme.rubyPrimary
             border.width: 1
         }
+
+        // ── Название клипа (не кликабельный заголовок) ──
         MenuItem {
-            text: "✂  Разрезать"
+            enabled: false
+            contentItem: Text {
+                text: "📹  " + root.clipName
+                color: Theme.textSecondary
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontSizeSmall
+                font.bold: true
+                elide: Text.ElideRight
+            }
+            background: Rectangle {
+                color: "transparent"
+            }
+        }
+        MenuSeparator {}
+
+        MenuItem {
+            text: "✂  Разрезать по playhead"
             onTriggered: root.splitRequested(root.clipId)
             contentItem: Text {
                 text: parent.text
@@ -473,7 +499,7 @@ Item {
             }
         }
         MenuItem {
-            text: "✨  Эффекты..."
+            text: "✨  Эффекты клипа..."
             onTriggered: root.effectsRequested(root.clipId)
             contentItem: Text {
                 text: parent.text
@@ -488,7 +514,7 @@ Item {
         }
         MenuSeparator {}
         MenuItem {
-            text: "🗑  Удалить"
+            text: "🗑  Удалить клип"
             onTriggered: root.deleteRequested(root.clipId)
             contentItem: Text {
                 text: parent.text
@@ -515,12 +541,58 @@ Item {
             border.color: "#43A047"
             border.width: 1
         }
+
+        // ── Название клипа ──
+        MenuItem {
+            enabled: false
+            contentItem: Text {
+                text: "🎵  " + root.clipName
+                color: Theme.textSecondary
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontSizeSmall
+                font.bold: true
+                elide: Text.ElideRight
+            }
+            background: Rectangle {
+                color: "transparent"
+            }
+        }
+        MenuSeparator {}
+
         MenuItem {
             text: root.isMuted ? "🔊  Включить звук" : "🔇  Отключить звук"
             onTriggered: {
                 root.isMuted = !root.isMuted
                 root.muteToggled(root.clipId, root.isMuted)
             }
+            contentItem: Text {
+                text: parent.text
+                color: Theme.textPrimary
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontSize
+            }
+            background: Rectangle {
+                color: parent.hovered ? Theme.buttonHover : "transparent"
+                radius: Theme.borderRadius
+            }
+        }
+        MenuItem {
+            text: "✂  Разрезать по playhead"
+            onTriggered: root.splitRequested(root.clipId)
+            contentItem: Text {
+                text: parent.text
+                color: Theme.textPrimary
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontSize
+            }
+            background: Rectangle {
+                color: parent.hovered ? Theme.buttonHover : "transparent"
+                radius: Theme.borderRadius
+            }
+        }
+        MenuItem {
+            text: "✨  Эффекты клипа..."
+            onTriggered: root.effectsRequested(root.clipId)
             contentItem: Text {
                 text: parent.text
                 color: Theme.textPrimary

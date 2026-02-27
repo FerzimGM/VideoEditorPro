@@ -59,7 +59,7 @@ Rectangle {
         keys: [] // пустой = принимать любые drag-данные
         z: 5
 
-        onEntered: {
+        onEntered: function (drag) {
             // Подсветка только для файлов, не для клипов
             if (!drag.keys.includes("clip/move")) {
                 dropHighlight.visible = true
@@ -195,6 +195,9 @@ Rectangle {
 
         delegate: VideoClip {
             id: clipItem
+            // z:10 — ВЫШЕ DropArea (fileDropArea z:5, clipMoveDropArea z:6)
+            // Без этого правый клик перехватывается DropArea → меню не открывается
+            z: 10
 
             x: modelData.startTime * root.pixelsPerSecond
             y: (root.height - height) / 2
@@ -281,8 +284,9 @@ Rectangle {
                                   var splitTime = cppTimeline ? cppTimeline.currentTime : 0
                                   console.log("✂ Split clip", id, "at",
                                               splitTime)
-                                  cppTimeline.splitClipAt(splitTime,
-                                                          root.trackNumber)
+                                  // splitClip(index, time) — точный разрез по id клипа
+                                  if (cppTimeline)
+                                  cppTimeline.splitClip(id, splitTime)
                               }
 
             onMuteToggled: (id, muted) => {

@@ -195,7 +195,9 @@ Rectangle {
 
         delegate: VideoClip {
             id: clipItem
+            z: 10 // Выше DropArea (fileDropArea z:5, clipMoveDropArea z:6)
 
+            // Без z:10 DropArea перехватывает ПКМ — контекстное меню не открывается
             x: modelData.startTime * root.pixelsPerSecond
             y: (root.height - height) / 2
             width: modelData.duration * root.pixelsPerSecond
@@ -281,8 +283,9 @@ Rectangle {
                                   var splitTime = cppTimeline ? cppTimeline.currentTime : 0
                                   console.log("✂ Split clip", id, "at",
                                               splitTime)
-                                  cppTimeline.splitClipAt(splitTime,
-                                                          root.trackNumber)
+                                  // splitClip(index, time) — точный разрез по id клипа
+                                  if (cppTimeline)
+                                  cppTimeline.splitClip(id, splitTime)
                               }
 
             onMuteToggled: (id, muted) => {

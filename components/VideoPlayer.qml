@@ -51,6 +51,10 @@ Rectangle {
 
     // Сигнал: обновить playhead
     signal timePositionChanged(real newTime)
+    // VideoPlayer НИКОГДА не пишет isPlaying = false напрямую!
+    // isPlaying: playbackManager.isPlaying — QML binding в main.qml.
+    // Прямое присваивание рвёт binding → кнопка "играет", полоска стоит.
+    signal playbackStopped
 
     // ===== ЭФФЕКТЫ API =====
     function applyBrightness(v) {
@@ -164,11 +168,12 @@ Rectangle {
     // ===== ВОСПРОИЗВЕДЕНИЕ =====
     function startPlayback() {
         if (!cppTimeline) {
-            isPlaying = false
+            videoPlayer.playbackStopped()
             return
         }
 
         // Останавливаем таймеры ПЕРЕД stop() чтобы избежать каскада
+        gapClockTimer.stop()
         nextClipTimer1.stop()
         nextClipTimer2.stop()
 
@@ -182,7 +187,7 @@ Rectangle {
             var n2 = findNextOnTrack(-0.1, 2)
             if (!n1 && !n2) {
                 console.log("⚠️ Нет клипов")
-                isPlaying = false
+                videoPlayer.playbackStopped()
                 return
             }
             var firstT = Math.min(n1 ? n1.startTime : 999,
@@ -196,6 +201,7 @@ Rectangle {
     }
 
     function pausePlayback() {
+        gapClockTimer.stop()
         nextClipTimer1.stop()
         nextClipTimer2.stop()
         mediaPlayer1.pause()
@@ -272,8 +278,8 @@ Rectangle {
                         console.log("⏹ Конец таймлайна")
                         nextClipTimer1.stop()
                         nextClipTimer2.stop()
-                        videoPlayer.isPlaying = false
                         Qt.callLater(function () {
+                            videoPlayer.playbackStopped()
                             videoPlayer.timePositionChanged(0.0)
                             videoPlayer.updateScrubFrame()
                         })
@@ -370,8 +376,56 @@ Rectangle {
     Connections {
         target: cppTimeline
         function onClipsChanged() {
-            if (!videoPlayer.isPlaying)
-                videoPlayer.updateScrubFrame()
+            if (!videoPlayer.isPlaying) {
+                // При паузе — обновляем scrub frame по новым данным
+                Qt.callLater(videoPlayer.updateScrubFrame)
+                return
+            }
+
+            // При воспроизведении: клип мог быть УДАЛЁН или ОБРЕЗАН.
+            // ВАЖНО: при обрезке путь к файлу НЕ меняется — clipPathAt вернёт тот же path!
+            // Поэтому проверяем clipInfoAt: если info == null → клипа нет.
+            // Дополнительно: если info есть, но текущая позиция плеера вышла
+            // за пределы нового endTime клипа → тоже останавливаем.
+            var t = videoPlayer.currentTime
+
+            if (mediaPlayer1.playbackState !== MediaPlayer.StoppedState) {
+                var info1 = videoPlayer.clipInfoAt(t, 1)
+                if (!info1) {
+                    // Клип удалён или нет клипа под playhead
+                    mediaPlayer1.stop()
+                    mediaPlayer1.source = ""
+                } else {
+                    // Клип есть — проверяем что позиция плеера в допустимом диапазоне
+                    var clipEnd1 = (info1.startTime + info1.duration) * 1000
+                    if (mediaPlayer1.position > clipEnd1 + 200) {
+                        mediaPlayer1.stop()
+                        mediaPlayer1.source = ""
+                    }
+                }
+            }
+
+            if (mediaPlayer2.playbackState !== MediaPlayer.StoppedState) {
+                var info2 = videoPlayer.clipInfoAt(t, 2)
+                if (!info2) {
+                    mediaPlayer2.stop()
+                    mediaPlayer2.source = ""
+                } else {
+                    var clipEnd2 = (info2.startTime + info2.duration) * 1000
+                    if (mediaPlayer2.position > clipEnd2 + 200) {
+                        mediaPlayer2.stop()
+                        mediaPlayer2.source = ""
+                    }
+                }
+            }
+
+            // Перезапускаем с текущей позиции
+            videoPlayer._resyncing = true
+            Qt.callLater(function () {
+                if (videoPlayer.isPlaying)
+                    videoPlayer.startPlayback()
+            })
+            resyncClearTimer.restart()
         }
     }
 
@@ -418,21 +472,58 @@ Rectangle {
                 }
             }
 
-            // Если ОБА плеера стоят и playhead не движется — ищем следующий клип
+            // Если ОБА плеера стоят — gap clock плавно двигает время до следующего клипа
             if (!p1busy && !p2busy) {
                 var n1 = videoPlayer.findNextOnTrack(t, 1)
                 var n2 = videoPlayer.findNextOnTrack(t, 2)
                 if (n1 || n2) {
-                    // Есть будущие клипы! Прыгаем к ближайшему из них.
-                    var nextT = Math.min(n1 ? n1.startTime : 9999,
-                                         n2 ? n2.startTime : 9999)
-                    console.log("👁 Watchdog: мёртвая зона, прыгаем к t=",
-                                nextT.toFixed(2))
-                    videoPlayer.timePositionChanged(nextT)
-                    Qt.callLater(videoPlayer.startPlayback)
+                    if (!gapClockTimer.running) {
+                        gapClockTimer._lastWallTime = Date.now() / 1000.0
+                        gapClockTimer.start()
+                    }
                 }
-                // Если n1 и n2 оба null — конец должен был быть пойман в tryNextOnTrack
             }
+        }
+    }
+
+    // ===== GAP CLOCK — плавно двигает playhead в гэпах между клипами =====
+    Timer {
+        id: gapClockTimer
+        interval: 40
+        repeat: true
+        property real _lastWallTime: 0.0
+        onTriggered: {
+            if (!videoPlayer.isPlaying) {
+                stop()
+                return
+            }
+            if (mediaPlayer1.playbackState === MediaPlayer.PlayingState
+                    || mediaPlayer2.playbackState === MediaPlayer.PlayingState) {
+                stop()
+                return
+            }
+            var now = Date.now() / 1000.0
+            var elapsed = Math.min(
+                        0.2, now - _lastWallTime) * videoPlayer.playbackSpeed
+            _lastWallTime = now
+            var newTime = videoPlayer.currentTime + elapsed
+            if (videoPlayer.clipPathAt(newTime, 1) !== ""
+                    || videoPlayer.clipPathAt(newTime, 2) !== "") {
+                stop()
+                videoPlayer.timePositionChanged(newTime)
+                return
+            }
+            if (!videoPlayer.findNextOnTrack(newTime, 1)
+                    && !videoPlayer.findNextOnTrack(newTime, 2)) {
+                stop()
+                Qt.callLater(function () {
+                    videoPlayer.playbackStopped()
+                    videoPlayer.timePositionChanged(0.0)
+                    videoPlayer.updateScrubFrame()
+                })
+                return
+            }
+            videoPlayer.timePositionChanged(newTime)
         }
     }
 
