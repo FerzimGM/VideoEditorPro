@@ -254,34 +254,61 @@ bool Timeline::splitClip(int index, double splitTime) {
         return false;
     }
 
-    TimelineClip& originalClip = m_clips[index];
+    // *** КРИТИЧНО: НЕ используем ссылку TimelineClip& originalClip = m_clips[index] ***
+    // m_clips.append() может перевыделить память QList → ссылка становится висячей
+    // (dangling reference) → UB: startTime = -1.45682e+144 в логах.
+    // Решение: работаем только через индекс или делаем полные копии ДО append().
 
     // Проверить что splitTime внутри клипа
-    if (splitTime <= originalClip.startTime || splitTime >= originalClip.endTime()) {
+    if (splitTime <= m_clips[index].startTime || splitTime >= m_clips[index].endTime()) {
         qWarning() << "❌ splitTime вне границ клипа";
         return false;
     }
 
-    // Создать второй клип
-    TimelineClip secondClip = originalClip;
+    // Снимаем полные копии ДО любых модификаций списка
+    TimelineClip firstClip  = m_clips[index];  // копия оригинала
+    TimelineClip secondClip = m_clips[index];  // копия для второй части
 
-    // Первая часть: [start, split)
-    double firstDuration = splitTime - originalClip.startTime;
-    originalClip.duration = firstDuration;
-    originalClip.trimEnd = originalClip.trimEnd + (secondClip.duration - firstDuration);
+    // Сколько секунд от начала клипа до точки разреза (в единицах таймлайна)
+    double cutOffset = splitTime - firstClip.startTime;
 
-    // Вторая часть: [split, end)
+    // ── Первая часть: [startTime, splitTime) ─────────────────────────────
+    // duration сокращается до cutOffset, trimEnd увеличивается на остаток.
+    // trimStart не трогаем — начало клипа не изменилось.
+    firstClip.duration = cutOffset;
+    firstClip.trimEnd  = secondClip.trimEnd + (secondClip.duration - cutOffset);
+
+    // ── Вторая часть: [splitTime, endTime) ───────────────────────────────
+    // startTime сдвигается на splitTime.
+    // trimStart += cutOffset (пропускаем уже показанные секунды исходника).
+    // trimEnd остаётся — правый край не менялся.
     secondClip.startTime = splitTime;
-    secondClip.duration = secondClip.duration - firstDuration;
-    secondClip.trimStart = secondClip.trimStart + firstDuration;
+    secondClip.duration  = secondClip.duration - cutOffset;
+    secondClip.trimStart = secondClip.trimStart + cutOffset;
 
-    // Добавить вторую часть
+    // Обновляем оригинальный элемент через индекс (не через ссылку!)
+    m_clips[index] = firstClip;
+
+    // Теперь append() — список может перевыделиться, но firstClip уже скопирован
     m_clips.append(secondClip);
     sortClips();
 
-    emit clipsChanged();
-
+    // *** КРИТИЧНО: qDebug() ДО emit clipsChanged() ***
+    // Если напечатать ПОСЛЕ emit — QML синхронно обрабатывает сигнал,
+    // пересоздаёт делегаты Repeater, Component.onCompleted вызывается пока
+    // firstClip ещё на стеке C++. MSVC в Debug заполняет освобождённую память
+    // 0xCC → при интерпретации как double получается -1.45682e+144.
     qDebug() << "✅ Клип разрезан на 2 части";
+    qDebug() << "   Часть A: startTime=" << firstClip.startTime
+             << "duration=" << firstClip.duration
+             << "trimStart=" << firstClip.trimStart
+             << "trimEnd=" << firstClip.trimEnd;
+    qDebug() << "   Часть B: startTime=" << secondClip.startTime
+             << "duration=" << secondClip.duration
+             << "trimStart=" << secondClip.trimStart
+             << "trimEnd=" << secondClip.trimEnd;
+
+    emit clipsChanged();
     return true;
 }
 
@@ -316,6 +343,46 @@ bool Timeline::trimClip(int index, double newTrimStart, double newTrimEnd) {
     emit totalDurationChanged();
 
     qDebug() << "✅ Клип обрезан. Новая длительность:" << clip.duration;
+    return true;
+}
+
+// ===== ОБРЕЗКА ЛЕВОГО КРАЯ КЛИПА =====
+// Вызывается когда пользователь тянет левый resize-хэндл клипа.
+// Атомарно: startTime + trimStart + duration — правый край не двигается.
+//
+// *** ВАЖНО: НЕ используем TimelineClip& ref после append() — висячая ссылка! ***
+bool Timeline::setClipLeftTrim(int index, double newStartTime, double newTrimStart)
+{
+    qDebug() << "✂️ setClipLeftTrim: index=" << index
+             << "newStart=" << newStartTime
+             << "newTrimStart=" << newTrimStart;
+
+    if (index < 0 || index >= m_clips.size()) {
+        qWarning() << "❌ Неверный индекс:" << index;
+        return false;
+    }
+
+    if (newTrimStart < 0.0) newTrimStart = 0.0;
+
+    // Правый край таймлайна неподвижен = startTime + duration
+    double oldEndTimeline = m_clips[index].startTime + m_clips[index].duration;
+    double newDuration    = oldEndTimeline - newStartTime;
+
+    if (newDuration < 0.1) {
+        qWarning() << "❌ Клип стал слишком коротким:" << newDuration;
+        return false;
+    }
+
+    m_clips[index].startTime = newStartTime;
+    m_clips[index].trimStart = newTrimStart;
+    m_clips[index].duration  = newDuration;
+
+    emit clipsChanged();
+    emit totalDurationChanged();
+
+    qDebug() << "✅ setClipLeftTrim: startTime=" << m_clips[index].startTime
+             << "trimStart=" << m_clips[index].trimStart
+             << "duration=" << m_clips[index].duration;
     return true;
 }
 
@@ -697,12 +764,14 @@ QVariantMap Timeline::getClipInfoAt(double time, int trackIndex) {
     info["fps"]       = 0.0;
     info["startTime"] = 0.0;
     info["trimStart"] = 0.0;
+    info["duration"]  = 0.0;  // ← QML findNextOnTrack использует это для эффективного шага
 
     TimelineClip* clip = getClipAt(time, trackIndex);
     if (!clip) return info;
 
     info["startTime"] = clip->startTime;
     info["trimStart"] = clip->trimStart;
+    info["duration"]  = clip->duration;  // ← реальная длина клипа на таймлайне (с учётом trim)
 
     // FIX: Используем кэш метаданных вместо открытия нового MediaDecoder!
     // Кэш заполняется в addClip() — один раз при добавлении клипа.
@@ -777,6 +846,7 @@ bool Timeline::setClipMuted(int index, bool muted) {
     }
     m_clips[index].isMuted = muted;
     emit clipModified(index);
+    emit clipsChanged();  // ← QML перечитает getClipsForTrack → isMuted обновится в VideoClip
     qDebug() << (muted ? "🔇" : "🔊") << "Клип" << index << (muted ? "заглушён" : "включён");
     return true;
 }

@@ -210,14 +210,7 @@ Item {
                 }
             }
 
-            // ── ПРАВЫЙ КЛИК → видео меню ──
-            // MouseArea(RightButton) надёжнее TapHandler в Qt6 внутри Flickable.
-            // popup() без аргументов — открывается у курсора, всегда работает.
-            MouseArea {
-                anchors.fill: parent
-                acceptedButtons: Qt.RightButton
-                onClicked: videoMenu.popup()
-            }
+            // Правый клик обрабатывается rootRightClick на уровне root Item
 
             // ── ПЕРЕТАСКИВАНИЕ — только левая кнопка ──
             DragHandler {
@@ -358,12 +351,7 @@ Item {
                 }
             }
 
-            // ── ПРАВЫЙ КЛИК → аудио меню ──
-            MouseArea {
-                anchors.fill: parent
-                acceptedButtons: Qt.RightButton
-                onClicked: audioMenu.popup()
-            }
+            // Правый клик обрабатывается rootRightClick на уровне root Item
 
             // ── ПЕРЕТАСКИВАНИЕ аудио полосы ──
             DragHandler {
@@ -416,6 +404,27 @@ Item {
                     duration: 120
                 }
             }
+        }
+    }
+
+    // =========================================================
+    // ПРАВЫЙ КЛИК — root уровень, вне конкуренции с DragHandler
+    // =========================================================
+    // ПОЧЕМУ ЗДЕСЬ:
+    // MouseArea внутри videoStrip конкурирует с DragHandler(CanTakeOverFromAnything).
+    // DragHandler в Qt6 получает grab раньше и блокирует onClicked MouseArea.
+    // На root уровне Item — никаких DragHandler-ов, клик гарантированно доходит.
+    // mouse.y определяет: верхняя половина → видео меню, нижняя → аудио меню.
+    MouseArea {
+        id: rootRightClick
+        anchors.fill: parent
+        acceptedButtons: Qt.RightButton
+        z: 100 // Выше Column (z:0) и selectionBorder (z:50)
+        onClicked: function (mouse) {
+            if (mouse.y < root.videoH + 1)
+                videoMenu.popup()
+            else
+                audioMenu.popup()
         }
     }
 

@@ -9,7 +9,7 @@ QtObject {
     id: appRoot
 
     // ===== ОКНО 1: SPLASH SCREEN =====
-    property var splashWindow: Window {
+    property var splashWindow: ApplicationWindow {
         id: splashWin
         visible: true
         width: 800
@@ -44,7 +44,7 @@ QtObject {
     }
 
     // ===== ГЛАВНОЕ ОКНО =====
-    property var mainWindow: Window {
+    property var mainWindow: ApplicationWindow {
         id: root
         visible: false
         width: 1600
@@ -143,6 +143,243 @@ QtObject {
             id: clipEffectsDialog
             parentWindow: root
             visible: false
+        }
+
+        // ===== КОНТЕКСТНЫЕ МЕНЮ (прямо в ApplicationWindow) =====
+        // Menu здесь — единственное место где Overlay.overlay гарантированно работает.
+        // В дочерних компонентах (.qml файлах) Overlay.overlay возвращает null в Qt 6.
+        // Хранит видимость видео/аудио полос каждого клипа
+        QtObject {
+            id: clipStates
+            property var _hidden: ({})
+
+            function setVideoHidden(clipId, val) {
+                var h = Object.assign({}, _hidden)
+                h[clipId + "_v"] = val
+                _hidden = h
+            }
+            function setAudioHidden(clipId, val) {
+                var h = Object.assign({}, _hidden)
+                h[clipId + "_a"] = val
+                _hidden = h
+            }
+            function isVideoHidden(clipId) {
+                return _hidden[clipId + "_v"] === true
+            }
+            function isAudioHidden(clipId) {
+                return _hidden[clipId + "_a"] === true
+            }
+        }
+
+        QtObject {
+            id: menuContext
+            property int clipId: -1
+            property int track: 1
+            property string clipName: ""
+            property bool isMuted: false
+            property bool videoHidden: false
+        }
+
+        Menu {
+            id: videoContextMenu
+            parent: Overlay.overlay
+            width: 240
+
+            background: Rectangle {
+                color: "#1E1E2E"
+                radius: 6
+                border.color: "#DC143C"
+                border.width: 1
+            }
+            MenuItem {
+                enabled: false
+                contentItem: Text {
+                    text: "📹  " + menuContext.clipName
+                    color: "#999"
+                    font.bold: true
+                    font.pixelSize: 12
+                    leftPadding: 8
+                    verticalAlignment: Text.AlignVCenter
+                }
+                background: Rectangle {
+                    color: "transparent"
+                }
+            }
+            MenuSeparator {
+                contentItem: Rectangle {
+                    implicitHeight: 1
+                    color: "#444"
+                }
+            }
+            MenuItem {
+                text: "✂  Разрезать по playhead"
+                contentItem: Text {
+                    text: parent.text
+                    color: "white"
+                    font.pixelSize: 12
+                    leftPadding: 8
+                    verticalAlignment: Text.AlignVCenter
+                }
+                background: Rectangle {
+                    color: parent.highlighted ? "#2a2a3e" : "transparent"
+                }
+                onTriggered: if (cppTimeline)
+                                 cppTimeline.splitClipAt(
+                                             cppTimeline.currentTime,
+                                             menuContext.track)
+            }
+            MenuItem {
+                text: "✨  Эффекты клипа..."
+                contentItem: Text {
+                    text: parent.text
+                    color: "white"
+                    font.pixelSize: 12
+                    leftPadding: 8
+                    verticalAlignment: Text.AlignVCenter
+                }
+                background: Rectangle {
+                    color: parent.highlighted ? "#2a2a3e" : "transparent"
+                }
+                onTriggered: clipEffectsDialog.openForClip(menuContext.clipId)
+            }
+            MenuSeparator {
+                contentItem: Rectangle {
+                    implicitHeight: 1
+                    color: "#444"
+                }
+            }
+            MenuItem {
+                implicitHeight: 34
+                background: Rectangle {
+                    color: parent.highlighted ? "#2a2a3e" : "transparent"
+                }
+                contentItem: Text {
+                    text: clipStates.isVideoHidden(
+                              menuContext.clipId) ? "👁  Показать видео" : "🙈  Скрыть видео"
+                    color: "white"
+                    font.pixelSize: 12
+                    leftPadding: 8
+                    verticalAlignment: Text.AlignVCenter
+                }
+                onTriggered: {
+                    var nowHidden = clipStates.isVideoHidden(menuContext.clipId)
+                    clipStates.setVideoHidden(menuContext.clipId, !nowHidden)
+                    console.log("🙈 Видео скрыто:", !nowHidden)
+                }
+            }
+            MenuSeparator {
+                contentItem: Rectangle {
+                    implicitHeight: 1
+                    color: "#444"
+                }
+            }
+            MenuItem {
+                implicitHeight: 34
+                background: Rectangle {
+                    color: parent.highlighted ? Qt.rgba(0.87, 0.13, 0.23,
+                                                        0.15) : "transparent"
+                }
+                contentItem: Text {
+                    text: "🗑  Удалить клип"
+                    color: "#EF5350"
+                    font.pixelSize: 12
+                    leftPadding: 8
+                    verticalAlignment: Text.AlignVCenter
+                }
+                onTriggered: if (cppTimeline)
+                                 cppTimeline.removeClip(menuContext.clipId)
+            }
+        }
+
+        Menu {
+            id: audioContextMenu
+            parent: Overlay.overlay
+            width: 240
+
+            background: Rectangle {
+                color: "#1E1E2E"
+                radius: 6
+                border.color: "#43A047"
+                border.width: 1
+            }
+            MenuItem {
+                enabled: false
+                contentItem: Text {
+                    text: "🎵  " + menuContext.clipName
+                    color: "#999"
+                    font.bold: true
+                    font.pixelSize: 12
+                    leftPadding: 8
+                    verticalAlignment: Text.AlignVCenter
+                }
+                background: Rectangle {
+                    color: "transparent"
+                }
+            }
+            MenuSeparator {
+                contentItem: Rectangle {
+                    implicitHeight: 1
+                    color: "#444"
+                }
+            }
+            MenuItem {
+                text: menuContext.isMuted ? "🔊  Включить звук" : "🔇  Выключить звук"
+                contentItem: Text {
+                    text: parent.text
+                    color: "white"
+                    font.pixelSize: 12
+                    leftPadding: 8
+                    verticalAlignment: Text.AlignVCenter
+                }
+                background: Rectangle {
+                    color: parent.highlighted ? "#2a2a3e" : "transparent"
+                }
+                onTriggered: {
+                    var newMuted = !menuContext.isMuted
+                    menuContext.isMuted = newMuted
+                    clipStates.setMuted(menuContext.clipId, newMuted)
+                    if (cppTimeline)
+                        cppTimeline.setClipMuted(menuContext.clipId, newMuted)
+                }
+            }
+            MenuItem {
+                text: "✂  Разрезать по playhead"
+                contentItem: Text {
+                    text: parent.text
+                    color: "white"
+                    font.pixelSize: 12
+                    leftPadding: 8
+                    verticalAlignment: Text.AlignVCenter
+                }
+                background: Rectangle {
+                    color: parent.highlighted ? "#2a2a3e" : "transparent"
+                }
+                onTriggered: if (cppTimeline)
+                                 cppTimeline.splitClipAt(
+                                             cppTimeline.currentTime,
+                                             menuContext.track)
+            }
+            MenuSeparator {
+                contentItem: Rectangle {
+                    implicitHeight: 1
+                    color: "#444"
+                }
+            }
+            MenuItem {
+                text: "🗑  Удалить клип"
+                contentItem: Text {
+                    text: parent.text
+                    color: "#EF5350"
+                    font.pixelSize: 12
+                    leftPadding: 8
+                    verticalAlignment: Text.AlignVCenter
+                }
+                background: Rectangle {
+                    color: parent.highlighted ? "#2a2a3e" : "transparent"
+                }
+                onTriggered: if (cppTimeline)
+                                 cppTimeline.removeClip(menuContext.clipId)
+            }
         }
 
         QtObject {
@@ -472,6 +709,68 @@ QtObject {
                             // *** Передаём скорость → QMediaPlayer.playbackRate ***
                             playbackSpeed: playbackManager.playbackSpeed
                             volume: 1.0
+                            // hideVideo=true только если track1 скрыт И track2 пустой → чёрный экран
+                            hideVideo: {
+                                var _hv = clipStates._hidden
+                                if (!cppTimeline || !clipStates)
+                                    return false
+                                var t = playbackManager.currentTime
+                                var c1 = cppTimeline.getClipsForTrack(1)
+                                var track1HiddenHere = false
+                                for (var i = 0; i < c1.length; i++) {
+                                    if (t >= c1[i].startTime
+                                            && t < c1[i].startTime + c1[i].duration) {
+                                        track1HiddenHere = clipStates.isVideoHidden(
+                                                    c1[i].id)
+                                        break
+                                    }
+                                }
+                                if (!track1HiddenHere)
+                                    return false
+                                // track1 скрыт — есть ли что-то на track2?
+                                var c2 = cppTimeline.getClipsForTrack(2)
+                                for (var j = 0; j < c2.length; j++) {
+                                    if (t >= c2[j].startTime
+                                            && t < c2[j].startTime + c2[j].duration)
+                                        return false // track2 есть → показываем его
+                                }
+                                return true // оба пусты/скрыты → чёрный экран
+                            }
+                            // hideTrack1Video: скрыть только videoOutput1 (track1), track2 остаётся
+                            hideTrack1Video: {
+                                var _hv2 = clipStates._hidden
+                                if (!cppTimeline || !clipStates)
+                                    return false
+                                var t2 = playbackManager.currentTime
+                                var clips1 = cppTimeline.getClipsForTrack(1)
+                                for (var ii = 0; ii < clips1.length; ii++) {
+                                    if (t2 >= clips1[ii].startTime
+                                            && t2 < clips1[ii].startTime + clips1[ii].duration)
+                                        return clipStates.isVideoHidden(
+                                                    clips1[ii].id)
+                                }
+                                return false
+                            }
+                            hideAudio: {
+                                var _mv = clipStates.muteVersion // триггер mute
+                                var _ha = clipStates._hidden // триггер audioHidden
+                                if (!cppTimeline || !clipStates)
+                                    return false
+                                for (var tk = 1; tk <= 2; tk++) {
+                                    var tclips = cppTimeline.getClipsForTrack(
+                                                tk)
+                                    for (var j = 0; j < tclips.length; j++) {
+                                        var c2 = tclips[j]
+                                        var s2 = c2.startTime
+                                        if (playbackManager.currentTime >= s2
+                                                && playbackManager.currentTime < s2 + c2.duration)
+                                            return clipStates.isAudioHidden(
+                                                        c2.id)
+                                                    || clipStates.isMuted(c2.id)
+                                    }
+                                }
+                                return false
+                            }
 
                             // Обновляем playhead из QMediaPlayer
                             onTimePositionChanged: time => {
@@ -560,6 +859,7 @@ QtObject {
                         // main → Timeline.selectedClipId → Track.selectedClipId
                         //   → VideoClip.selected = (root.selectedClipId === modelData.id)
                         selectedClipId: selectionManager.selectedClipId
+                        clipStates: clipStates
 
                         onTimeChanged: time => {
                                            playbackManager.currentTime = time
@@ -581,6 +881,42 @@ QtObject {
                                                 clipEffectsDialog.openForClip(
                                                     id)
                                             }
+                        //  ДОБАВИТЬ ЭТИ ОБРАБОТЧИКИ (после onEffectsRequested):
+                        onShowVideoContextMenu: (clipId, track, clipName, x, y) => {
+                                                    menuContext.clipId = clipId
+                                                    menuContext.track = track
+                                                    menuContext.clipName = clipName
+                                                    var clips = cppTimeline ? cppTimeline.getClipsForTrack(track) : []
+                                                    for (var i = 0; i < clips.length; i++) {
+                                                        if (clips[i].id === clipId) {
+                                                            menuContext.isMuted = clips[i].isMuted
+                                                            || false
+                                                            break
+                                                        }
+                                                    }
+                                                    var lp = root.contentItem.mapFromGlobal(
+                                                        x, y)
+                                                    console.log(
+                                                        ">>> POPUP x=", lp.x,
+                                                        "y=", lp.y, "w=",
+                                                        videoContextMenu.width)
+                                                    videoContextMenu.popup(
+                                                        lp.x, lp.y)
+                                                    console.log(
+                                                        ">>> visible=",
+                                                        videoContextMenu.visible)
+                                                }
+
+                        onShowAudioContextMenu: (clipId, track, clipName, isMuted, x, y) => {
+                                                    menuContext.clipId = clipId
+                                                    menuContext.track = track
+                                                    menuContext.clipName = clipName
+                                                    menuContext.isMuted = isMuted
+                                                    var lp = root.contentItem.mapFromGlobal(
+                                                        x, y)
+                                                    audioContextMenu.popup(
+                                                        lp.x, lp.y)
+                                                }
                     }
                 }
             }

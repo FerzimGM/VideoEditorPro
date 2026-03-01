@@ -18,11 +18,19 @@ Rectangle {
     // *** Выделение клипов через property-цепочку (main → Timeline → Track → VideoClip) ***
     // Прямой доступ по ID между компонентами в QML не работает!
     property int selectedClipId: -1
+    property var clipStates: null
+    property int _ctxClipId: -1
+    property int _ctxTrack: 1
+    property bool _ctxIsMuted: false
+    property string _ctxClipName: ""
     signal clipSelected(int clipId)
 
     signal timeChanged(real time)
     signal zoomChanged(int zoom)
     signal effectsRequested(int clipId)
+    signal showVideoContextMenu(int clipId, int track, string clipName, real x, real y)
+    signal showAudioContextMenu(int clipId, int track, string clipName, bool isMuted, real x, real y)
+
 
     onZoomLevelChanged: {
         pixelsPerSecond = zoomLevel / 10
@@ -188,6 +196,7 @@ Rectangle {
                         snapEnabled: root.snapEnabled
                         // *** Передаём выделение вниз по цепочке ***
                         selectedClipId: root.selectedClipId
+                        clipStates: root.clipStates
 
                         // Когда пользователь кликнул по клипу внутри Track
                         onClipSelected: id => {
@@ -224,6 +233,36 @@ Rectangle {
                                          }
                                      }
                         onEffectsRequested: id => root.effectsRequested(id)
+
+                        onContextMenuRequested: (id, isVideo, gx, gy) => {
+                                                    // Сохраняем контекст
+                                                    var clips = cppTimeline ? cppTimeline.getClipsForTrack(index + 1) : []
+                                                    root._ctxClipId = id
+                                                    root._ctxTrack = index + 1
+
+                                                    for (var i = 0; i < clips.length; i++) {
+                                                        if (clips[i].id === id) {
+                                                            root._ctxClipName = clips[i].filename
+                                                            || ""
+                                                            root._ctxIsMuted = clips[i].isMuted
+                                                            || false
+                                                            break
+                                                        }
+                                                    }
+
+                                                    // Эмитим сигналы (не popup!)
+                                                    if (isVideo)
+                                                    root.showVideoContextMenu(
+                                                        id, index + 1,
+                                                        root._ctxClipName, gx,
+                                                        gy)
+                                                    else
+                                                    root.showAudioContextMenu(
+                                                        id, index + 1,
+                                                        root._ctxClipName,
+                                                        root._ctxIsMuted, gx,
+                                                        gy)
+                                                }
                     }
                 }
 

@@ -12,6 +12,11 @@ Item {
     property bool isMuted: false
     property bool selected: false
     property real clipMaxWidth: 0
+    property real pixelsPerSecond: 10 // передаётся из Track.qml
+    property int trackNumber: 1 // передаётся из Track.qml
+
+    property bool videoHidden: false
+    property bool audioHidden: false
 
     readonly property real videoH: 50
     readonly property real audioH: 30
@@ -24,6 +29,9 @@ Item {
     signal splitRequested(int clipId)
     signal effectsRequested(int clipId)
     signal muteToggled(int clipId, bool muted)
+    // Сигнал для глобального меню: передаём глобальные экранные координаты
+    // и флаг isVideo чтобы Timeline.qml знал какое меню показать
+    signal contextMenuRequested(int clipId, bool isVideo, real globalX, real globalY)
 
     // ===== DRAG STATE =====
     property real _startX: 0
@@ -52,8 +60,9 @@ Item {
             id: videoStrip
             width: parent.width
             height: root.videoH
+            opacity: root.videoHidden ? 0.4 : 1.0
             radius: Theme.borderRadius
-            color: root.selected ? "#1E88E5" : "#1565C0"
+            color: root.videoHidden ? "#555" : (root.selected ? "#1E88E5" : "#1565C0")
             gradient: Gradient {
                 GradientStop {
                     position: 0.0
@@ -147,7 +156,37 @@ Item {
                             }
                         }
                     }
-                    onReleased: root.moved(root.x)
+                    onReleased: {
+                        // Один атомарный вызов C++: обновляет startTime + trimStart + duration.
+                        // НЕ вызываем moved() отдельно — setClipLeftTrim сам делает всё.
+                        var pps = root.pixelsPerSecond || 10
+                        var newStartTime = root.x / pps
+                        var deltaX = root.x - _ox // px
+                        var deltaSec = deltaX / pps // секунды
+
+                        if (cppTimeline) {
+                            // Берём текущий trimStart из C++ (до изменений)
+                            var info = cppTimeline.getClipInfoAt(
+                                        (_ox + _sw * 0.5) / pps,
+                                        root.trackNumber || 1)
+                            var currentTrimStart = (info && info.trimStart
+                                                    !== undefined) ? info.trimStart : 0.0
+                            var newTrimStart = Math.max(
+                                        0.0, currentTrimStart + deltaSec)
+
+                            console.log("✂ LeftTrim id=", root.clipId, "Δsec=",
+                                        deltaSec.toFixed(3), "trimStart:",
+                                        currentTrimStart.toFixed(3), "→",
+                                        newTrimStart.toFixed(3))
+
+                            cppTimeline.setClipLeftTrim(root.clipId,
+                                                        newStartTime,
+                                                        newTrimStart)
+                        } else {
+                            // Fallback: просто двигаем позицию
+                            root.moved(root.x)
+                        }
+                    }
                 }
             }
 
@@ -266,6 +305,14 @@ Item {
                 }
             }
 
+            Text {
+                anchors.centerIn: parent
+                visible: root.videoHidden
+                text: "🚫 видео скрыто"
+                color: "#ccc"
+                font.pixelSize: 10
+                font.bold: true
+            }
             Behavior on color {
                 ColorAnimation {
                     duration: 120
@@ -280,8 +327,9 @@ Item {
             id: audioStrip
             width: parent.width
             height: root.audioH
+            opacity: (root.audioHidden || root.isMuted) ? 0.5 : 1.0
             radius: Theme.borderRadius
-            color: root.isMuted ? "#555" : (root.selected ? "#43A047" : "#2E7D32")
+            color: root.audioHidden ? "#555" : (root.isMuted ? "#555" : (root.selected ? "#43A047" : "#2E7D32"))
             gradient: Gradient {
                 GradientStop {
                     position: 0.0
@@ -399,6 +447,14 @@ Item {
                 }
             }
 
+            Text {
+                anchors.centerIn: parent
+                visible: root.audioHidden || root.isMuted
+                text: root.audioHidden ? "🔇 аудио скрыто" : "🔇 заглушено"
+                color: "#ccc"
+                font.pixelSize: 9
+                font.bold: true
+            }
             Behavior on color {
                 ColorAnimation {
                     duration: 120
@@ -408,23 +464,29 @@ Item {
     }
 
     // =========================================================
-    // ПРАВЫЙ КЛИК — root уровень, вне конкуренции с DragHandler
+    // ПРАВЫЙ КЛИК — эмитит сигнал наверх в Timeline → main.qml
     // =========================================================
-    // ПОЧЕМУ ЗДЕСЬ:
-    // MouseArea внутри videoStrip конкурирует с DragHandler(CanTakeOverFromAnything).
-    // DragHandler в Qt6 получает grab раньше и блокирует onClicked MouseArea.
-    // На root уровне Item — никаких DragHandler-ов, клик гарантированно доходит.
-    // mouse.y определяет: верхняя половина → видео меню, нижняя → аудио меню.
+    // Меню объявлены ПРЯМО В main.qml (ApplicationWindow) — только там
+    // Overlay.overlay работает корректно в Qt 6.
     MouseArea {
         id: rootRightClick
         anchors.fill: parent
         acceptedButtons: Qt.RightButton
-        z: 100 // Выше Column (z:0) и selectionBorder (z:50)
-        onClicked: function (mouse) {
-            if (mouse.y < root.videoH + 1)
-                videoMenu.popup()
-            else
-                audioMenu.popup()
+        z: 100
+        // ВАЖНО: onPressed, не onClicked!
+        // onClicked = mouseRelease. Если вызвать popup() на release — Qt отправляет
+        // следующий MouseButtonRelease в меню как "клик вне меню" → мгновенное закрытие.
+        // onPressed = кнопка ЕЩЁ ЗАЖАТА когда popup() открывается → release происходит
+        // уже внутри открытого меню → меню остаётся живым.
+        onPressed: function (mouse) {
+            if (mouse.button !== Qt.RightButton)
+                return
+            mouse.accepted = true
+            var g = root.mapToGlobal(mouse.x, mouse.y)
+            var isVideo = (mouse.y < root.videoH + 1)
+            console.log("🖱️ ПКМ", isVideo ? "VIDEO" : "AUDIO", "clipId=",
+                        root.clipId)
+            root.contextMenuRequested(root.clipId, isVideo, g.x, g.y)
         }
     }
 
@@ -452,173 +514,6 @@ Item {
             radius: parent.radius - 3
             color: Qt.rgba(0.87, 0.13, 0.23, 0.08)
             visible: root.selected
-        }
-    }
-
-    // =========================================================
-    // КОНТЕКСТНОЕ МЕНЮ ВИДЕО
-    // =========================================================
-    Menu {
-        id: videoMenu
-        background: Rectangle {
-            color: Theme.panelBackground
-            radius: Theme.borderRadius
-            border.color: Theme.rubyPrimary
-            border.width: 1
-        }
-
-        // ── Название клипа (не кликабельный заголовок) ──
-        MenuItem {
-            enabled: false
-            contentItem: Text {
-                text: "📹  " + root.clipName
-                color: Theme.textSecondary
-                font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontSizeSmall
-                font.bold: true
-                elide: Text.ElideRight
-            }
-            background: Rectangle {
-                color: "transparent"
-            }
-        }
-        MenuSeparator {}
-
-        MenuItem {
-            text: "✂  Разрезать по playhead"
-            onTriggered: root.splitRequested(root.clipId)
-            contentItem: Text {
-                text: parent.text
-                color: Theme.textPrimary
-                font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontSize
-            }
-            background: Rectangle {
-                color: parent.hovered ? Theme.buttonHover : "transparent"
-                radius: Theme.borderRadius
-            }
-        }
-        MenuItem {
-            text: "✨  Эффекты клипа..."
-            onTriggered: root.effectsRequested(root.clipId)
-            contentItem: Text {
-                text: parent.text
-                color: Theme.textPrimary
-                font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontSize
-            }
-            background: Rectangle {
-                color: parent.hovered ? Theme.buttonHover : "transparent"
-                radius: Theme.borderRadius
-            }
-        }
-        MenuSeparator {}
-        MenuItem {
-            text: "🗑  Удалить клип"
-            onTriggered: root.deleteRequested(root.clipId)
-            contentItem: Text {
-                text: parent.text
-                color: "#EF5350"
-                font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontSize
-            }
-            background: Rectangle {
-                color: parent.hovered ? Qt.rgba(0.94, 0.33, 0.31,
-                                                0.15) : "transparent"
-                radius: Theme.borderRadius
-            }
-        }
-    }
-
-    // =========================================================
-    // КОНТЕКСТНОЕ МЕНЮ АУДИО
-    // =========================================================
-    Menu {
-        id: audioMenu
-        background: Rectangle {
-            color: Theme.panelBackground
-            radius: Theme.borderRadius
-            border.color: "#43A047"
-            border.width: 1
-        }
-
-        // ── Название клипа ──
-        MenuItem {
-            enabled: false
-            contentItem: Text {
-                text: "🎵  " + root.clipName
-                color: Theme.textSecondary
-                font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontSizeSmall
-                font.bold: true
-                elide: Text.ElideRight
-            }
-            background: Rectangle {
-                color: "transparent"
-            }
-        }
-        MenuSeparator {}
-
-        MenuItem {
-            text: root.isMuted ? "🔊  Включить звук" : "🔇  Отключить звук"
-            onTriggered: {
-                root.isMuted = !root.isMuted
-                root.muteToggled(root.clipId, root.isMuted)
-            }
-            contentItem: Text {
-                text: parent.text
-                color: Theme.textPrimary
-                font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontSize
-            }
-            background: Rectangle {
-                color: parent.hovered ? Theme.buttonHover : "transparent"
-                radius: Theme.borderRadius
-            }
-        }
-        MenuItem {
-            text: "✂  Разрезать по playhead"
-            onTriggered: root.splitRequested(root.clipId)
-            contentItem: Text {
-                text: parent.text
-                color: Theme.textPrimary
-                font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontSize
-            }
-            background: Rectangle {
-                color: parent.hovered ? Theme.buttonHover : "transparent"
-                radius: Theme.borderRadius
-            }
-        }
-        MenuItem {
-            text: "✨  Эффекты клипа..."
-            onTriggered: root.effectsRequested(root.clipId)
-            contentItem: Text {
-                text: parent.text
-                color: Theme.textPrimary
-                font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontSize
-            }
-            background: Rectangle {
-                color: parent.hovered ? Theme.buttonHover : "transparent"
-                radius: Theme.borderRadius
-            }
-        }
-        MenuSeparator {}
-        MenuItem {
-            text: "🗑  Удалить клип"
-            onTriggered: root.deleteRequested(root.clipId)
-            contentItem: Text {
-                text: parent.text
-                color: "#EF5350"
-                font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontSize
-            }
-            background: Rectangle {
-                color: parent.hovered ? Qt.rgba(0.94, 0.33, 0.31,
-                                                0.15) : "transparent"
-                radius: Theme.borderRadius
-            }
         }
     }
 }

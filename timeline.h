@@ -65,9 +65,11 @@ public:
     // ===== МЕТАДАННЫЕ КЛИПА =====
     // Возвращает QVariantMap:
     //   { "width": int, "height": int, "fps": double,
-    //     "startTime": double, "trimStart": double }
-    // Нужно VideoPlayer для отображения разрешения/FPS и
-    // для синхронизации QMediaPlayer при старте воспроизведения.
+    //     "startTime": double, "trimStart": double, "duration": double }
+    // VideoPlayer использует:
+    //   startTime + trimStart → вычислить posMs при старте воспроизведения
+    //   duration             → findNextOnTrack шагает через клип целиком (не по 1s)
+    //   width/height/fps     → отображение метаданных в UI
     Q_INVOKABLE QVariantMap getClipInfoAt(double time, int trackIndex = 1);
 
     // Путь к файлу активного клипа (для QMediaPlayer.source)
@@ -93,6 +95,18 @@ public:
 
     // Обрезать клип (изменить trimStart/trimEnd)
     Q_INVOKABLE bool trimClip(int index, double newTrimStart, double newTrimEnd);
+
+    // ===== ОБРЕЗКА ЛЕВОГО КРАЯ (хэндл) =====
+    // Атомарно обновляет startTime + trimStart + duration за один вызов.
+    // Используется когда пользователь перетащил левый resize-хэндл клипа.
+    //
+    // index         — индекс клипа (clipId из QML = индекс в m_clips до сортировки)
+    // newStartTime  — новая позиция клипа на таймлайне (секунды)
+    // newTrimStart  — сколько секунд исходника пропустить от начала (≥ 0)
+    //
+    // Метод сам пересчитывает duration = sourceDuration - newTrimStart - trimEnd,
+    // чтобы правый край клипа не двигался.
+    Q_INVOKABLE bool setClipLeftTrim(int index, double newStartTime, double newTrimStart);
 
     // Применить эффект к клипу
     Q_INVOKABLE bool applyEffect(int index, const QString& effectName, double value);

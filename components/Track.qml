@@ -13,6 +13,7 @@ Rectangle {
     property bool snapEnabled: true
     property var clips: []
     property int selectedClipId: -1
+    property var clipStates: null
 
     signal clipClicked(int clipId)
     signal clipSelected(int clipId)
@@ -20,6 +21,8 @@ Rectangle {
     signal clipDropped(string filepath, real time)
     signal clipMoved(int clipId, real newTime)
     signal effectsRequested(int clipId)
+    // Пробрасываем запрос контекстного меню наверх в Timeline.qml
+    signal contextMenuRequested(int clipId, bool isVideo, real globalX, real globalY)
 
     // ===== ОБНОВИТЬ КЛИПЫ ИЗ C++ =====
     function updateClipsFromCpp() {
@@ -205,7 +208,15 @@ Rectangle {
             clipName: modelData.filename
             clipId: modelData.id
             selected: root.selectedClipId === modelData.id
-            isMuted: modelData.isMuted || false
+            // isMuted берём из clipStates (QML-side) — реагирует мгновенно.
+            // modelData.isMuted не эмитит dataChanged при setClipMuted в C++.
+            isMuted: root.clipStates ? root.clipStates.isMuted(
+                                           modelData.id) : (modelData.isMuted
+                                                            || false)
+            videoHidden: root.clipStates ? root.clipStates.isVideoHidden(
+                                               modelData.id) : false
+            audioHidden: root.clipStates ? root.clipStates.isAudioHidden(
+                                               modelData.id) : false
 
             // Максимальная ширина = оригинальная длина клипа * текущий масштаб
             // Запрещает растягивать клип длиннее исходного видео
@@ -296,6 +307,11 @@ Rectangle {
             onEffectsRequested: id => {
                                     root.effectsRequested(id)
                                 }
+
+            onContextMenuRequested: (id, isVideo, gx, gy) => {
+                                        root.contextMenuRequested(id, isVideo,
+                                                                  gx, gy)
+                                    }
         }
     }
 }

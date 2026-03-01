@@ -215,20 +215,15 @@ Rectangle {
             return
 
         var mp = (track === 1) ? mediaPlayer1 : mediaPlayer2
-        var cache = (track === 1) ? track1Cache : track2Cache
         var t = videoPlayer.currentTime + 0.08
         var p = clipPathAt(t, track)
 
         if (p !== "") {
-            // Следующий клип сразу после текущего
-            var info = clipInfoAt(t, track)
-            cache.clipStartTime = info ? (info.startTime || 0.0) : 0.0
-            cache.clipTrimStart = info ? (info.trimStart || 0.0) : 0.0
-            mp.stop()
-            mp.source = p
-            mp.position = Math.max(0, cache.clipTrimStart * 1000)
-            mp.playbackRate = videoPlayer.playbackSpeed
-            mp.play()
+            // Клип найден под playhead.
+            // Используем startTrack — он правильно вычислит posMs=(t-startTime+trimStart)*1000
+            // и НЕ перезапустит если уже играет в нужной позиции.
+            // Ручной mp.position=clipTrimStart*1000 — баг: сбрасывал в начало клипа!
+            videoPlayer.startTrack(track, t)
             console.log("⏭ Track", track, "next:", p.split("/").pop())
         } else {
             // Нет клипа сразу — есть ли дальше на ЭТОМ треке?
@@ -377,29 +372,33 @@ Rectangle {
         target: cppTimeline
         function onClipsChanged() {
             if (!videoPlayer.isPlaying) {
-                videoPlayer.updateScrubFrame()
+                // При паузе — обновляем scrub frame по новым данным
+                Qt.callLater(videoPlayer.updateScrubFrame)
                 return
             }
-            // Клипы изменились во время воспроизведения (trim/delete).
-            // Немедленно останавливаем плеер у которого исчез клип под playhead.
-            // Затем перезапускаем воспроизведение с ТЕКУЩЕЙ позиции.
+
+            // При воспроизведении: клип мог быть УДАЛЁН или ОБРЕЗАН.
+            // ВАЖНО: при обрезке путь к файлу НЕ меняется — clipPathAt вернёт тот же path!
+            // Поэтому проверяем clipInfoAt: если info == null → клипа нет.
+            // Дополнительно: если info есть, но текущая позиция плеера вышла
+            // за пределы нового endTime клипа → тоже останавливаем.
             var t = videoPlayer.currentTime
 
+            // clipPathAt честно проверяет границы клипа в C++ (trim/delete)
             if (mediaPlayer1.playbackState !== MediaPlayer.StoppedState) {
-                var p1 = videoPlayer.clipPathAt(t, 1)
-                if (p1 === "" || mediaPlayer1.source.toString() !== p1) {
+                if (videoPlayer.clipPathAt(t, 1) === "") {
                     mediaPlayer1.stop()
                     mediaPlayer1.source = ""
                 }
             }
             if (mediaPlayer2.playbackState !== MediaPlayer.StoppedState) {
-                var p2 = videoPlayer.clipPathAt(t, 2)
-                if (p2 === "" || mediaPlayer2.source.toString() !== p2) {
+                if (videoPlayer.clipPathAt(t, 2) === "") {
                     mediaPlayer2.stop()
                     mediaPlayer2.source = ""
                 }
             }
-            // Даём Qt обработать stop(), потом перезапускаем с текущего времени
+
+            // Перезапускаем с текущей позиции
             videoPlayer._resyncing = true
             Qt.callLater(function () {
                 if (videoPlayer.isPlaying)
@@ -529,6 +528,17 @@ Rectangle {
 
             var t = mediaPlayer1.position / 1000.0 + track1Cache.clipStartTime
                     - track1Cache.clipTrimStart
+
+            // Клип обрезан/удалён — текущее время уже за пределами нового конца?
+            // clipPathAt проверяет реальные границы клипа в C++ (учитывает trim)
+            if (videoPlayer.clipPathAt(t, 1) === "") {
+                mediaPlayer1.stop()
+                mediaPlayer1.source = ""
+                if (mediaPlayer2.playbackState !== MediaPlayer.PlayingState)
+                    Qt.callLater(videoPlayer.startPlayback)
+                return
+            }
+
             videoPlayer.timePositionChanged(t)
 
             // Подхватываем дорожку 2 если она ещё не играет, но клип появился
@@ -583,6 +593,16 @@ Rectangle {
             // дорожка 1 — мастер
             var t = mediaPlayer2.position / 1000.0 + track2Cache.clipStartTime
                     - track2Cache.clipTrimStart
+
+            // Клип обрезан/удалён?
+            if (videoPlayer.clipPathAt(t, 2) === "") {
+                mediaPlayer2.stop()
+                mediaPlayer2.source = ""
+                if (mediaPlayer1.playbackState !== MediaPlayer.PlayingState)
+                    Qt.callLater(videoPlayer.startPlayback)
+                return
+            }
+
             videoPlayer.timePositionChanged(t)
 
             // FIX: если дорожка 1 имеет клип, но не играет — запускаем её

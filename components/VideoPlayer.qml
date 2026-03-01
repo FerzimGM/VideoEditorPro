@@ -20,6 +20,9 @@ Rectangle {
     property bool isPlaying: false
     property real playbackSpeed: 1.0
     property real volume: 1.0
+    property bool hideVideo: false
+    property bool hideTrack1Video: false // скрыть только track1, track2 остаётся видим
+    property bool hideAudio: false
 
     // ===== ЭФФЕКТЫ =====
     property real brightness: 1.0
@@ -48,6 +51,16 @@ Rectangle {
         property real clipStartTime: 0.0
         property real clipTrimStart: 0.0
     }
+
+    // ===== GUARD: предотвращает рекурсивный перезапуск трека =====
+    // Проблема (бесконечный цикл):
+    //   tryNextOnTrack() → mp.stop() + source="" → onPlaybackStateChanged(Stopped)
+    //   → tryNextOnTrack() снова → loop
+    // Решение: флаг "явно останавливаю" сбрасывается через Qt.callLater (1 тик).
+    // onCurrentTimeChanged НЕ блокируется (нет time-guard) → трек запустится
+    // на следующем тике как только playhead дойдёт до нового клипа.
+    property bool _stoppingTrack1: false
+    property bool _stoppingTrack2: false
 
     // Сигнал: обновить playhead
     signal timePositionChanged(real newTime)
@@ -156,6 +169,13 @@ Rectangle {
 
         cache.clipStartTime = st
         cache.clipTrimStart = trim
+
+        // Сбрасываем флаг "остановки" для этого трека — трек успешно стартует
+        if (track === 1)
+            videoPlayer._stoppingTrack1 = false
+        else
+            videoPlayer._stoppingTrack2 = false
+
         mp.stop()
         mp.source = p
         mp.position = posMs
@@ -176,6 +196,10 @@ Rectangle {
         gapClockTimer.stop()
         nextClipTimer1.stop()
         nextClipTimer2.stop()
+
+        // Сбрасываем guard'ы блокировки — playback стартует заново
+        videoPlayer._stoppingTrack1 = false
+        videoPlayer._stoppingTrack2 = false
 
         // НЕ сбрасываем _resyncing здесь! Флаг живёт до resyncClearTimer (300ms).
         // Если сбросить здесь — binding loop может перезапустить startPlayback
@@ -214,33 +238,73 @@ Rectangle {
         if (!cppTimeline || !videoPlayer.isPlaying)
             return
 
-        var mp = (track === 1) ? mediaPlayer1 : mediaPlayer2
-        var cache = (track === 1) ? track1Cache : track2Cache
-        var t = videoPlayer.currentTime + 0.08
-        var p = clipPathAt(t, track)
+        // Предотвращаем рекурсию: onPlaybackStateChanged(Stopped) может
+        // вызвать tryNextOnTrack снова пока мы ещё в процессе остановки.
+        if (track === 1 && videoPlayer._stoppingTrack1)
+            return
+        if (track === 2 && videoPlayer._stoppingTrack2)
+            return
 
-        if (p !== "") {
-            // Следующий клип сразу после текущего
-            var info = clipInfoAt(t, track)
-            cache.clipStartTime = info ? (info.startTime || 0.0) : 0.0
-            cache.clipTrimStart = info ? (info.trimStart || 0.0) : 0.0
-            mp.stop()
-            mp.source = p
-            mp.position = Math.max(0, cache.clipTrimStart * 1000)
-            mp.playbackRate = videoPlayer.playbackSpeed
-            mp.play()
-            console.log("⏭ Track", track, "next:", p.split("/").pop())
+        var mp = (track === 1) ? mediaPlayer1 : mediaPlayer2
+        // ИСПРАВЛЕНО: ищем следующий клип от currentTime и стартуем с его startTime
+        // Баг был: var t = currentTime + 20 → плеер запускался на 20с позже начала клипа
+        var next = findNextOnTrack(videoPlayer.currentTime, track)
+
+        if (next) {
+            // *** КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ: не стартуем клип если он далеко в будущем! ***
+            // Проблема старого кода: tryNextOnTrack находит клип с startTime=20s,
+            // currentTime=10s → startTrack(track, 20) → mp.play() → onPositionChanged:
+            //   t = mp.position(0ms)/1000 + clipStartTime(20) - trim(0) = 20s
+            //   timePositionChanged(20) → playhead ПРЫГАЕТ с 10s на 20s!
+            //   Пропускаются все клипы между 10 и 20 секундами.
+            // Решение: стартуем сразу ТОЛЬКО если клип начинается прямо сейчас (≤0.5с).
+            // Для больших пауз — gapWatchTimer/gapClockTimer сами подтянут playhead
+            // до нужного момента, и onCurrentTimeChanged запустит клип в точное время.
+            if (next.startTime <= videoPlayer.currentTime + 0.5) {
+                videoPlayer.startTrack(track, next.startTime)
+                console.log("⏭ Track", track, "next (immediate):",
+                            next.path.split("/").pop())
+            } else {
+                // Клип далеко — просто останавливаем текущий источник.
+                // gapClockTimer сам доведёт время до next.startTime,
+                // после чего onCurrentTimeChanged запустит клип в точное время.
+                var mp = (track === 1) ? mediaPlayer1 : mediaPlayer2
+                if (track === 1)
+                    videoPlayer._stoppingTrack1 = true
+                else
+                    videoPlayer._stoppingTrack2 = true
+                mp.stop()
+                mp.source = ""
+                Qt.callLater(function () {
+                    if (track === 1)
+                        videoPlayer._stoppingTrack1 = false
+                    else
+                        videoPlayer._stoppingTrack2 = false
+                })
+                console.log("⏸ Track", track, "gap until",
+                            next.startTime.toFixed(2),
+                            "s — waiting for gapClock")
+            }
         } else {
-            // Нет клипа сразу — есть ли дальше на ЭТОМ треке?
-            var next = findNextOnTrack(videoPlayer.currentTime, track)
+
+            // Устанавливаем флаг ПЕРЕД stop() чтобы избежать рекурсии
+            if (track === 1) {
+                videoPlayer._stoppingTrack1 = true
+                Qt.callLater(function () {
+                    videoPlayer._stoppingTrack1 = false
+                })
+            } else {
+                videoPlayer._stoppingTrack2 = true
+                Qt.callLater(function () {
+                    videoPlayer._stoppingTrack2 = false
+                })
+            }
             mp.stop()
             mp.source = ""
 
             var otherTrack = (track === 1) ? 2 : 1
             var other = (track === 1) ? mediaPlayer2 : mediaPlayer1
 
-            // Пробуем запустить другой трек если он стоит, но должен играть.
-            // Ищем с запасом 0.5s назад — защита от timing jitter
             var startedOther = false
             if (other.playbackState !== MediaPlayer.PlayingState) {
                 var pOtherNow = videoPlayer.clipPathAt(videoPlayer.currentTime,
@@ -261,16 +325,10 @@ Rectangle {
             }
 
             if (!next) {
-                // Этот трек полностью закончился.
-                // Проверяем конец таймлайна: только если НИЧЕГО нет на обоих треках.
-                // ВАЖНО: даём небольшую задержку — startTrack асинхронный,
-                // PlayingState ещё не успевает обновиться сразу после вызова play().
-                // Если только что запустили другой трек (startedOther=true) — ждём watchdog.
                 if (!startedOther) {
                     var otherBusy = other.playbackState === MediaPlayer.PlayingState
                     var otherHasNow = videoPlayer.clipPathAt(
                                 videoPlayer.currentTime, otherTrack) !== ""
-                    // Ищем будущие клипы на другом треке с нулевым lookback
                     var nextOther = findNextOnTrack(videoPlayer.currentTime,
                                                     otherTrack)
 
@@ -285,9 +343,7 @@ Rectangle {
                         })
                     }
                 }
-                // Иначе: другой трек запущен или играет — watchdog подхватит
             }
-            // Если next есть — перезапустится через onCurrentTimeChanged или watchdog
         }
     }
 
@@ -313,23 +369,23 @@ Rectangle {
         if (_resyncing)
             return
 
-        // Запуск дорожки 2 если она остановлена, но клип под playhead появился
-        if (mediaPlayer2.playbackState !== MediaPlayer.PlayingState) {
+        // Запуск дорожки 2 если она остановлена, но клип под playhead появился.
+        // _stoppingTrack2 защищает только от рекурсии (один тик), не блокирует надолго.
+        if (mediaPlayer2.playbackState !== MediaPlayer.PlayingState
+                && !_stoppingTrack2) {
             var p2 = clipPathAt(currentTime, 2)
-            if (p2 !== "" && mediaPlayer2.source.toString() !== p2)
+            if (p2 !== "" && mediaPlayer2.source.toString() !== p2) {
                 startTrack(2, currentTime)
+            }
         }
 
         // Запуск дорожки 1 если она стоит, но клип под playhead появился.
-        // ВЫНЕСЕНО до проверки info1 — работает даже если info1==null.
-        // Это нужно для перехода из гэпа в новый клип (track2 двигает playhead,
-        // track1 в это время стоит, при достижении clip B track1 должна запуститься).
-        if (mediaPlayer1.playbackState !== MediaPlayer.PlayingState) {
+        if (mediaPlayer1.playbackState !== MediaPlayer.PlayingState
+                && !_stoppingTrack1) {
             var p1now = clipPathAt(currentTime, 1)
             if (p1now !== "" && mediaPlayer1.source.toString() !== p1now) {
                 startTrack(1, currentTime)
                 return
-                // Запустили — ресинхронизация не нужна
             }
         }
 
@@ -382,44 +438,21 @@ Rectangle {
                 return
             }
 
-            // При воспроизведении: клип мог быть УДАЛЁН или ОБРЕЗАН.
-            // ВАЖНО: при обрезке путь к файлу НЕ меняется — clipPathAt вернёт тот же path!
-            // Поэтому проверяем clipInfoAt: если info == null → клипа нет.
-            // Дополнительно: если info есть, но текущая позиция плеера вышла
-            // за пределы нового endTime клипа → тоже останавливаем.
-            var t = videoPlayer.currentTime
+            // При воспроизведении: клип мог быть УДАЛЁН, ОБРЕЗАН или ПЕРЕМЕЩЁН.
+            // ─── ВАЖНО: почему принудительно останавливаем оба плеера ───────
+            // При обрезке путь к файлу НЕ меняется — clipPathAt может вернуть
+            // тот же path. Если просто проверить clipPathAt(t)==="" и оставить
+            // играть дальше, MediaPlayer продолжит за новую trim-границу, потому
+            // что он не знает о нашем trimEnd (знает только длину полного файла).
+            // Решение: стоп → source="" → startPlayback() с нуля от currentTime.
+            // startPlayback вычислит правильный posMs=(t-startTime+trimStart)*1000.
+            // Минус: ~1 кадр чёрного при обрезке во время воспроизведения.
+            // Это лучше, чем играть обрезанное видео ещё несколько секунд.
+            mediaPlayer1.stop()
+            mediaPlayer1.source = ""
+            mediaPlayer2.stop()
+            mediaPlayer2.source = ""
 
-            if (mediaPlayer1.playbackState !== MediaPlayer.StoppedState) {
-                var info1 = videoPlayer.clipInfoAt(t, 1)
-                if (!info1) {
-                    // Клип удалён или нет клипа под playhead
-                    mediaPlayer1.stop()
-                    mediaPlayer1.source = ""
-                } else {
-                    // Клип есть — проверяем что позиция плеера в допустимом диапазоне
-                    var clipEnd1 = (info1.startTime + info1.duration) * 1000
-                    if (mediaPlayer1.position > clipEnd1 + 200) {
-                        mediaPlayer1.stop()
-                        mediaPlayer1.source = ""
-                    }
-                }
-            }
-
-            if (mediaPlayer2.playbackState !== MediaPlayer.StoppedState) {
-                var info2 = videoPlayer.clipInfoAt(t, 2)
-                if (!info2) {
-                    mediaPlayer2.stop()
-                    mediaPlayer2.source = ""
-                } else {
-                    var clipEnd2 = (info2.startTime + info2.duration) * 1000
-                    if (mediaPlayer2.position > clipEnd2 + 200) {
-                        mediaPlayer2.stop()
-                        mediaPlayer2.source = ""
-                    }
-                }
-            }
-
-            // Перезапускаем с текущей позиции
             videoPlayer._resyncing = true
             Qt.callLater(function () {
                 if (videoPlayer.isPlaying)
@@ -457,7 +490,8 @@ Rectangle {
             // Если клип есть под playhead но плеер не запущен — запускаем
             if (!p1busy) {
                 var p1 = videoPlayer.clipPathAt(t, 1)
-                if (p1 !== "" && mediaPlayer1.source.toString() !== p1) {
+                if (p1 !== "" && mediaPlayer1.source.toString() !== p1
+                        && !videoPlayer._stoppingTrack1) {
                     console.log("👁 Watchdog: запускаем T1 при t=",
                                 t.toFixed(2))
                     videoPlayer.startTrack(1, t)
@@ -465,7 +499,8 @@ Rectangle {
             }
             if (!p2busy) {
                 var p2 = videoPlayer.clipPathAt(t, 2)
-                if (p2 !== "" && mediaPlayer2.source.toString() !== p2) {
+                if (p2 !== "" && mediaPlayer2.source.toString() !== p2
+                        && !videoPlayer._stoppingTrack2) {
                     console.log("👁 Watchdog: запускаем T2 при t=",
                                 t.toFixed(2))
                     videoPlayer.startTrack(2, t)
@@ -533,7 +568,8 @@ Rectangle {
         videoOutput: videoOutput1
         audioOutput: AudioOutput {
             id: audioOut1
-            volume: videoPlayer.volume
+            muted: videoPlayer.hideAudio
+            volume: videoPlayer.hideAudio ? 0.0 : videoPlayer.volume
         }
         onErrorOccurred: function (e, s) {
             console.log("❌ T1:", s)
@@ -549,6 +585,17 @@ Rectangle {
 
             var t = mediaPlayer1.position / 1000.0 + track1Cache.clipStartTime
                     - track1Cache.clipTrimStart
+
+            // Клип обрезан/удалён — текущее время уже за пределами нового конца?
+            // clipPathAt проверяет реальные границы клипа в C++ (учитывает trim)
+            if (videoPlayer.clipPathAt(t, 1) === "") {
+                mediaPlayer1.stop()
+                mediaPlayer1.source = ""
+                if (mediaPlayer2.playbackState !== MediaPlayer.PlayingState)
+                    Qt.callLater(videoPlayer.startPlayback)
+                return
+            }
+
             videoPlayer.timePositionChanged(t)
 
             // Подхватываем дорожку 2 если она ещё не играет, но клип появился
@@ -583,7 +630,8 @@ Rectangle {
         videoOutput: videoOutput2
         audioOutput: AudioOutput {
             id: audioOut2
-            volume: videoPlayer.volume
+            muted: videoPlayer.hideAudio
+            volume: videoPlayer.hideAudio ? 0.0 : videoPlayer.volume
         }
         onErrorOccurred: function (e, s) {
             console.log("❌ T2:", s)
@@ -597,12 +645,29 @@ Rectangle {
                 return
             if (mediaPlayer2.playbackState !== MediaPlayer.PlayingState)
                 return
+
+            // дорожка 1 — мастер позиции
+            var t = mediaPlayer2.position / 1000.0 + track2Cache.clipStartTime
+                    - track2Cache.clipTrimStart
+
+            // ─── Проверка границы ВСЕГДА — даже если трек 1 играет ───────
+            // БАГ ИСПРАВЛЕН: раньше при track1.playing делали early return,
+            // не проверив нашлась ли track2 за пределами обрезанного клипа.
+            // Файл у MediaPlayer тот же — он не знает о нашем trimEnd.
+            // Результат: track2 продолжал играть за обрезанную границу пока
+            // сам файл не заканчивался. Теперь проверяем ПЕРВЫМ делом.
+            if (videoPlayer.clipPathAt(t, 2) === "") {
+                mediaPlayer2.stop()
+                mediaPlayer2.source = ""
+                if (mediaPlayer1.playbackState !== MediaPlayer.PlayingState)
+                    Qt.callLater(videoPlayer.startPlayback)
+                return
+            }
+
+            // Трек 1 управляет позицией playhead — дальше ничего не делаем
             if (mediaPlayer1.playbackState === MediaPlayer.PlayingState)
                 return
 
-            // дорожка 1 — мастер
-            var t = mediaPlayer2.position / 1000.0 + track2Cache.clipStartTime
-                    - track2Cache.clipTrimStart
             videoPlayer.timePositionChanged(t)
 
             // FIX: если дорожка 1 имеет клип, но не играет — запускаем её
@@ -672,7 +737,8 @@ Rectangle {
                 id: videoOutput2
                 anchors.fill: parent
                 z: 1
-                visible: videoPlayer.isPlaying && mediaPlayer2.source !== ""
+                visible: !videoPlayer.hideVideo && videoPlayer.isPlaying
+                         && mediaPlayer2.source !== ""
                          && mediaPlayer2.playbackState === MediaPlayer.PlayingState
             }
             // Дорожка 1 — поверх (z:2) + шейдер эффектов
@@ -680,7 +746,8 @@ Rectangle {
                 id: videoOutput1
                 anchors.fill: parent
                 z: 2
-                visible: videoPlayer.isPlaying
+                visible: !videoPlayer.hideVideo && !videoPlayer.hideTrack1Video
+                         && videoPlayer.isPlaying
                          && (mediaPlayer1.playbackState === MediaPlayer.PlayingState
                              || (mediaPlayer1.source !== ""
                                  && videoPlayer.clipPathAt(
@@ -717,7 +784,8 @@ gl_FragColor = vec4(clamp(c.rgb,0.0,1.0),1.0); }"
                 fillMode: Image.PreserveAspectFit
                 cache: false
                 asynchronous: true
-                visible: !videoPlayer.isPlaying
+                visible: !videoPlayer.hideVideo && !videoPlayer.hideTrack1Video
+                         && !videoPlayer.isPlaying
                          && videoPlayer.currentFrameSource !== ""
                 BusyIndicator {
                     anchors.centerIn: parent
