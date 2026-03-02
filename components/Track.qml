@@ -14,6 +14,10 @@ Rectangle {
     property var clips: []
     property int selectedClipId: -1
     property var clipStates: null
+    // *** Cross-track snap: клипы ДРУГОЙ дорожки для магнит-привязки ***
+    // Если магнит включён, перетаскиваемый клип притягивается к концам
+    // клипов как своей дорожки, так и дорожки-партнёра.
+    property var otherTrackClips: []
 
     signal clipClicked(int clipId)
     signal clipSelected(int clipId)
@@ -143,17 +147,18 @@ Rectangle {
                        // Snap
                        if (root.snapEnabled && root.clips) {
                            var threshold = 0.5
-                           for (var i = 0; i < root.clips.length; i++) {
-                               var c = root.clips[i]
+                           var allSnap = (root.clips || []).concat(root.otherTrackClips || [])
+                           for (var i = 0; i < allSnap.length; i++) {
+                               var c = allSnap[i]
                                if (c.id === clipId)
                                continue
+                               var cEnd = c.startTime + c.duration
                                if (Math.abs(time - c.startTime) < threshold) {
                                    time = c.startTime
                                    break
                                }
-                               if (Math.abs(
-                                       time - (c.startTime + c.duration)) < threshold) {
-                                   time = c.startTime + c.duration
+                               if (Math.abs(time - cEnd) < threshold) {
+                                   time = cEnd
                                    break
                                }
                            }
@@ -241,32 +246,41 @@ Rectangle {
             onMoved: newX => {
                          var newTime = newX / root.pixelsPerSecond
 
-                         // Snap к другим клипам
-                         if (root.snapEnabled && root.clips) {
+                         // *** Snap к краям клипов: своя дорожка + дорожка-партнёр ***
+                         // При включённом магните притягиваемся к startTime и endTime
+                         // всех клипов обеих дорожек (кроме самого перетаскиваемого).
+                         if (root.snapEnabled) {
                              var snapThreshold = 0.5
-                             for (var i = 0; i < root.clips.length; i++) {
-                                 var otherClip = root.clips[i]
-                                 if (otherClip.id === modelData.id)
-                                 continue
+                             // Объединяем клипы своей и чужой дорожки
+                             var allClips = (root.clips || []).concat(root.otherTrackClips || [])
+                             var snapped = false
+                             for (var i = 0; i < allClips.length && !snapped; i++) {
+                                 var c = allClips[i]
+                                 if (c.id === modelData.id)
+                                     continue
 
-                                 var otherStart = otherClip.startTime
-                                 var otherEnd = otherClip.startTime + otherClip.duration
+                                 var otherStart = c.startTime
+                                 var otherEnd = c.startTime + c.duration
 
-                                 if (Math.abs(
-                                         newTime - otherStart) < snapThreshold) {
+                                 // Начало нашего клипа → к началу другого
+                                 if (Math.abs(newTime - otherStart) < snapThreshold) {
                                      newTime = otherStart
-                                     break
-                                 }
-                                 if (Math.abs(
-                                         newTime - otherEnd) < snapThreshold) {
+                                     snapped = true
+                                 // Начало нашего клипа → к концу другого
+                                 } else if (Math.abs(newTime - otherEnd) < snapThreshold) {
                                      newTime = otherEnd
-                                     break
-                                 }
-                                 var curEnd = newTime + modelData.duration
-                                 if (Math.abs(
-                                         curEnd - otherStart) < snapThreshold) {
-                                     newTime = otherStart - modelData.duration
-                                     break
+                                     snapped = true
+                                 // Конец нашего клипа → к началу другого
+                                 } else {
+                                     var curEnd = newTime + modelData.duration
+                                     if (Math.abs(curEnd - otherStart) < snapThreshold) {
+                                         newTime = otherStart - modelData.duration
+                                         snapped = true
+                                     // Конец нашего клипа → к концу другого
+                                     } else if (Math.abs(curEnd - otherEnd) < snapThreshold) {
+                                         newTime = otherEnd - modelData.duration
+                                         snapped = true
+                                     }
                                  }
                              }
                          }

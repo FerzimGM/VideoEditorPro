@@ -15,6 +15,27 @@ Rectangle {
     property real pixelsPerSecond: 10
     property bool snapEnabled: true // Snap включён
 
+    // *** Клипы обеих дорожек для cross-track магнит-snap ***
+    // Каждой дорожке передаём клипы ДРУГОЙ дорожки, чтобы магнит
+    // притягивался к концам клипов на обеих дорожках одновременно.
+    property var track1Clips: []
+    property var track2Clips: []
+
+    Connections {
+        target: cppTimeline
+        function onClipsChanged() {
+            root.track1Clips = cppTimeline ? cppTimeline.getClipsForTrack(
+                                                 1) : []
+            root.track2Clips = cppTimeline ? cppTimeline.getClipsForTrack(
+                                                 2) : []
+        }
+    }
+
+    Component.onCompleted: {
+        root.track1Clips = cppTimeline ? cppTimeline.getClipsForTrack(1) : []
+        root.track2Clips = cppTimeline ? cppTimeline.getClipsForTrack(2) : []
+    }
+
     // *** Выделение клипов через property-цепочку (main → Timeline → Track → VideoClip) ***
     // Прямой доступ по ID между компонентами в QML не работает!
     property int selectedClipId: -1
@@ -30,7 +51,6 @@ Rectangle {
     signal effectsRequested(int clipId)
     signal showVideoContextMenu(int clipId, int track, string clipName, real x, real y)
     signal showAudioContextMenu(int clipId, int track, string clipName, bool isMuted, real x, real y)
-
 
     onZoomLevelChanged: {
         pixelsPerSecond = zoomLevel / 10
@@ -194,6 +214,8 @@ Rectangle {
                         pixelsPerSecond: root.pixelsPerSecond
                         //  root.snapEnabled (не timeline.snapEnabled)
                         snapEnabled: root.snapEnabled
+                        // *** Клипы другой дорожки для cross-track магнит-snap ***
+                        otherTrackClips: index === 0 ? root.track2Clips : root.track1Clips
                         // *** Передаём выделение вниз по цепочке ***
                         selectedClipId: root.selectedClipId
                         clipStates: root.clipStates

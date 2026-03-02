@@ -96,7 +96,6 @@ QVariantList Timeline::getClipsForTrack(int trackIndex) {
         }
     }
 
-    qDebug() << "📋 getClipsForTrack" << trackIndex << "→" << result.size() << "клипов";
     return result;
 }
 

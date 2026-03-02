@@ -152,6 +152,18 @@ QtObject {
         QtObject {
             id: clipStates
             property var _hidden: ({})
+            property var _muted: ({})
+            property int muteVersion: 0
+
+            function isMuted(clipId) {
+                return _muted[clipId] === true
+            }
+            function setMuted(clipId, val) {
+                var m = Object.assign({}, _muted)
+                m[clipId] = val
+                _muted = m
+                muteVersion++
+            }
 
             function setVideoHidden(clipId, val) {
                 var h = Object.assign({}, _hidden)
@@ -168,6 +180,25 @@ QtObject {
             }
             function isAudioHidden(clipId) {
                 return _hidden[clipId + "_a"] === true
+            }
+        }
+
+        // ===== КЭШ КЛИПОВ — обновляется только при clipsChanged =====
+        // Устраняет спам getClipsForTrack: раньше hideVideo/hideAudio вызывали
+        // getClipsForTrack при каждом изменении currentTime (25+ раз в секунду).
+        QtObject {
+            id: clipsCache
+            property var track1: []
+            property var track2: []
+        }
+        Connections {
+            id: clipsCacheUpdater
+            target: cppTimeline
+            function onClipsChanged() {
+                clipsCache.track1 = cppTimeline ? cppTimeline.getClipsForTrack(
+                                                      1) : []
+                clipsCache.track2 = cppTimeline ? cppTimeline.getClipsForTrack(
+                                                      2) : []
             }
         }
 
@@ -715,7 +746,7 @@ QtObject {
                                 if (!cppTimeline || !clipStates)
                                     return false
                                 var t = playbackManager.currentTime
-                                var c1 = cppTimeline.getClipsForTrack(1)
+                                var c1 = clipsCache.track1
                                 var track1HiddenHere = false
                                 for (var i = 0; i < c1.length; i++) {
                                     if (t >= c1[i].startTime
@@ -728,7 +759,7 @@ QtObject {
                                 if (!track1HiddenHere)
                                     return false
                                 // track1 скрыт — есть ли что-то на track2?
-                                var c2 = cppTimeline.getClipsForTrack(2)
+                                var c2 = clipsCache.track2
                                 for (var j = 0; j < c2.length; j++) {
                                     if (t >= c2[j].startTime
                                             && t < c2[j].startTime + c2[j].duration)
@@ -742,7 +773,7 @@ QtObject {
                                 if (!cppTimeline || !clipStates)
                                     return false
                                 var t2 = playbackManager.currentTime
-                                var clips1 = cppTimeline.getClipsForTrack(1)
+                                var clips1 = clipsCache.track1
                                 for (var ii = 0; ii < clips1.length; ii++) {
                                     if (t2 >= clips1[ii].startTime
                                             && t2 < clips1[ii].startTime + clips1[ii].duration)
@@ -751,23 +782,38 @@ QtObject {
                                 }
                                 return false
                             }
-                            hideAudio: {
-                                var _mv = clipStates.muteVersion // триггер mute
-                                var _ha = clipStates._hidden // триггер audioHidden
+                            // Per-track audio muting: каждый трек глушится независимо
+                            hideAudio1: {
+                                var _mv1 = clipStates.muteVersion
+                                var _ha1 = clipStates._hidden
                                 if (!cppTimeline || !clipStates)
                                     return false
-                                for (var tk = 1; tk <= 2; tk++) {
-                                    var tclips = cppTimeline.getClipsForTrack(
-                                                tk)
-                                    for (var j = 0; j < tclips.length; j++) {
-                                        var c2 = tclips[j]
-                                        var s2 = c2.startTime
-                                        if (playbackManager.currentTime >= s2
-                                                && playbackManager.currentTime < s2 + c2.duration)
-                                            return clipStates.isAudioHidden(
-                                                        c2.id)
-                                                    || clipStates.isMuted(c2.id)
-                                    }
+                                var t1 = playbackManager.currentTime
+                                var tc1 = clipsCache.track1
+                                for (var i1 = 0; i1 < tc1.length; i1++) {
+                                    if (t1 >= tc1[i1].startTime
+                                            && t1 < tc1[i1].startTime + tc1[i1].duration)
+                                        return clipStates.isAudioHidden(
+                                                    tc1[i1].id)
+                                                || clipStates.isMuted(
+                                                    tc1[i1].id)
+                                }
+                                return false
+                            }
+                            hideAudio2: {
+                                var _mv2 = clipStates.muteVersion
+                                var _ha2 = clipStates._hidden
+                                if (!cppTimeline || !clipStates)
+                                    return false
+                                var t2 = playbackManager.currentTime
+                                var tc2 = clipsCache.track2
+                                for (var i2 = 0; i2 < tc2.length; i2++) {
+                                    if (t2 >= tc2[i2].startTime
+                                            && t2 < tc2[i2].startTime + tc2[i2].duration)
+                                        return clipStates.isAudioHidden(
+                                                    tc2[i2].id)
+                                                || clipStates.isMuted(
+                                                    tc2[i2].id)
                                 }
                                 return false
                             }
