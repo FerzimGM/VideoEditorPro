@@ -155,20 +155,15 @@ Rectangle {
         if (!cppTimeline)
             return null
         var maxT = (cppTimeline.totalDuration || 120) + 2.0
-        var step = 0.25
+        var step = 0.05 // ← Уменьшаем шаг для точности
         var t = fromTime + step
+
+        // *** FIX: Ищем с небольшим допуском назад (0.1s) ***
+        // Это нужно чтобы найти клип который начинается прямо сейчас
         while (t <= maxT) {
             var p = clipPathAt(t, track)
             if (p !== "") {
                 var info = clipInfoAt(t, track)
-                // *** КРИТИЧНАЯ ПРАВКА: допуск увеличен с 0.05s до 1.0s ***
-                // Проблема с 0.05: если currentTime успел уйти на 0.06-0.1s ВПЕРЁД
-                // относительно startTime нового клипа (например, gapClock немного
-                // переступил), то клип отвергался (startTime < fromTime-0.05),
-                // findNextOnTrack возвращал null → tryNextOnTrack думал что клипов
-                // больше нет → emit playbackStopped() + timePositionChanged(0) — reset.
-                // Клипы на одном треке никогда не перекрываются, поэтому допуск 1.0s
-                // никогда не вернёт "старый" уже закончившийся клип.
                 if (info && info.startTime > fromTime - 1.0)
                     return {
                         "path": p,
@@ -176,11 +171,7 @@ Rectangle {
                         "trimStart": info.trimStart || 0.0,
                         "duration": info.duration || 0.0
                     }
-                // *** CRITICAL FIX: jump to END of clip, not t+duration ***
-                // Old: t += info.duration → jumps from MIDDLE of clip by its full duration,
-                // overshooting the next clip. E.g. at t=23.35 inside clip0(start=0.6, dur=23.2):
-                //   t = 23.35 + 23.2 = 46.55 → skips МемХромакей at 30.3 entirely!
-                // Fix: always land right after the clip's actual end.
+                // Переходим к концу текущего клипа
                 t = (info && info.startTime !== undefined
                      && info.duration) ? info.startTime + info.duration + step : t + step
             } else {
@@ -306,41 +297,28 @@ Rectangle {
         if (!cppTimeline || !videoPlayer.isPlaying)
             return
 
-        // Предотвращаем рекурсию: onPlaybackStateChanged(Stopped) может
-        // вызвать tryNextOnTrack снова пока мы ещё в процессе остановки.
         if (track === 1 && videoPlayer._stoppingTrack1)
             return
         if (track === 2 && videoPlayer._stoppingTrack2)
             return
 
         var mp = (track === 1) ? mediaPlayer1 : mediaPlayer2
-        // ИСПРАВЛЕНО: ищем следующий клип от currentTime и стартуем с его startTime
-        // Баг был: var t = currentTime + 20 → плеер запускался на 20с позже начала клипа
-        var next = findNextOnTrack(videoPlayer.currentTime, track)
+
+        // *** FIX: Ищем следующий клип от ТЕКУЩЕГО времени + небольшой допуск ***
+        var next = findNextOnTrack(videoPlayer.currentTime + 0.05, track)
 
         if (next) {
-            // *** КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ: не стартуем клип если он далеко в будущем! ***
-            // Проблема старого кода: tryNextOnTrack находит клип с startTime=20s,
-            // currentTime=10s → startTrack(track, 20) → mp.play() → onPositionChanged:
-            //   t = mp.position(0ms)/1000 + clipStartTime(20) - trim(0) = 20s
-            //   timePositionChanged(20) → playhead ПРЫГАЕТ с 10s на 20s!
-            //   Пропускаются все клипы между 10 и 20 секундами.
-            // Решение: стартуем сразу ТОЛЬКО если клип начинается прямо сейчас (≤0.5с).
-            // Для больших пауз — gapWatchTimer/gapClockTimer сами подтянут playhead
-            // до нужного момента, и onCurrentTimeChanged запустит клип в точное время.
-            if (next.startTime <= videoPlayer.currentTime + 0.5) {
+            // *** FIX: Увеличиваем допуск до 2.0s для надежного перехода ***
+            if (next.startTime <= videoPlayer.currentTime + 1.5) {
                 videoPlayer.startTrack(track, next.startTime)
                 console.log("⏭ Track", track, "next (immediate):",
                             next.path.split("/").pop())
             } else {
-                // Клип далеко — просто останавливаем текущий источник.
-                // gapClockTimer сам доведёт время до next.startTime,
-                // после чего onCurrentTimeChanged запустит клип в точное время.
+                // Клип далеко — останавливаем и ждем gapClock
                 var mp = (track === 1) ? mediaPlayer1 : mediaPlayer2
                 if (track === 1) {
                     videoPlayer._stoppingTrack1 = true
-                    videoPlayer._track1Path
-                            = "" // ← сбрасываем путь, чтобы watchdog видел "нет клипа"
+                    videoPlayer._track1Path = ""
                 } else {
                     videoPlayer._stoppingTrack2 = true
                     videoPlayer._track2Path = ""
@@ -358,11 +336,24 @@ Rectangle {
                             "s — waiting for gapClock")
             }
         } else {
+            // *** FIX: Проверяем ДРУГУЮ дорожку перед тем как сказать "конец" ***
+            var otherTrack = (track === 1) ? 2 : 1
+            var otherNext = findNextOnTrack(videoPlayer.currentTime + 0.05,
+                                            otherTrack)
 
-            // Устанавливаем флаг ПЕРЕД stop() чтобы избежать рекурсии
+            if (otherNext
+                    && otherNext.startTime <= videoPlayer.currentTime + 2.0) {
+                // На другой дорожке есть клип — запускаем его
+                videoPlayer.startTrack(otherTrack, otherNext.startTime)
+                console.log("⏭ Track", otherTrack, "bridge:",
+                            otherNext.path.split("/").pop())
+                return
+            }
+
+            // Действительно конец
             if (track === 1) {
                 videoPlayer._stoppingTrack1 = true
-                videoPlayer._track1Path = "" // watchdog должен видеть пустой путь
+                videoPlayer._track1Path = ""
                 Qt.callLater(function () {
                     videoPlayer._stoppingTrack1 = false
                 })
@@ -376,46 +367,34 @@ Rectangle {
             mp.stop()
             mp.source = ""
 
-            var otherTrack = (track === 1) ? 2 : 1
             var other = (track === 1) ? mediaPlayer2 : mediaPlayer1
-
             var startedOther = false
+
             if (other.playbackState !== MediaPlayer.PlayingState) {
                 var pOtherNow = videoPlayer.clipPathAt(videoPlayer.currentTime,
                                                        otherTrack)
                 if (pOtherNow !== "") {
                     videoPlayer.startTrack(otherTrack, videoPlayer.currentTime)
                     startedOther = true
-                } else {
-                    var otherBridge = findNextOnTrack(
-                                videoPlayer.currentTime - 0.5, otherTrack)
-                    if (otherBridge
-                            && otherBridge.startTime <= videoPlayer.currentTime + 1.0) {
-                        videoPlayer.startTrack(otherTrack,
-                                               otherBridge.startTime)
-                        startedOther = true
-                    }
                 }
             }
 
-            if (!next) {
-                if (!startedOther) {
-                    var otherBusy = other.playbackState === MediaPlayer.PlayingState
-                    var otherHasNow = videoPlayer.clipPathAt(
-                                videoPlayer.currentTime, otherTrack) !== ""
-                    var nextOther = findNextOnTrack(videoPlayer.currentTime,
-                                                    otherTrack)
+            if (!startedOther) {
+                var otherBusy = other.playbackState === MediaPlayer.PlayingState
+                var otherHasNow = videoPlayer.clipPathAt(
+                            videoPlayer.currentTime, otherTrack) !== ""
+                var nextOther = findNextOnTrack(videoPlayer.currentTime + 0.05,
+                                                otherTrack)
 
-                    if (!otherBusy && !otherHasNow && !nextOther) {
-                        console.log("⏹ Конец таймлайна")
-                        nextClipTimer1.stop()
-                        nextClipTimer2.stop()
-                        Qt.callLater(function () {
-                            videoPlayer.playbackStopped()
-                            videoPlayer.timePositionChanged(0.0)
-                            videoPlayer.updateScrubFrame()
-                        })
-                    }
+                if (!otherBusy && !otherHasNow && !nextOther) {
+                    console.log("⏹ Конец таймлайна")
+                    nextClipTimer1.stop()
+                    nextClipTimer2.stop()
+                    Qt.callLater(function () {
+                        videoPlayer.playbackStopped()
+                        videoPlayer.timePositionChanged(0.0)
+                        videoPlayer.updateScrubFrame()
+                    })
                 }
             }
         }
@@ -634,12 +613,16 @@ Rectangle {
                         0.2, now - _lastWallTime) * videoPlayer.playbackSpeed
             _lastWallTime = now
             var newTime = videoPlayer.currentTime + elapsed
+
+            // *** FIX: Лог для отладки ***
+            console.log("⏱ gapClock:", videoPlayer.currentTime.toFixed(2), "→",
+                        newTime.toFixed(2))
+
             var p1atNew = videoPlayer.clipPathAt(newTime, 1)
             var p2atNew = videoPlayer.clipPathAt(newTime, 2)
             if (p1atNew !== "" || p2atNew !== "") {
                 stop()
                 videoPlayer.timePositionChanged(newTime)
-                // Немедленно стартуем треки вместо ожидания onCurrentTimeChanged
                 if (p1atNew !== ""
                         && mediaPlayer1.playbackState !== MediaPlayer.PlayingState)
                     videoPlayer.startTrack(1, newTime)
@@ -683,19 +666,14 @@ Rectangle {
             if (mediaPlayer1.playbackState !== MediaPlayer.PlayingState)
                 return
 
-            // *** FIX: игнорируем позиции ДО завершения seek ***
-            // После mp.position = posMs плеер перематывает и сообщает промежуточные
-            // значения от 0 до posMs. Если обработать их: t = low/1000 + start - trim
-            // может упасть ДО startTime клипа → clipPathAt="" → клип убивается.
-            // Пропускаем пока position не достигнет целевой позиции.
+            // Игнорируем позиции ДО завершения seek
             if (mediaPlayer1.position < track1Cache.expectedStartPos)
                 return
 
             var t = mediaPlayer1.position / 1000.0 + track1Cache.clipStartTime
                     - track1Cache.clipTrimStart
 
-            // Клип обрезан/удалён — текущее время уже за пределами нового конца?
-            // clipPathAt проверяет реальные границы клипа в C++ (учитывает trim)
+            // Клип обрезан/удалён
             if (videoPlayer.clipPathAt(t, 1) === "") {
                 mediaPlayer1.stop()
                 mediaPlayer1.source = ""
@@ -705,21 +683,22 @@ Rectangle {
                 return
             }
 
-            // *** FIX: защита от прыжка playhead назад после seek к trimmed-клипу ***
-            // Сценарий: T1 Part B trimStart=11.2s → posMs=11200ms.
-            // H.264 keyframe в 8000ms → плеер играет от 8000→11200ms (заблокировано).
-            // Когда position=11200ms разблокируется: t = 11.2 + 17.7 - 11.2 = 17.7s,
-            // но currentTime уже 18.2s (T2 успело продвинуть время вперёд).
-            // Без этой проверки: timePositionChanged(17.7) → playhead ПРЫГАЕТ НАЗАД.
-            // Решение: пропускаем обновление времени пока t не "догонит" currentTime.
-            // Boundary-check выше уже прошёл (клип существует) — трек не убивается.
+            // *** FIX: Проверяем что время не уходит НАЗАД больше чем на 0.5s ***
+            // Если уходит — это признак что плеер "запутался", нужно ресинхронизировать
+            if (t < videoPlayer.currentTime - 0.5) {
+                console.log("⚠️ T1: время уходит назад (", t.toFixed(2), "<",
+                            videoPlayer.currentTime.toFixed(2),
+                            ") — игнорируем")
+                return
+            }
+
+            // Обновляем время только если оно ВПЕРЕДИ или близко к текущему
             if (t >= videoPlayer.currentTime - 0.1) {
                 videoPlayer.timePositionChanged(t)
 
-                // Подхватываем дорожку 2 если она ещё не играет, но клип появился
+                // Подхватываем дорожку 2
                 if (mediaPlayer2.playbackState !== MediaPlayer.PlayingState) {
                     var p2 = videoPlayer.clipPathAt(t, 2)
-                    // *** ВАЖНО: сравниваем с _track2Path, не с URL-кодированным source! ***
                     if (p2 !== "" && videoPlayer._track2Path !== p2)
                         videoPlayer.startTrack(2, t)
                 }

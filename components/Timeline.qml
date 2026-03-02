@@ -21,6 +21,11 @@ Rectangle {
     property var track1Clips: []
     property var track2Clips: []
 
+    // ✅ Отслеживать изменения snapEnabled
+    onSnapEnabledChanged: {
+        console.log("🧲 Snap:", snapEnabled ? "ВКЛ" : "ВЫКЛ")
+    }
+
     Connections {
         target: cppTimeline
         function onClipsChanged() {
@@ -371,8 +376,9 @@ Rectangle {
                 acceptedButtons: Qt.LeftButton
 
                 onClicked: mouse => {
-                               var time = (mouse.x + timelineFlickable.contentX)
-                               / root.pixelsPerSecond
+                               // *** FIX: mouse.x уже внутри flickable — НЕ добавляем contentX! ***
+                               // mouse.x — это позиция относительно начала контента flickable
+                               var time = mouse.x / root.pixelsPerSecond
                                root.timeChanged(
                                    Math.max(0, Math.min(root.duration, time)))
                            }

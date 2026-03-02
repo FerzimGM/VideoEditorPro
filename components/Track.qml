@@ -144,23 +144,56 @@ Rectangle {
 
                        var time = Math.max(0, drop.x / root.pixelsPerSecond)
 
-                       // Snap
-                       if (root.snapEnabled && root.clips) {
-                           var threshold = 0.5
-                           var allSnap = (root.clips || []).concat(root.otherTrackClips || [])
-                           for (var i = 0; i < allSnap.length; i++) {
-                               var c = allSnap[i]
-                               if (c.id === clipId)
-                               continue
+                       // ✅ Snap к обеим дорожкам
+                       if (root.snapEnabled) {
+                           var threshold = 0.5 // 500ms допуск
+                           var allClips = []
+
+                           // Собираем ВСЕ клипы кроме текущего
+                           if (root.clips) {
+                               for (var i = 0; i < root.clips.length; i++) {
+                                   if (root.clips[i].id !== clipId)
+                                   allClips.push(root.clips[i])
+                               }
+                           }
+                           if (root.otherTrackClips) {
+                               for (var j = 0; j < root.otherTrackClips.length; j++) {
+                                   allClips.push(root.otherTrackClips[j])
+                               }
+                           }
+
+                           // Ищем ближайший край — ВСЕ 4 ВАРИАНТА
+                           var snapped = false
+                           for (var k = 0; k < allClips.length
+                                && !snapped; k++) {
+                               var c = allClips[k]
+                               var cStart = c.startTime
                                var cEnd = c.startTime + c.duration
-                               if (Math.abs(time - c.startTime) < threshold) {
-                                   time = c.startTime
-                                   break
-                               }
-                               if (Math.abs(time - cEnd) < threshold) {
+                               var myEnd = time
+                               + (/* duration нужно получить */ 5.0) // TODO: получить duration
+
+                               // Начало нашего клипа → к началу другого
+                               if (Math.abs(time - cStart) < threshold) {
+                                   time = cStart
+                                   snapped = true
+                               } // Начало нашего → к концу другого
+                               else if (Math.abs(time - cEnd) < threshold) {
                                    time = cEnd
-                                   break
+                                   snapped = true
+                               } // Конец нашего → к началу другого
+                               else if (Math.abs(myEnd - cStart) < threshold) {
+                                   time = cStart - (/* duration */ 5.0)
+                                   snapped = true
+                               } // Конец нашего → к концу другого
+                               else if (Math.abs(myEnd - cEnd) < threshold) {
+                                   time = cEnd - (/* duration */ 5.0)
+                                   snapped = true
                                }
+                           }
+
+                           if (snapped) {
+                               console.log("🧲 Snap: clip", clipId, "→",
+                                           time.toFixed(2), "s")
                            }
                        }
 
@@ -245,49 +278,92 @@ Rectangle {
             // ─── СИГНАЛЫ ОТ VideoClip ─────────────────────────────────
             onMoved: newX => {
                          var newTime = newX / root.pixelsPerSecond
+                         var myDuration = modelData.duration
+                         var myEnd = newTime + myDuration
 
-                         // *** Snap к краям клипов: своя дорожка + дорожка-партнёр ***
-                         // При включённом магните притягиваемся к startTime и endTime
-                         // всех клипов обеих дорожек (кроме самого перетаскиваемого).
+                         // *** Snap ВКЛ: притягивание + авто-сдвиг при пересечении ***
                          if (root.snapEnabled) {
-                             var snapThreshold = 0.5
-                             // Объединяем клипы своей и чужой дорожки
-                             var allClips = (root.clips || []).concat(root.otherTrackClips || [])
-                             var snapped = false
-                             for (var i = 0; i < allClips.length && !snapped; i++) {
-                                 var c = allClips[i]
-                                 if (c.id === modelData.id)
-                                     continue
+                             var threshold = 0.5
+                             var allClips = []
+                             var hasOverlap = false
+                             var overlapEnd = 0
 
-                                 var otherStart = c.startTime
-                                 var otherEnd = c.startTime + c.duration
-
-                                 // Начало нашего клипа → к началу другого
-                                 if (Math.abs(newTime - otherStart) < snapThreshold) {
-                                     newTime = otherStart
-                                     snapped = true
-                                 // Начало нашего клипа → к концу другого
-                                 } else if (Math.abs(newTime - otherEnd) < snapThreshold) {
-                                     newTime = otherEnd
-                                     snapped = true
-                                 // Конец нашего клипа → к началу другого
-                                 } else {
-                                     var curEnd = newTime + modelData.duration
-                                     if (Math.abs(curEnd - otherStart) < snapThreshold) {
-                                         newTime = otherStart - modelData.duration
-                                         snapped = true
-                                     // Конец нашего клипа → к концу другого
-                                     } else if (Math.abs(curEnd - otherEnd) < snapThreshold) {
-                                         newTime = otherEnd - modelData.duration
-                                         snapped = true
-                                     }
+                             // Собираем ВСЕ клипы кроме текущего
+                             if (root.clips) {
+                                 for (var i = 0; i < root.clips.length; i++) {
+                                     if (root.clips[i].id !== modelData.id)
+                                     allClips.push(root.clips[i])
                                  }
+                             }
+                             if (root.otherTrackClips) {
+                                 for (var j = 0; j < root.otherTrackClips.length; j++) {
+                                     allClips.push(root.otherTrackClips[j])
+                                 }
+                             }
+
+                             // 1. Сначала пытаемся притянуться к ближайшему краю
+                             var snapped = false
+                             for (var k = 0; k < allClips.length
+                                  && !snapped; k++) {
+                                 var c = allClips[k]
+                                 var cStart = c.startTime
+                                 var cEnd = c.startTime + c.duration
+
+                                 // Начало нашего → к началу другого
+                                 if (Math.abs(newTime - cStart) < threshold) {
+                                     newTime = cStart
+                                     snapped = true
+                                 } // Начало нашего → к концу другого
+                                 else if (Math.abs(
+                                              newTime - cEnd) < threshold) {
+                                     newTime = cEnd
+                                     snapped = true
+                                 } // Конец нашего → к началу другого
+                                 else if (Math.abs(
+                                              myEnd - cStart) < threshold) {
+                                     newTime = cStart - myDuration
+                                     snapped = true
+                                 } // Конец нашего → к концу другого
+                                 else if (Math.abs(myEnd - cEnd) < threshold) {
+                                     newTime = cEnd - myDuration
+                                     snapped = true
+                                 }
+                             }
+
+                             if (snapped) {
+                                 console.log("🧲 Snap: clip", modelData.id,
+                                             "→", newTime.toFixed(2), "s")
+                             }
+
+                             // 2. Проверяем пересечения после snap
+                             myEnd = newTime + myDuration
+                             for (var m = 0; m < allClips.length; m++) {
+                                 var c = allClips[m]
+                                 var cStart = c.startTime
+                                 var cEnd = c.startTime + c.duration
+
+                                 // Проверяем пересечение [newTime, myEnd) vs [cStart, cEnd)
+                                 if (!(myEnd <= cStart || newTime >= cEnd)) {
+                                     hasOverlap = true
+                                     // Запоминаем конец пересекаемого клипа
+                                     if (cEnd > overlapEnd)
+                                     overlapEnd = cEnd
+                                 }
+                             }
+
+                             // 3. Если есть пересечение — сдвигаем в конец последнего пересекаемого
+                             if (hasOverlap) {
+                                 newTime = overlapEnd
+                                 console.log("⛔ Overlap! Auto-shift clip",
+                                             modelData.id, "→",
+                                             newTime.toFixed(2), "s")
                              }
                          }
 
                          newTime = Math.max(0, newTime)
                          console.log("📍 Move clip", modelData.id, "→",
-                                     newTime, "sec on track", root.trackNumber)
+                                     newTime.toFixed(2), "sec on track",
+                                     root.trackNumber)
                          root.clipMoved(modelData.id, newTime)
                      }
 

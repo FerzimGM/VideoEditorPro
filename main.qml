@@ -864,7 +864,11 @@ QtObject {
                         onSpeedChanged: speed => {
                                             playbackManager.playbackSpeed = speed
                                         }
-                        onSnapToggled: playbackManager.snapEnabled = !playbackManager.snapEnabled
+                        onSnapToggled: {
+                            playbackManager.snapEnabled = !playbackManager.snapEnabled
+                            // ✅ ДОБАВИТЬ: передача в timeline
+                            timeline.snapEnabled = playbackManager.snapEnabled
+                        }
 
                         onCutClicked: {
                             if (!root.cutKeyPressed) {
