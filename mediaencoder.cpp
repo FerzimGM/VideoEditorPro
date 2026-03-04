@@ -199,7 +199,7 @@ bool MediaEncoder::initializeAudio() {
     m_audioCodecContext->codec_id    = AV_CODEC_ID_AAC;
     m_audioCodecContext->sample_fmt  = AV_SAMPLE_FMT_FLTP;  // AAC требует float planar
     m_audioCodecContext->sample_rate = AUDIO_SAMPLE_RATE;
-    m_audioCodecContext->bit_rate    = 128000;  // 128 kbps
+    m_audioCodecContext->bit_rate    = 192000;  // 192 kbps — хорошее качество
 
     // Стерео layout
     AVChannelLayout stereo;

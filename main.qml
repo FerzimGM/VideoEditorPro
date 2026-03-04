@@ -59,6 +59,11 @@ QtObject {
         // Shortcuts тоже в Window root → доступ без проблем
         property bool cutKeyPressed: false
 
+        // ===== ПАРАМЕТРЫ ЭКСПОРТА (из ExportPanel в LeftSidebar) =====
+        // Сохраняются когда пользователь нажимает "Сохранить видео"
+        property string _exportResolution: "1920×1080"
+        property string _exportFormat: "MP4"
+
         // Resize handles
         MouseArea {
             anchors.right: parent.right
@@ -538,7 +543,7 @@ QtObject {
             id: exportFileDialog
             fileMode: FileDialog.SaveFile
             title: "Экспорт видео"
-            nameFilters: ["MP4 (*.mp4)", "AVI (*.avi)", "MOV (*.mov)", "MKV (*.mkv)"]
+            nameFilters: ["MP4 (*.mp4)", "AVI (*.avi)", "MOV (*.mov)", "MKV (*.mkv)", "WebM (*.webm)"]
             defaultSuffix: "mp4"
             onAccepted: {
                 var filepath = selectedFile.toString()
@@ -550,8 +555,8 @@ QtObject {
                 exportDialog.renderProgress = 0
                 exportDialog.open()
 
-                // Парсим разрешение из ComboBox
-                var resText = resolutionCombo.currentText
+                // Разрешение из ExportPanel (сохранено в root)
+                var resText = root._exportResolution || "1920×1080"
                 var w = 1920, h = 1080
                 if (resText.indexOf("1280") >= 0) {
                     w = 1280
@@ -564,8 +569,20 @@ QtObject {
                     h = 1440
                 }
 
-                // Синхронизируем состояния и запускаем рендер
-                syncStatesAndRender(filepath, w, h)
+                var fmt = root._exportFormat || "MP4"
+
+                // Синхронизируем clipStates → C++ и запускаем рендер
+                // (инлайн вместо функции — FileDialog.onAccepted в Qt 6
+                //  не видит функции ApplicationWindow напрямую)
+                var hiddenMap = {}
+                var mutedMap = {}
+                for (var i = 0; i < cppTimeline.clipCount; i++) {
+                    hiddenMap[i + "_v"] = clipStates.isVideoHidden(i)
+                    hiddenMap[i + "_a"] = clipStates.isAudioHidden(i)
+                    mutedMap[i] = clipStates.isMuted(i)
+                }
+                cppTimeline.syncClipStatesForRender(hiddenMap, mutedMap)
+                cppTimeline.renderToFile(filepath, w, h, fmt)
             }
         }
 
@@ -747,6 +764,24 @@ QtObject {
                     Layout.preferredWidth: Theme.sidebarWidth
                     Layout.fillHeight: true
                     videoPlayer: videoPlayer
+
+                    // Кнопка "СОХРАНИТЬ ВИДЕО" в ExportPanel
+                    onExportRequested: (resolution, format) => {
+                                           root._exportResolution = resolution
+                                           root._exportFormat = format
+                                           // Выставляем расширение по умолчанию
+                                           var extMap = {
+                                               "MP4": "mp4",
+                                               "AVI": "avi",
+                                               "MOV": "mov",
+                                               "MKV": "mkv",
+                                               "WEBM": "webm",
+                                               "WebM": "webm"
+                                           }
+                                           exportFileDialog.defaultSuffix = extMap[format]
+                                           || "mp4"
+                                           exportFileDialog.open()
+                                       }
                 }
 
                 // Центральная колонка

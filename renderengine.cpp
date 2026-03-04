@@ -132,30 +132,43 @@ void RenderWorker::cancel() {
     m_cancelled = true;
 }
 
-// ===== КЭШ ДЕКОДЕРОВ =====
-MediaDecoder* RenderWorker::getDecoder(const QString& filepath) {
-    if (m_decoders.contains(filepath)) {
-        return m_decoders[filepath];
-    }
+// ===== КЭШ ДЕКОДЕРОВ (раздельный для видео и аудио) =====
+MediaDecoder* RenderWorker::getVideoDecoder(const QString& filepath) {
+    if (m_videoDecoders.contains(filepath))
+        return m_videoDecoders[filepath];
 
     auto* decoder = new MediaDecoder();
     if (!decoder->openFile(filepath)) {
-        qWarning() << "⚠️ Не могу открыть" << filepath;
+        qWarning() << "⚠️ Не могу открыть (video):" << filepath;
         delete decoder;
         return nullptr;
     }
+    m_videoDecoders[filepath] = decoder;
+    return decoder;
+}
 
-    m_decoders[filepath] = decoder;
+MediaDecoder* RenderWorker::getAudioDecoder(const QString& filepath) {
+    if (m_audioDecoders.contains(filepath))
+        return m_audioDecoders[filepath];
+
+    auto* decoder = new MediaDecoder();
+    if (!decoder->openFile(filepath)) {
+        qWarning() << "⚠️ Не могу открыть (audio):" << filepath;
+        delete decoder;
+        return nullptr;
+    }
+    m_audioDecoders[filepath] = decoder;
     return decoder;
 }
 
 void RenderWorker::closeAllDecoders() {
-    for (auto* decoder : m_decoders) {
-        decoder->closeFile();
-        delete decoder;
-    }
-    m_decoders.clear();
+    for (auto* d : m_videoDecoders) { d->closeFile(); delete d; }
+    for (auto* d : m_audioDecoders) { d->closeFile(); delete d; }
+    m_videoDecoders.clear();
+    m_audioDecoders.clear();
+    m_videoPositions.clear();
 }
+
 
 // ===== НАЙТИ АКТИВНЫЙ КЛИП =====
 TimelineClip* RenderWorker::findActiveClip(double time, int trackIndex) {
@@ -245,14 +258,34 @@ QImage RenderWorker::compositeVideoAt(double time) {
 }
 
 // ===== ДЕКОДИРОВАТЬ ВИДЕОКАДР КЛИПА =====
+// Использует отдельный видеодекодер (не смешанный с аудио).
+// Читает последовательно — seek только при старте или прыжке.
 QImage RenderWorker::decodeVideoFrame(TimelineClip* clip, double timelineTime) {
-    MediaDecoder* decoder = getDecoder(clip->filepath);
+    MediaDecoder* decoder = getVideoDecoder(clip->filepath);
     if (!decoder || !decoder->hasVideo()) return QImage();
 
-    // Вычислить время в исходном файле
     double sourceTime = clip->sourceTimeAt(timelineTime);
+    double fps = decoder->getFrameRate();
+    double frameDur = (fps > 0) ? (1.0 / fps) : 0.04;
 
-    return decoder->getFrameAt(sourceTime);
+    QString key = clip->filepath;
+    double lastPos = m_videoPositions.value(key, -1.0);
+
+    bool needSeek = (lastPos < 0.0) ||
+                    (sourceTime < lastPos - frameDur * 0.5) ||
+                    (sourceTime > lastPos + frameDur * 5.0);
+
+    QImage frame;
+    if (needSeek) {
+        frame = decoder->getFrameAt(sourceTime);
+    } else {
+        frame = decoder->getNextFrame();
+    }
+
+    if (!frame.isNull())
+        m_videoPositions[key] = sourceTime;
+
+    return frame;
 }
 
 // ===== МИКШИРОВАНИЕ АУДИО =====
@@ -306,7 +339,8 @@ QVector<float> RenderWorker::mixAudioAt(double time, double frameDuration) {
 QVector<float> RenderWorker::decodeAudioChunk(TimelineClip* clip,
                                               double timelineTime,
                                               double duration) {
-    MediaDecoder* decoder = getDecoder(clip->filepath);
+    // Используем отдельный аудиодекодер — он не мешает видеодекодеру
+    MediaDecoder* decoder = getAudioDecoder(clip->filepath);
     if (!decoder || !decoder->hasAudio()) return QVector<float>();
 
     double sourceTime = clip->sourceTimeAt(timelineTime);
@@ -567,4 +601,5 @@ QImage RenderEngine::applyGrayscale(const QImage& frame) {
     }
     return result;
 }
+
 

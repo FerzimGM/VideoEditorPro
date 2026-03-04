@@ -63,11 +63,20 @@ private:
     int m_bitrate;
     bool m_cancelled;
 
-    // Кэш декодеров: filepath → MediaDecoder*
-    QMap<QString, MediaDecoder*> m_decoders;
+    // РАЗДЕЛЬНЫЕ кэши декодеров для видео и аудио.
+    // Нельзя использовать один декодер на файл: av_read_frame читает пакеты
+    // обоих потоков вперемешку. Если аудиодекодер читает аудиопакеты,
+    // он пропускает (выбрасывает) видеопакеты — следующий getNextFrame()
+    // получает неверную позицию и возвращает только keyframes.
+    QMap<QString, MediaDecoder*> m_videoDecoders;  // только видео
+    QMap<QString, MediaDecoder*> m_audioDecoders;  // только аудио
+
+    // Позиция последнего декодированного видеокадра (для sequential read)
+    QMap<QString, double> m_videoPositions;
 
     // Получить или создать декодер для файла
-    MediaDecoder* getDecoder(const QString& filepath);
+    MediaDecoder* getVideoDecoder(const QString& filepath);
+    MediaDecoder* getAudioDecoder(const QString& filepath);
 
     // Закрыть все кэшированные декодеры
     void closeAllDecoders();

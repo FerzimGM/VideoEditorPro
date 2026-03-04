@@ -83,7 +83,8 @@ public:
     // outputPath — путь к файлу
     // width, height — разрешение (из exportDialog)
     Q_INVOKABLE bool renderToFile(const QString& outputPath,
-                                  int width = 1920, int height = 1080);
+                                  int width = 1920, int height = 1080,
+                                  const QString& format = "MP4");
 
     // Отменить текущий рендеринг
     Q_INVOKABLE void cancelRender();

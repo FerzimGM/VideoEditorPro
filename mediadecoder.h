@@ -96,6 +96,20 @@ private:
     AVFrame* m_rgbFrame;
     AVPacket* m_packet;
 
+    // Позиция последнего декодированного аудио (для sequential read без seek)
+    double m_lastAudioPos;
+
+    // Буфер переполнения: сэмплы декодированные сверх запроса.
+    // AAC-фрейм = 1024 сэмплов, запрос на 33мс = ~1470 сэмплов.
+    // Читаем 2 AAC-фрейма (2048), лишние 578 кладём сюда — не выбрасываем.
+    // Следующий вызов начинает с этих 578 → непрерывный поток без дырок.
+    QVector<float> m_audioOverflow;
+
+    // Кэшированные параметры SwsContext (для пересоздания при смене формата)
+    AVPixelFormat m_cachedSwsFmt;
+    int m_cachedSwsW;
+    int m_cachedSwsH;
+
     // Вспомогательные функции
     bool initializeVideo();
     bool initializeAudio();
@@ -105,4 +119,6 @@ private:
 };
 
 #endif // MEDIADECODER_H
+
+
 

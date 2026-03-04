@@ -15,6 +15,10 @@ MediaDecoder::MediaDecoder(QObject *parent)
     , m_frame(nullptr)
     , m_rgbFrame(nullptr)
     , m_packet(nullptr)
+    , m_lastAudioPos(-1.0)
+    , m_cachedSwsFmt(AV_PIX_FMT_NONE)
+    , m_cachedSwsW(0)
+    , m_cachedSwsH(0)
 {
 }
 
@@ -104,6 +108,11 @@ void MediaDecoder::closeFile() {
     m_audioStream      = nullptr;
     m_videoStreamIndex = -1;
     m_audioStreamIndex = -1;
+    m_lastAudioPos     = -1.0;
+    m_audioOverflow.clear();
+    m_cachedSwsFmt     = AV_PIX_FMT_NONE;
+    m_cachedSwsW       = 0;
+    m_cachedSwsH       = 0;
 }
 
 // ===== ИНИЦИАЛИЗАЦИЯ ВИДЕО =====
@@ -211,11 +220,38 @@ bool MediaDecoder::initializeSwrContext() {
     return true;
 }
 
-// ===== ПОЛУЧИТЬ КАДР В УКАЗАННОЕ ВРЕМЯ =====
 QImage MediaDecoder::getFrameAt(double timestamp) {
-    if (!m_videoCodecContext) return QImage();
+    if (!m_videoCodecContext || !m_videoStream) return QImage();
     if (!seekTo(timestamp)) return QImage();
-    return getNextFrame();
+
+    double timeBase = av_q2d(m_videoStream->time_base);
+    double fps = getFrameRate();
+    double frameDur = (fps > 0) ? (1.0 / fps) : 0.04;
+    QImage lastGood;
+
+    for (int decoded = 0; decoded < 300; ++decoded) {
+        if (av_read_frame(m_formatContext, m_packet) < 0) break;
+        if (m_packet->stream_index != m_videoStreamIndex) {
+            av_packet_unref(m_packet); continue;
+        }
+        int ret = avcodec_send_packet(m_videoCodecContext, m_packet);
+        av_packet_unref(m_packet);
+        if (ret < 0) continue;
+
+        ret = avcodec_receive_frame(m_videoCodecContext, m_frame);
+        if (ret != 0) continue;
+
+        double pts = 0.0;
+        if (m_frame->best_effort_timestamp != AV_NOPTS_VALUE)
+            pts = m_frame->best_effort_timestamp * timeBase;
+        else if (m_frame->pts != AV_NOPTS_VALUE)
+            pts = m_frame->pts * timeBase;
+
+        QImage img = avFrameToQImage(m_frame);
+        if (!img.isNull()) lastGood = img;
+        if (pts >= timestamp - frameDur * 0.5) return lastGood;
+    }
+    return lastGood;
 }
 
 // ===== ПОЛУЧИТЬ СЛЕДУЮЩИЙ ВИДЕОКАДР =====
@@ -242,39 +278,43 @@ QImage MediaDecoder::getNextFrame() {
     return QImage();
 }
 
-// ===== КОНВЕРТАЦИЯ AVFrame → QImage =====
 QImage MediaDecoder::avFrameToQImage(AVFrame* frame) {
-    if (!frame) return QImage();
+    if (!frame || frame->width <= 0 || frame->height <= 0) return QImage();
 
     int width  = frame->width;
     int height = frame->height;
+    AVPixelFormat srcFmt = (AVPixelFormat)frame->format;
 
-    // Создать/пересоздать SwsContext при необходимости
-    if (!m_swsContext) {
+    if (!m_swsContext ||
+        srcFmt != m_cachedSwsFmt ||
+        width  != m_cachedSwsW   ||
+        height != m_cachedSwsH)
+    {
+        if (m_swsContext) { sws_freeContext(m_swsContext); m_swsContext = nullptr; }
         m_swsContext = sws_getContext(
-            width, height, (AVPixelFormat)frame->format,
+            width, height, srcFmt,
             width, height, AV_PIX_FMT_RGB24,
-            SWS_BILINEAR, nullptr, nullptr, nullptr
-            );
+            SWS_BILINEAR, nullptr, nullptr, nullptr);
+        if (!m_swsContext) return QImage();
+        m_cachedSwsFmt = srcFmt;
+        m_cachedSwsW   = width;
+        m_cachedSwsH   = height;
     }
-    if (!m_swsContext) return QImage();
 
-    // Выделить буфер для RGB
-    int numBytes = av_image_get_buffer_size(AV_PIX_FMT_RGB24, width, height, 1);
-    uint8_t* buffer = (uint8_t*)av_malloc(numBytes);
+    int numBytes = av_image_get_buffer_size(AV_PIX_FMT_RGB24, width, height, 32);
+    uint8_t* buffer = (uint8_t*)av_malloc(numBytes + AV_INPUT_BUFFER_PADDING_SIZE);
+    if (!buffer) return QImage();
 
     av_image_fill_arrays(m_rgbFrame->data, m_rgbFrame->linesize,
-                         buffer, AV_PIX_FMT_RGB24, width, height, 1);
+                         buffer, AV_PIX_FMT_RGB24, width, height, 32);
 
-    // Конвертировать
-    sws_scale(m_swsContext, frame->data, frame->linesize,
+    sws_scale(m_swsContext,
+              (const uint8_t* const*)frame->data, frame->linesize,
               0, height, m_rgbFrame->data, m_rgbFrame->linesize);
 
-    // Создать QImage (копия — т.к. buffer будет освобождён)
     QImage image(m_rgbFrame->data[0], width, height,
                  m_rgbFrame->linesize[0], QImage::Format_RGB888);
     QImage result = image.copy();
-
     av_free(buffer);
     return result;
 }
@@ -283,24 +323,43 @@ QImage MediaDecoder::avFrameToQImage(AVFrame* frame) {
 // Возвращает interleaved float PCM: [L0, R0, L1, R1, ...]
 // Всегда OUTPUT_SAMPLE_RATE (44100), OUTPUT_CHANNELS (2)
 QVector<float> MediaDecoder::decodeAudioRange(double startTime, double duration) {
-    if (!m_audioCodecContext || !m_swrContext || !m_formatContext) {
+    if (!m_audioCodecContext || !m_swrContext || !m_formatContext)
         return QVector<float>();
-    }
 
     int totalSamples = static_cast<int>(duration * OUTPUT_SAMPLE_RATE);
+    int totalFloats  = totalSamples * OUTPUT_CHANNELS;
+
+    // ── Seek только при прыжке ────────────────────────────────────────────
+    bool needSeek = (m_lastAudioPos < 0.0) ||
+                    (startTime < m_lastAudioPos - 0.05) ||
+                    (startTime > m_lastAudioPos + duration * 8.0);
+
+    if (needSeek) {
+        m_audioOverflow.clear();
+        int64_t t = static_cast<int64_t>(startTime * AV_TIME_BASE);
+        av_seek_frame(m_formatContext, -1, t, AVSEEK_FLAG_BACKWARD);
+        avcodec_flush_buffers(m_audioCodecContext);
+        swr_convert(m_swrContext, nullptr, 0, nullptr, 0); // сброс задержки swr
+        m_lastAudioPos = startTime;
+    }
+
+    // ── Результат = остаток с прошлого вызова + новые сэмплы ─────────────
     QVector<float> result;
-    result.reserve(totalSamples * OUTPUT_CHANNELS);
+    result.reserve(totalFloats + 4096);
 
-    // Seek к началу диапазона
-    int64_t seekTarget = static_cast<int64_t>(startTime * AV_TIME_BASE);
-    av_seek_frame(m_formatContext, -1, seekTarget, AVSEEK_FLAG_BACKWARD);
-    avcodec_flush_buffers(m_audioCodecContext);
+    // Сначала берём то что осталось с прошлого раза
+    if (!m_audioOverflow.isEmpty()) {
+        result = m_audioOverflow;
+        m_audioOverflow.clear();
+    }
 
-    double endTime = startTime + duration;
-    AVFrame* audioFrame = av_frame_alloc();
-    AVPacket* pkt = av_packet_alloc();
+    // ── Читаем новые пакеты пока не наберём достаточно ───────────────────
+    AVFrame*  audioFrame = av_frame_alloc();
+    AVPacket* pkt        = av_packet_alloc();
 
-    while (av_read_frame(m_formatContext, pkt) >= 0) {
+    while (result.size() < totalFloats) {
+        if (av_read_frame(m_formatContext, pkt) < 0) break;
+
         if (pkt->stream_index != m_audioStreamIndex) {
             av_packet_unref(pkt);
             continue;
@@ -311,78 +370,76 @@ QVector<float> MediaDecoder::decodeAudioRange(double startTime, double duration)
         if (ret < 0) continue;
 
         while (avcodec_receive_frame(m_audioCodecContext, audioFrame) == 0) {
-            // Вычислить временную позицию кадра
-            double framePts = 0.0;
+            // Пропускаем кадры до начала нашего окна
             if (audioFrame->pts != AV_NOPTS_VALUE) {
-                framePts = audioFrame->pts *
-                           av_q2d(m_audioStream->time_base);
-            }
-
-            // Пропустить кадры до startTime
-            double frameEnd = framePts +
-                              (double)audioFrame->nb_samples / m_audioCodecContext->sample_rate;
-            if (frameEnd < startTime) continue;
-
-            // Остановить после endTime
-            if (framePts >= endTime) {
-                av_frame_unref(audioFrame);
-                goto done;
-            }
-
-            // Ресемплировать в float stereo 44100
-            {
-                // Максимальное количество выходных сэмплов
-                int maxOutSamples = swr_get_out_samples(m_swrContext,
-                                                        audioFrame->nb_samples);
-                if (maxOutSamples <= 0) maxOutSamples = audioFrame->nb_samples * 2;
-
-                // Буфер для выхода
-                uint8_t* outBuf = nullptr;
-                int outLinesize = 0;
-                av_samples_alloc(&outBuf, &outLinesize,
-                                 OUTPUT_CHANNELS, maxOutSamples,
-                                 AV_SAMPLE_FMT_FLT, 0);
-
-                int convertedSamples = swr_convert(
-                    m_swrContext,
-                    &outBuf, maxOutSamples,
-                    (const uint8_t**)audioFrame->data, audioFrame->nb_samples
-                    );
-
-                if (convertedSamples > 0) {
-                    const float* floatData = reinterpret_cast<const float*>(outBuf);
-                    int floatCount = convertedSamples * OUTPUT_CHANNELS;
-
-                    // Добавить в результат (с ограничением по totalSamples)
-                    for (int i = 0; i < floatCount &&
-                                    result.size() < totalSamples * OUTPUT_CHANNELS; ++i) {
-                        result.append(floatData[i]);
-                    }
+                double frameEnd = audioFrame->pts * av_q2d(m_audioStream->time_base)
+                + (double)audioFrame->nb_samples
+                    / m_audioCodecContext->sample_rate;
+                if (frameEnd < startTime - 0.005) {
+                    av_frame_unref(audioFrame);
+                    continue;
                 }
-
-                if (outBuf) av_freep(&outBuf);
             }
+
+            // Ресемплирование
+            int maxOut = swr_get_out_samples(m_swrContext, audioFrame->nb_samples);
+            if (maxOut <= 0) maxOut = audioFrame->nb_samples * 2 + 256;
+
+            uint8_t* outBuf   = nullptr;
+            int      outLSize = 0;
+            av_samples_alloc(&outBuf, &outLSize,
+                             OUTPUT_CHANNELS, maxOut, AV_SAMPLE_FMT_FLT, 0);
+
+            int converted = swr_convert(m_swrContext,
+                                        &outBuf, maxOut,
+                                        (const uint8_t**)audioFrame->data,
+                                        audioFrame->nb_samples);
+            if (converted > 0) {
+                const float* p = reinterpret_cast<const float*>(outBuf);
+                for (int i = 0; i < converted * OUTPUT_CHANNELS; ++i)
+                    result.append(p[i]);
+            }
+            if (outBuf) av_freep(&outBuf);
 
             av_frame_unref(audioFrame);
-
-            // Достаточно сэмплов?
-            if (result.size() >= totalSamples * OUTPUT_CHANNELS) {
-                goto done;
-            }
         }
     }
 
-done:
     av_frame_free(&audioFrame);
     av_packet_free(&pkt);
 
-    // Дополнить тишиной если не хватило данных
-    while (result.size() < totalSamples * OUTPUT_CHANNELS) {
-        result.append(0.0f);
+    // ── Flush задержки swr ────────────────────────────────────────────────
+    {
+        int delayed = swr_get_delay(m_swrContext, OUTPUT_SAMPLE_RATE);
+        if (delayed > 0 && result.size() < totalFloats) {
+            int maxOut = delayed + 256;
+            uint8_t* outBuf   = nullptr;
+            int      outLSize = 0;
+            av_samples_alloc(&outBuf, &outLSize,
+                             OUTPUT_CHANNELS, maxOut, AV_SAMPLE_FMT_FLT, 0);
+            int flushed = swr_convert(m_swrContext, &outBuf, maxOut, nullptr, 0);
+            if (flushed > 0) {
+                const float* p = reinterpret_cast<const float*>(outBuf);
+                for (int i = 0; i < flushed * OUTPUT_CHANNELS; ++i)
+                    result.append(p[i]);
+            }
+            if (outBuf) av_freep(&outBuf);
+        }
     }
 
-    // Обрезать лишнее
-    result.resize(totalSamples * OUTPUT_CHANNELS);
+    m_lastAudioPos = startTime + duration;
+
+    // ── Сохраняем переполнение, не выбрасываем ────────────────────────────
+    // Это ключевое исправление: вместо resize() (который обрезает и теряет
+    // сэмплы) сохраняем лишнее в m_audioOverflow для следующего вызова.
+    if (result.size() > totalFloats) {
+        m_audioOverflow = result.mid(totalFloats);
+        result.resize(totalFloats);
+    } else {
+        // Дополнить тишиной если не хватило (только у конца файла)
+        while (result.size() < totalFloats)
+            result.append(0.0f);
+    }
 
     return result;
 }

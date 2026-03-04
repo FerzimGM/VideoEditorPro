@@ -766,8 +766,8 @@ void Timeline::syncClipStatesForRender(QVariantMap hiddenMap, QVariantMap mutedM
 //  РЕНДЕРИНГ — запуск в отдельном потоке через RenderEngine
 // ================================================================
 
-bool Timeline::renderToFile(const QString& outputPath, int width, int height) {
-    qDebug() << "renderToFile:" << outputPath << width << "x" << height;
+bool Timeline::renderToFile(const QString& outputPath, int width, int height, const QString& format) {
+    qDebug() << "renderToFile:" << outputPath << width << "x" << height << "format:" << format;
 
     // Очистить file:/// prefix
     QString cleanPath = outputPath;
@@ -794,6 +794,7 @@ bool Timeline::renderToFile(const QString& outputPath, int width, int height) {
     m_renderEngine->setClips(m_clips);
     m_renderEngine->setOutputPath(cleanPath);
     m_renderEngine->setOutputResolution(width, height);
+    m_renderEngine->setOutputFormat(format);
 
     // Определить FPS из первого клипа
     double fps = 30.0;

@@ -8,16 +8,25 @@ Rectangle {
     color: Theme.panelBackground
 
     property int currentMode: 0 // 0 - эффекты, 1 - экспорт
-    property var videoPlayer: null  // Ссылка на VideoPlayer для эффектов
-    property string selectedEffect: ""  // Выбранный эффект
+    property var videoPlayer: null // Ссылка на VideoPlayer для эффектов
+    property string selectedEffect: "" // Выбранный эффект
+
+    // Сигнал экспорта — перехватывается в main.qml
+    signal exportRequested(string resolution, string format)
 
     Rectangle {
         anchors.right: parent.right
         width: 2
         height: parent.height
         gradient: Gradient {
-            GradientStop { position: 0.0; color: Theme.rubyGradientStart }
-            GradientStop { position: 1.0; color: Theme.rubyGradientEnd }
+            GradientStop {
+                position: 0.0
+                color: Theme.rubyGradientStart
+            }
+            GradientStop {
+                position: 1.0
+                color: Theme.rubyGradientEnd
+            }
         }
     }
 
@@ -86,58 +95,60 @@ Rectangle {
                             ColumnLayout {
                                 width: parent.width - 20
                                 spacing: Theme.spacing
-                                
+
                                 // Заголовок выбранного эффекта
                                 Text {
-                                    text: root.selectedEffect || "Выберите эффект"
+                                    text: root.selectedEffect
+                                          || "Выберите эффект"
                                     color: root.selectedEffect ? Theme.rubyPrimary : Theme.textDisabled
                                     font.family: Theme.fontFamily
                                     font.pixelSize: Theme.fontSizeLarge
                                     font.bold: true
                                     Layout.fillWidth: true
                                 }
-                                
+
                                 Rectangle {
                                     Layout.fillWidth: true
                                     height: 1
                                     color: Theme.dividerColor
                                     visible: root.selectedEffect !== ""
                                 }
-                                
+
                                 // ===== ПАРАМЕТРЫ ЯРКОСТИ =====
                                 Column {
                                     Layout.fillWidth: true
                                     spacing: Theme.spacing
                                     visible: root.selectedEffect === "Яркость"
-                                    
+
                                     Text {
                                         text: "Уровень яркости"
                                         color: Theme.textPrimary
                                         font.family: Theme.fontFamily
                                         font.pixelSize: Theme.fontSize
                                     }
-                                    
+
                                     Slider {
                                         width: parent.width
                                         from: 0.5
                                         to: 2.0
                                         value: 1.0
                                         stepSize: 0.1
-                                        
+
                                         onMoved: {
                                             if (root.videoPlayer) {
                                                 root.videoPlayer.brightness = value
                                             }
                                         }
-                                        
+
                                         background: Rectangle {
                                             x: parent.leftPadding
-                                            y: parent.topPadding + parent.availableHeight / 2 - height / 2
+                                            y: parent.topPadding
+                                               + parent.availableHeight / 2 - height / 2
                                             width: parent.availableWidth
                                             height: 4
                                             radius: 2
                                             color: Theme.backgroundDark
-                                            
+
                                             Rectangle {
                                                 width: parent.parent.visualPosition * parent.width
                                                 height: parent.height
@@ -145,59 +156,63 @@ Rectangle {
                                                 radius: 2
                                             }
                                         }
-                                        
+
                                         handle: Rectangle {
-                                            x: parent.leftPadding + parent.visualPosition * parent.availableWidth - width / 2
-                                            y: parent.topPadding + parent.availableHeight / 2 - height / 2
+                                            x: parent.leftPadding + parent.visualPosition
+                                               * parent.availableWidth - width / 2
+                                            y: parent.topPadding
+                                               + parent.availableHeight / 2 - height / 2
                                             width: 16
                                             height: 16
                                             radius: 8
                                             color: parent.pressed ? Theme.rubyLight : Theme.rubyPrimary
                                         }
                                     }
-                                    
+
                                     Text {
-                                        text: root.videoPlayer ? root.videoPlayer.brightness.toFixed(2) + "x" : "1.00x"
+                                        text: root.videoPlayer ? root.videoPlayer.brightness.toFixed(
+                                                                     2) + "x" : "1.00x"
                                         color: Theme.textSecondary
                                         font.family: Theme.fontFamily
                                         font.pixelSize: Theme.fontSizeSmall
                                     }
                                 }
-                                
+
                                 // ===== ПАРАМЕТРЫ КОНТРАСТА =====
                                 Column {
                                     Layout.fillWidth: true
                                     spacing: Theme.spacing
                                     visible: root.selectedEffect === "Контраст"
-                                    
+
                                     Text {
                                         text: "Уровень контраста"
                                         color: Theme.textPrimary
                                         font.family: Theme.fontFamily
                                         font.pixelSize: Theme.fontSize
                                     }
-                                    
+
                                     Slider {
                                         width: parent.width
                                         from: 0.5
                                         to: 2.0
                                         value: 1.0
                                         stepSize: 0.1
-                                        
+
                                         onMoved: {
                                             if (root.videoPlayer) {
                                                 root.videoPlayer.contrast = value
                                             }
                                         }
-                                        
+
                                         background: Rectangle {
                                             x: parent.leftPadding
-                                            y: parent.topPadding + parent.availableHeight / 2 - height / 2
+                                            y: parent.topPadding
+                                               + parent.availableHeight / 2 - height / 2
                                             width: parent.availableWidth
                                             height: 4
                                             radius: 2
                                             color: Theme.backgroundDark
-                                            
+
                                             Rectangle {
                                                 width: parent.parent.visualPosition * parent.width
                                                 height: parent.height
@@ -205,59 +220,63 @@ Rectangle {
                                                 radius: 2
                                             }
                                         }
-                                        
+
                                         handle: Rectangle {
-                                            x: parent.leftPadding + parent.visualPosition * parent.availableWidth - width / 2
-                                            y: parent.topPadding + parent.availableHeight / 2 - height / 2
+                                            x: parent.leftPadding + parent.visualPosition
+                                               * parent.availableWidth - width / 2
+                                            y: parent.topPadding
+                                               + parent.availableHeight / 2 - height / 2
                                             width: 16
                                             height: 16
                                             radius: 8
                                             color: parent.pressed ? Theme.rubyLight : Theme.rubyPrimary
                                         }
                                     }
-                                    
+
                                     Text {
-                                        text: root.videoPlayer ? root.videoPlayer.contrast.toFixed(2) + "x" : "1.00x"
+                                        text: root.videoPlayer ? root.videoPlayer.contrast.toFixed(
+                                                                     2) + "x" : "1.00x"
                                         color: Theme.textSecondary
                                         font.family: Theme.fontFamily
                                         font.pixelSize: Theme.fontSizeSmall
                                     }
                                 }
-                                
+
                                 // ===== ПАРАМЕТРЫ НАСЫЩЕННОСТИ =====
                                 Column {
                                     Layout.fillWidth: true
                                     spacing: Theme.spacing
                                     visible: root.selectedEffect === "Насыщенность"
-                                    
+
                                     Text {
                                         text: "Уровень насыщенности"
                                         color: Theme.textPrimary
                                         font.family: Theme.fontFamily
                                         font.pixelSize: Theme.fontSize
                                     }
-                                    
+
                                     Slider {
                                         width: parent.width
                                         from: 0.0
                                         to: 2.0
                                         value: 1.0
                                         stepSize: 0.1
-                                        
+
                                         onMoved: {
                                             if (root.videoPlayer) {
                                                 root.videoPlayer.saturation = value
                                             }
                                         }
-                                        
+
                                         background: Rectangle {
                                             x: parent.leftPadding
-                                            y: parent.topPadding + parent.availableHeight / 2 - height / 2
+                                            y: parent.topPadding
+                                               + parent.availableHeight / 2 - height / 2
                                             width: parent.availableWidth
                                             height: 4
                                             radius: 2
                                             color: Theme.backgroundDark
-                                            
+
                                             Rectangle {
                                                 width: parent.parent.visualPosition * parent.width
                                                 height: parent.height
@@ -265,33 +284,36 @@ Rectangle {
                                                 radius: 2
                                             }
                                         }
-                                        
+
                                         handle: Rectangle {
-                                            x: parent.leftPadding + parent.visualPosition * parent.availableWidth - width / 2
-                                            y: parent.topPadding + parent.availableHeight / 2 - height / 2
+                                            x: parent.leftPadding + parent.visualPosition
+                                               * parent.availableWidth - width / 2
+                                            y: parent.topPadding
+                                               + parent.availableHeight / 2 - height / 2
                                             width: 16
                                             height: 16
                                             radius: 8
                                             color: parent.pressed ? Theme.rubyLight : Theme.rubyPrimary
                                         }
                                     }
-                                    
+
                                     Text {
-                                        text: root.videoPlayer ? root.videoPlayer.saturation.toFixed(2) + "x" : "1.00x"
+                                        text: root.videoPlayer ? root.videoPlayer.saturation.toFixed(
+                                                                     2) + "x" : "1.00x"
                                         color: Theme.textSecondary
                                         font.family: Theme.fontFamily
                                         font.pixelSize: Theme.fontSizeSmall
                                     }
-                                    
+
                                     CheckBox {
                                         text: "Чёрно-белое"
-                                        
+
                                         onToggled: {
                                             if (root.videoPlayer) {
                                                 root.videoPlayer.grayscale = checked
                                             }
                                         }
-                                        
+
                                         contentItem: Text {
                                             text: parent.text
                                             color: Theme.textPrimary
@@ -300,7 +322,7 @@ Rectangle {
                                             leftPadding: parent.indicator.width + parent.spacing
                                             verticalAlignment: Text.AlignVCenter
                                         }
-                                        
+
                                         indicator: Rectangle {
                                             width: 20
                                             height: 20
@@ -308,7 +330,7 @@ Rectangle {
                                             color: parent.checked ? Theme.rubyPrimary : Theme.backgroundDark
                                             border.color: Theme.rubyPrimary
                                             border.width: 2
-                                            
+
                                             Text {
                                                 anchors.centerIn: parent
                                                 text: "✓"
@@ -320,35 +342,38 @@ Rectangle {
                                         }
                                     }
                                 }
-                                
+
                                 // TODO: Добавить параметры для остальных эффектов
                                 Text {
-                                    visible: root.selectedEffect !== "" && 
-                                            root.selectedEffect !== "Яркость" && 
-                                            root.selectedEffect !== "Контраст" && 
-                                            root.selectedEffect !== "Насыщенность"
-                                    text: "Параметры для эффекта\n\"" + root.selectedEffect + "\"\nбудут доступны в C++ версии"
+                                    visible: root.selectedEffect !== ""
+                                             && root.selectedEffect !== "Яркость"
+                                             && root.selectedEffect !== "Контраст"
+                                             && root.selectedEffect !== "Насыщенность"
+                                    text: "Параметры для эффекта\n\"" + root.selectedEffect
+                                          + "\"\nбудут доступны в C++ версии"
                                     color: Theme.textDisabled
                                     font.family: Theme.fontFamily
                                     font.pixelSize: Theme.fontSize
                                     Layout.fillWidth: true
                                     wrapMode: Text.WordWrap
                                 }
-                                
-                                Item { Layout.fillHeight: true }
-                                
+
+                                Item {
+                                    Layout.fillHeight: true
+                                }
+
                                 // Кнопка сброса (всегда видна если эффект выбран)
                                 Button {
                                     visible: root.selectedEffect !== ""
                                     text: "Сбросить эффекты"
                                     Layout.fillWidth: true
-                                    
+
                                     onClicked: {
                                         if (root.videoPlayer) {
                                             root.videoPlayer.resetEffects()
                                         }
                                     }
-                                    
+
                                     contentItem: Text {
                                         text: parent.text
                                         color: Theme.textPrimary
@@ -357,7 +382,7 @@ Rectangle {
                                         horizontalAlignment: Text.AlignHCenter
                                         verticalAlignment: Text.AlignVCenter
                                     }
-                                    
+
                                     background: Rectangle {
                                         color: parent.down ? Theme.rubyDark : (parent.hovered ? Theme.rubyLight : Theme.rubyPrimary)
                                         radius: Theme.borderRadius
@@ -394,37 +419,68 @@ Rectangle {
 
                             EffectCategory {
                                 title: "Видео эффекты"
-                                effects: [
-                                    { name: "Яркость/Контраст", icon: "☀" },
-                                    { name: "Насыщенность", icon: "🎨" },
-                                    { name: "Размытие", icon: "◎" },
-                                    { name: "Резкость", icon: "⬥" },
-                                    { name: "Цветокоррекция", icon: "🎭" }
-                                ]
+                                effects: [{
+                                        "name": "Яркость/Контраст",
+                                        "icon": "☀"
+                                    }, {
+                                        "name": "Насыщенность",
+                                        "icon": "🎨"
+                                    }, {
+                                        "name": "Размытие",
+                                        "icon": "◎"
+                                    }, {
+                                        "name": "Резкость",
+                                        "icon": "⬥"
+                                    }, {
+                                        "name": "Цветокоррекция",
+                                        "icon": "🎭"
+                                    }]
                             }
 
                             EffectCategory {
                                 title: "Переходы"
-                                effects: [
-                                    { name: "Растворение", icon: "⊶" },
-                                    { name: "Затемнение", icon: "⬛" },
-                                    { name: "Вытеснение", icon: "➤" },
-                                    { name: "Масштабирование", icon: "⊕" },
-                                    { name: "Скольжение", icon: "⇒" },
-                                    { name: "Zoom", icon: "⊙" }
-                                ]
+                                effects: [{
+                                        "name": "Растворение",
+                                        "icon": "⊶"
+                                    }, {
+                                        "name": "Затемнение",
+                                        "icon": "⬛"
+                                    }, {
+                                        "name": "Вытеснение",
+                                        "icon": "➤"
+                                    }, {
+                                        "name": "Масштабирование",
+                                        "icon": "⊕"
+                                    }, {
+                                        "name": "Скольжение",
+                                        "icon": "⇒"
+                                    }, {
+                                        "name": "Zoom",
+                                        "icon": "⊙"
+                                    }]
                             }
 
                             EffectCategory {
                                 title: "Аудио эффекты"
-                                effects: [
-                                    { name: "Громкость", icon: "🔊" },
-                                    { name: "Эквалайзер", icon: "📊" },
-                                    { name: "Реверберация", icon: "〰" },
-                                    { name: "Шумоподавление", icon: "🔇" },
-                                    { name: "Компрессор", icon: "⊡" },
-                                    { name: "Эхо", icon: "↷" }
-                                ]
+                                effects: [{
+                                        "name": "Громкость",
+                                        "icon": "🔊"
+                                    }, {
+                                        "name": "Эквалайзер",
+                                        "icon": "📊"
+                                    }, {
+                                        "name": "Реверберация",
+                                        "icon": "〰"
+                                    }, {
+                                        "name": "Шумоподавление",
+                                        "icon": "🔇"
+                                    }, {
+                                        "name": "Компрессор",
+                                        "icon": "⊡"
+                                    }, {
+                                        "name": "Эхо",
+                                        "icon": "↷"
+                                    }]
                             }
                         }
                     }
@@ -441,12 +497,17 @@ Rectangle {
             ExportPanel {
                 anchors.fill: parent
                 anchors.margins: Theme.spacing
+                // Пробрасываем сигнал из ExportPanel → LeftSidebar → main.qml
+                onExportClicked: (res, fmt) => root.exportRequested(res, fmt)
             }
         }
     }
 
     component ExportPanel: ColumnLayout {
         spacing: Theme.spacingLarge
+
+        // Сигнал: пользователь нажал "Сохранить видео"
+        signal exportClicked(string resolution, string format)
 
         Text {
             text: "ЭКСПОРТ ВИДЕО"
@@ -459,6 +520,7 @@ Rectangle {
         SettingRow {
             label: "Разрешение"
             ComboBox {
+                id: resolutionComboExport
                 implicitWidth: 150
                 model: ["1920×1080", "1280×720", "3840×2160", "2560×1440"]
                 currentIndex: 0
@@ -484,6 +546,7 @@ Rectangle {
         SettingRow {
             label: "Формат"
             ComboBox {
+                id: formatComboExport
                 implicitWidth: 150
                 model: ["MP4", "AVI", "MOV", "MKV", "WebM"]
                 currentIndex: 0
@@ -524,11 +587,21 @@ Rectangle {
             background: Rectangle {
                 color: parent.down ? Theme.rubyDark : (parent.hovered ? Theme.rubyLight : Theme.rubyPrimary)
                 radius: Theme.borderRadius
-                Behavior on color { ColorAnimation { duration: Theme.animationDuration } }
+                Behavior on color {
+                    ColorAnimation {
+                        duration: Theme.animationDuration
+                    }
+                }
             }
+
+            // Эмитим сигнал с выбранными значениями
+            onClicked: exportClicked(resolutionComboExport.currentText,
+                                     formatComboExport.currentText)
         }
 
-        Item { Layout.fillHeight: true }
+        Item {
+            Layout.fillHeight: true
+        }
     }
 
     component EffectCategory: Column {
@@ -585,7 +658,9 @@ Rectangle {
             height: visible ? implicitHeight : 0
 
             Behavior on height {
-                NumberAnimation { duration: Theme.animationDuration }
+                NumberAnimation {
+                    duration: Theme.animationDuration
+                }
             }
 
             Repeater {

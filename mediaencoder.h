@@ -95,6 +95,7 @@ private:
     double m_fps;
     int    m_bitrate;
     bool   m_audioEnabled;
+    QString m_format;   // "MP4", "AVI", "MOV", "MKV", "WebM"
 
     // Счётчики
     int64_t m_videoFrameCount;
