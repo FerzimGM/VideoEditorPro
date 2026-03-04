@@ -713,7 +713,6 @@ bool Timeline::setClipMuted(int index, bool muted) {
     }
     m_clips[index].isMuted = muted;
     emit clipModified(index);
-    emit clipsChanged();
     qDebug() << "Clip" << index << (muted ? "muted" : "unmuted");
     return true;
 }

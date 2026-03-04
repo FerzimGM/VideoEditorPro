@@ -651,7 +651,9 @@ Rectangle {
         videoOutput: videoOutput1
         audioOutput: AudioOutput {
             id: audioOut1
-            muted: videoPlayer.hideAudio1
+            // НЕ используем muted: — изменение muted на живом MediaPlayer
+            // вызывает внутренний stop/seek в Qt Multimedia → перемотка в начало.
+            // Просто обнуляем volume — тихо, без побочных эффектов на воспроизведение.
             volume: videoPlayer.hideAudio1 ? 0.0 : videoPlayer.volume
         }
         onErrorOccurred: function (e, s) {
@@ -729,7 +731,7 @@ Rectangle {
         videoOutput: videoOutput2
         audioOutput: AudioOutput {
             id: audioOut2
-            muted: videoPlayer.hideAudio2
+            // Аналогично audioOut1 — только volume, без muted.
             volume: videoPlayer.hideAudio2 ? 0.0 : videoPlayer.volume
         }
         onErrorOccurred: function (e, s) {

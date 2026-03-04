@@ -154,6 +154,7 @@ QtObject {
             property var _hidden: ({})
             property var _muted: ({})
             property int muteVersion: 0
+            property int hiddenVersion: 0 // счётчик для принудительного пересчёта videoHidden/audioHidden
 
             function isMuted(clipId) {
                 return _muted[clipId] === true
@@ -163,7 +164,6 @@ QtObject {
                 m[clipId] = val
                 _muted = m
                 muteVersion++
-                // НОВОЕ: синхронизация в C++
                 if (cppTimeline)
                     cppTimeline.setClipMuted(clipId, val)
             }
@@ -172,7 +172,7 @@ QtObject {
                 var h = Object.assign({}, _hidden)
                 h[clipId + "_v"] = val
                 _hidden = h
-                // НОВОЕ: синхронизация в C++
+                hiddenVersion++ // триггер для биндингов в Track.qml
                 if (cppTimeline)
                     cppTimeline.setClipVideoHidden(clipId, val)
             }
@@ -180,7 +180,7 @@ QtObject {
                 var h = Object.assign({}, _hidden)
                 h[clipId + "_a"] = val
                 _hidden = h
-                // НОВОЕ: синхронизация в C++
+                hiddenVersion++ // триггер для биндингов в Track.qml
                 if (cppTimeline)
                     cppTimeline.setClipAudioHidden(clipId, val)
             }
@@ -202,6 +202,11 @@ QtObject {
         }
         Connections {
             target: cppTimeline
+            function onClipsChanged() {
+                // Обновляем кэш клипов для биндингов VideoPlayer (hideVideo, hideAudio1/2)
+                clipsCache.track1 = cppTimeline.getClipsForTrack(1)
+                clipsCache.track2 = cppTimeline.getClipsForTrack(2)
+            }
             function onRenderProgress(percent) {
                 exportDialog.renderProgress = percent
             }
@@ -383,8 +388,7 @@ QtObject {
                     var newMuted = !menuContext.isMuted
                     menuContext.isMuted = newMuted
                     clipStates.setMuted(menuContext.clipId, newMuted)
-                    if (cppTimeline)
-                        cppTimeline.setClipMuted(menuContext.clipId, newMuted)
+                    // setClipMuted уже вызван внутри clipStates.setMuted — не дублируем
                 }
             }
             MenuItem {

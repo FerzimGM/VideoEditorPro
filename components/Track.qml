@@ -248,13 +248,24 @@ Rectangle {
             selected: root.selectedClipId === modelData.id
             // isMuted берём из clipStates (QML-side) — реагирует мгновенно.
             // modelData.isMuted не эмитит dataChanged при setClipMuted в C++.
-            isMuted: root.clipStates ? root.clipStates.isMuted(
-                                           modelData.id) : (modelData.isMuted
-                                                            || false)
-            videoHidden: root.clipStates ? root.clipStates.isVideoHidden(
-                                               modelData.id) : false
-            audioHidden: root.clipStates ? root.clipStates.isAudioHidden(
-                                               modelData.id) : false
+            // muteVersion читаем явно — Qt 6 не всегда регистрирует dep через var-цепочку внутри функции
+            isMuted: {
+                var _mv = root.clipStates ? root.clipStates.muteVersion : 0
+                return root.clipStates ? root.clipStates.isMuted(
+                                             modelData.id) : (modelData.isMuted
+                                                              || false)
+            }
+            // hiddenVersion читаем явно — гарантирует пересчёт при hide/show
+            videoHidden: {
+                var _hv = root.clipStates ? root.clipStates.hiddenVersion : 0
+                return root.clipStates ? root.clipStates.isVideoHidden(
+                                             modelData.id) : false
+            }
+            audioHidden: {
+                var _hv = root.clipStates ? root.clipStates.hiddenVersion : 0
+                return root.clipStates ? root.clipStates.isAudioHidden(
+                                             modelData.id) : false
+            }
 
             // Максимальная ширина = оригинальная длина клипа * текущий масштаб
             // Запрещает растягивать клип длиннее исходного видео
