@@ -4,6 +4,7 @@
 #include <QObject>
 #include <QString>
 #include <QImage>
+#include <QVector>
 
 extern "C" {
 #include <libavformat/avformat.h>
@@ -11,16 +12,18 @@ extern "C" {
 #include <libswscale/swscale.h>
 #include <libswresample/swresample.h>
 #include <libavutil/imgutils.h>
+#include <libavutil/opt.h>
 }
 
 /**
- * MediaDecoder - класс для декодирования видео и аудио
+ * MediaDecoder — универсальный декодер видео и аудио.
  *
- * Ответственность:
- * - Открывает видеофайл
- * - Декодирует видео кадры
- * - Декодирует аудио сэмплы
- * - Конвертирует форматы
+ * Поддерживает:
+ * - Любой формат через FFmpeg (mp4, avi, mov, mkv, webm, flv...)
+ * - Декодирование видеокадров (QImage)
+ * - Декодирование аудио (interleaved float PCM, 44100Hz, stereo)
+ * - Seek по времени
+ * - Последовательное чтение (эффективно для рендеринга)
  */
 class MediaDecoder : public QObject
 {
@@ -30,35 +33,42 @@ public:
     explicit MediaDecoder(QObject *parent = nullptr);
     ~MediaDecoder();
 
-    // ===== ОТКРЫТИЕ ФАЙЛА =====
+    // ===== ОТКРЫТИЕ / ЗАКРЫТИЕ =====
     bool openFile(const QString& filepath);
     void closeFile();
 
     // ===== ИНФОРМАЦИЯ О ФАЙЛЕ =====
-    double getDuration() const;  // Длительность в секундах
+    double getDuration() const;
     int getVideoWidth() const;
     int getVideoHeight() const;
     double getFrameRate() const;
     int getAudioSampleRate() const;
     int getAudioChannels() const;
+    bool hasVideo() const { return m_videoStreamIndex >= 0; }
+    bool hasAudio() const { return m_audioStreamIndex >= 0; }
 
     // ===== ДЕКОДИРОВАНИЕ ВИДЕО =====
-    // Получить кадр в указанное время
     QImage getFrameAt(double timestamp);
-
-    // Получить следующий кадр (для последовательного чтения)
     QImage getNextFrame();
 
     // ===== ДЕКОДИРОВАНИЕ АУДИО =====
-    // Получить аудио сэмплы от startTime до endTime
+    // Декодировать аудио в диапазоне [startTime, startTime+duration]
+    // Возвращает interleaved float PCM, стерео, 44100Hz
+    QVector<float> decodeAudioRange(double startTime, double duration);
+
+    // Legacy-обёртка (обратная совместимость)
     QByteArray getAudioSamples(double startTime, double endTime);
 
-    // ===== SEEK (ПЕРЕМОТКА) =====
+    // ===== SEEK =====
     bool seekTo(double timestamp);
 
     // ===== СОСТОЯНИЕ =====
     bool isOpen() const { return m_formatContext != nullptr; }
     QString getFilepath() const { return m_filepath; }
+
+    // ===== КОНСТАНТЫ АУДИО ВЫВОДА =====
+    static const int OUTPUT_SAMPLE_RATE = 44100;
+    static const int OUTPUT_CHANNELS    = 2;
 
 signals:
     void error(const QString& message);
@@ -73,13 +83,13 @@ private:
     AVCodecContext* m_videoCodecContext;
     AVStream* m_videoStream;
     int m_videoStreamIndex;
-    SwsContext* m_swsContext;  // Для конвертации форматов
+    SwsContext* m_swsContext;
 
     // Аудио
     AVCodecContext* m_audioCodecContext;
     AVStream* m_audioStream;
     int m_audioStreamIndex;
-    SwrContext* m_swrContext;  // Для resample аудио
+    SwrContext* m_swrContext;
 
     // Временные буферы
     AVFrame* m_frame;
@@ -89,8 +99,10 @@ private:
     // Вспомогательные функции
     bool initializeVideo();
     bool initializeAudio();
+    bool initializeSwrContext();
     QImage avFrameToQImage(AVFrame* frame);
     void freeResources();
 };
 
 #endif // MEDIADECODER_H
+

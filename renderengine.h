@@ -2,23 +2,104 @@
 #define RENDERENGINE_H
 
 #include <QObject>
+#include <QThread>
 #include <QImage>
 #include <QList>
+#include <QMap>
 #include "timelineclip.h"
 
-// Forward declarations
 class MediaDecoder;
 class MediaEncoder;
 
 /**
- * RenderEngine - композитинг клипов и применение эффектов
+ * RenderEngine — композитинг + кодирование всего таймлайна.
  *
- * Ответственность:
- * - Композитинг нескольких клипов в один timeline
- * - Применение видео эффектов (brightness, contrast, saturation)
- * - Микширование аудио из нескольких источников
- * - Управление процессом рендеринга
+ * АРХИТЕКТУРА:
+ *   Таймлайн → [Track 1 (основная, поверх)] + [Track 2 (фоновая)]
+ *
+ *   Для каждого момента времени:
+ *     1. Видео: Track1 поверх Track2.
+ *        Если Track1 скрыт или пуст → берём Track2.
+ *        Если оба пусты → чёрный кадр.
+ *     2. Аудио: миксуем оба трека (с учётом mute/audioHidden).
+ *     3. Применяем эффекты к видео.
+ *     4. Записываем в энкодер.
+ *
+ * ОПТИМИЗАЦИИ:
+ *   - Декодеры кэшируются по filepath (один декодер на файл)
+ *   - Не открываем/закрываем файл каждый кадр
+ *   - Рендер выполняется в отдельном потоке (не блокирует UI)
  */
+
+// ===== РАБОЧИЙ ОБЪЕКТ (выполняется в QThread) =====
+class RenderWorker : public QObject {
+    Q_OBJECT
+
+public:
+    explicit RenderWorker(QObject* parent = nullptr);
+    ~RenderWorker();
+
+    void setClips(const QList<TimelineClip>& clips)       { m_clips = clips; }
+    void setOutputPath(const QString& path)                { m_outputPath = path; }
+    void setOutputResolution(int w, int h)                 { m_outputWidth = w; m_outputHeight = h; }
+    void setFps(double fps)                                { m_fps = fps; }
+    void setBitrate(int bitrate)                           { m_bitrate = bitrate; }
+
+public slots:
+    void process();  // Основной метод — запускается в потоке
+    void cancel();
+
+signals:
+    void progressChanged(int percent);
+    void renderFinished(bool success);
+    void errorOccurred(const QString& message);
+
+private:
+    QList<TimelineClip> m_clips;
+    QString m_outputPath;
+    int m_outputWidth;
+    int m_outputHeight;
+    double m_fps;
+    int m_bitrate;
+    bool m_cancelled;
+
+    // Кэш декодеров: filepath → MediaDecoder*
+    QMap<QString, MediaDecoder*> m_decoders;
+
+    // Получить или создать декодер для файла
+    MediaDecoder* getDecoder(const QString& filepath);
+
+    // Закрыть все кэшированные декодеры
+    void closeAllDecoders();
+
+    // ===== КОМПОЗИТИНГ =====
+
+    // Найти активный клип на данной дорожке в данное время
+    TimelineClip* findActiveClip(double time, int trackIndex);
+
+    // Получить видеокадр для момента времени (композитинг двух дорожек)
+    QImage compositeVideoAt(double time);
+
+    // Получить аудио для момента времени (микширование двух дорожек)
+    QVector<float> mixAudioAt(double time, double frameDuration);
+
+    // Получить видеокадр одного клипа
+    QImage decodeVideoFrame(TimelineClip* clip, double timelineTime);
+
+    // Получить аудио одного клипа
+    QVector<float> decodeAudioChunk(TimelineClip* clip, double timelineTime,
+                                    double duration);
+
+    // ===== ЭФФЕКТЫ =====
+    QImage applyClipEffects(const QImage& frame, const TimelineClip& clip);
+    QImage applyBrightness(const QImage& frame, double value);
+    QImage applyContrast(const QImage& frame, double value);
+    QImage applySaturation(const QImage& frame, double value);
+    QImage applyGrayscale(const QImage& frame);
+};
+
+
+// ===== МЕНЕДЖЕР РЕНДЕРИНГА (создаёт поток, управляет жизненным циклом) =====
 class RenderEngine : public QObject
 {
     Q_OBJECT
@@ -27,28 +108,27 @@ public:
     explicit RenderEngine(QObject *parent = nullptr);
     ~RenderEngine();
 
-    // ===== НАСТРОЙКА =====
+    // Настройка
     void setClips(const QList<TimelineClip>& clips);
     void setOutputPath(const QString& path);
     void setOutputResolution(int width, int height);
-    void setOutputCodec(const QString& codec);  // "h264", "h265", etc.
-    void setOutputFormat(const QString& format); // "mp4", "avi", "mov"
+    void setOutputCodec(const QString& codec);
+    void setOutputFormat(const QString& format);
+    void setFps(double fps);
+    void setBitrate(int bitrate);
 
-    // ===== РЕНДЕРИНГ =====
-    bool render();  // Запустить рендеринг
-    void cancel();  // Отменить рендеринг
+    // Запуск / отмена
+    bool startRender();   // Запускает рендер в отдельном потоке
+    void cancel();
 
-    // ===== ПРИМЕНЕНИЕ ЭФФЕКТОВ К КАДРУ =====
-    QImage applyEffects(const QImage& frame, const QMap<QString, double>& effects);
-
-    // Отдельные эффекты:
-    QImage applyBrightness(const QImage& frame, double value);   // 0.5 - 2.0
-    QImage applyContrast(const QImage& frame, double value);     // 0.5 - 2.0
-    QImage applySaturation(const QImage& frame, double value);   // 0.0 - 2.0
-    QImage applyGrayscale(const QImage& frame);
+    // Статические эффекты (для превью, без потока)
+    static QImage applyBrightness(const QImage& frame, double value);
+    static QImage applyContrast(const QImage& frame, double value);
+    static QImage applySaturation(const QImage& frame, double value);
+    static QImage applyGrayscale(const QImage& frame);
 
 signals:
-    void progressChanged(int percent);  // 0-100
+    void progressChanged(int percent);
     void renderFinished(bool success);
     void error(const QString& message);
 
@@ -59,22 +139,11 @@ private:
     int m_outputHeight;
     QString m_codec;
     QString m_format;
-    bool m_cancelled;
+    double m_fps;
+    int m_bitrate;
 
-    // ===== ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ =====
-
-    // Получить клип который активен в указанное время на дорожке
-    TimelineClip* getActiveClip(double time, int trackIndex);
-
-    // Получить кадр для указанного времени
-    // Учитывает композитинг нескольких дорожек
-    QImage renderFrameAt(double time);
-
-    // Применить все эффекты клипа к кадру
-    QImage applyClipEffects(const QImage& frame, const TimelineClip& clip);
-
-    // Смиксовать аудио из всех активных клипов
-    QByteArray mixAudioAt(double time, double duration);
+    QThread* m_thread;
+    RenderWorker* m_worker;
 };
 
 #endif // RENDERENGINE_H

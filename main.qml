@@ -163,17 +163,26 @@ QtObject {
                 m[clipId] = val
                 _muted = m
                 muteVersion++
+                // НОВОЕ: синхронизация в C++
+                if (cppTimeline)
+                    cppTimeline.setClipMuted(clipId, val)
             }
 
             function setVideoHidden(clipId, val) {
                 var h = Object.assign({}, _hidden)
                 h[clipId + "_v"] = val
                 _hidden = h
+                // НОВОЕ: синхронизация в C++
+                if (cppTimeline)
+                    cppTimeline.setClipVideoHidden(clipId, val)
             }
             function setAudioHidden(clipId, val) {
                 var h = Object.assign({}, _hidden)
                 h[clipId + "_a"] = val
                 _hidden = h
+                // НОВОЕ: синхронизация в C++
+                if (cppTimeline)
+                    cppTimeline.setClipAudioHidden(clipId, val)
             }
             function isVideoHidden(clipId) {
                 return _hidden[clipId + "_v"] === true
@@ -192,13 +201,18 @@ QtObject {
             property var track2: []
         }
         Connections {
-            id: clipsCacheUpdater
             target: cppTimeline
-            function onClipsChanged() {
-                clipsCache.track1 = cppTimeline ? cppTimeline.getClipsForTrack(
-                                                      1) : []
-                clipsCache.track2 = cppTimeline ? cppTimeline.getClipsForTrack(
-                                                      2) : []
+            function onRenderProgress(percent) {
+                exportDialog.renderProgress = percent
+            }
+            function onRenderFinished(success) {
+                exportDialog.isRendering = false
+                if (success) {
+                    console.log("✅ Экспорт завершён!")
+                    exportDialog.close()
+                } else {
+                    console.log("❌ Ошибка экспорта")
+                }
             }
         }
 
@@ -527,10 +541,27 @@ QtObject {
                 filepath = filepath.replace(/^file:\/\/\//, "")
                 if (filepath.match(/^\/[A-Za-z]:\//))
                     filepath = filepath.substring(1)
+
                 exportDialog.isRendering = true
                 exportDialog.renderProgress = 0
                 exportDialog.open()
-                cppTimeline.renderToFile(filepath)
+
+                // Парсим разрешение из ComboBox
+                var resText = resolutionCombo.currentText
+                var w = 1920, h = 1080
+                if (resText.indexOf("1280") >= 0) {
+                    w = 1280
+                    h = 720
+                } else if (resText.indexOf("3840") >= 0) {
+                    w = 3840
+                    h = 2160
+                } else if (resText.indexOf("2560") >= 0) {
+                    w = 2560
+                    h = 1440
+                }
+
+                // Синхронизируем состояния и запускаем рендер
+                syncStatesAndRender(filepath, w, h)
             }
         }
 
@@ -636,8 +667,16 @@ QtObject {
                 Button {
                     text: exportDialog.isRendering ? "Отмена" : "Экспортировать"
                     Layout.alignment: Qt.AlignHCenter
-                    onClicked: exportDialog.isRendering ? exportDialog.close(
-                                                              ) : exportFileDialog.open()
+                    onClicked: {
+                        if (exportDialog.isRendering) {
+                            cppTimeline.cancelRender(
+                                        ) // ← НОВОЕ: отменяем рендер
+                            exportDialog.isRendering = false
+                            exportDialog.close()
+                        } else {
+                            exportFileDialog.open()
+                        }
+                    }
                     contentItem: Text {
                         text: parent.text
                         color: Theme.textPrimary
