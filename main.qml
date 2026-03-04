@@ -764,6 +764,7 @@ QtObject {
                     Layout.preferredWidth: Theme.sidebarWidth
                     Layout.fillHeight: true
                     videoPlayer: videoPlayer
+                    selectedClipId: selectionManager.selectedClipId
 
                     // Кнопка "СОХРАНИТЬ ВИДЕО" в ExportPanel
                     onExportRequested: (resolution, format) => {

@@ -105,6 +105,8 @@ private:
     QImage applyContrast(const QImage& frame, double value);
     QImage applySaturation(const QImage& frame, double value);
     QImage applyGrayscale(const QImage& frame);
+    QImage applyBlur(const QImage& frame, double radius);
+    QImage applySharpness(const QImage& frame, double strength);
 };
 
 
@@ -135,6 +137,8 @@ public:
     static QImage applyContrast(const QImage& frame, double value);
     static QImage applySaturation(const QImage& frame, double value);
     static QImage applyGrayscale(const QImage& frame);
+    static QImage applyBlur(const QImage& frame, double radius);
+    static QImage applySharpness(const QImage& frame, double strength);
 
 signals:
     void progressChanged(int percent);

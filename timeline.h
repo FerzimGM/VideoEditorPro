@@ -56,6 +56,8 @@ public:
     Q_INVOKABLE bool trimClip(int index, double newTrimStart, double newTrimEnd);
     Q_INVOKABLE bool setClipLeftTrim(int index, double newStartTime, double newTrimStart);
     Q_INVOKABLE bool applyEffect(int index, const QString& effectName, double value);
+    Q_INVOKABLE bool removeEffect(int index, const QString& effectName);
+    Q_INVOKABLE QVariantMap getClipEffects(int index) const;
     Q_INVOKABLE bool setClipMuted(int index, bool muted);
     Q_INVOKABLE double getTrackEndTime(int trackIndex) const;
     Q_INVOKABLE QVariantList getClipsForTrack(int trackIndex);

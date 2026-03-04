@@ -339,12 +339,23 @@ QVector<float> RenderWorker::mixAudioAt(double time, double frameDuration) {
 QVector<float> RenderWorker::decodeAudioChunk(TimelineClip* clip,
                                               double timelineTime,
                                               double duration) {
-    // Используем отдельный аудиодекодер — он не мешает видеодекодеру
     MediaDecoder* decoder = getAudioDecoder(clip->filepath);
     if (!decoder || !decoder->hasAudio()) return QVector<float>();
 
     double sourceTime = clip->sourceTimeAt(timelineTime);
-    return decoder->decodeAudioRange(sourceTime, duration);
+    QVector<float> audio = decoder->decodeAudioRange(sourceTime, duration);
+
+    // Применяем громкость если задана
+    auto it = clip->effects.find("volume");
+    if (it != clip->effects.end()) {
+        float vol = static_cast<float>(it.value());
+        if (qAbs(vol - 1.0f) > 0.01f) {
+            for (float& sample : audio)
+                sample = qBound(-1.0f, sample * vol, 1.0f);
+        }
+    }
+
+    return audio;
 }
 
 // ===== ЭФФЕКТЫ =====
@@ -358,42 +369,46 @@ QImage RenderWorker::applyClipEffects(const QImage& frame,
         const QString& name = it.key();
         double value = it.value();
 
-        if (name == "brightness")       result = applyBrightness(result, value);
-        else if (name == "contrast")    result = applyContrast(result, value);
-        else if (name == "saturation")  result = applySaturation(result, value);
-        else if (name == "grayscale" && value > 0.5) result = applyGrayscale(result);
+        if      (name == "brightness")                   result = applyBrightness(result, value);
+        else if (name == "contrast")                     result = applyContrast(result, value);
+        else if (name == "saturation")                   result = applySaturation(result, value);
+        else if (name == "grayscale" && value > 0.5)     result = applyGrayscale(result);
+        else if (name == "blur"      && value > 0.0)     result = applyBlur(result, value);
+        else if (name == "sharpness" && value > 0.0)     result = applySharpness(result, value);
+        // "volume" применяется к аудио в decodeAudioChunk, не к кадру
     }
 
     return result;
 }
 
+// Яркость: value в диапазоне -1.0 .. +1.0 (аддитивный сдвиг ±255)
 QImage RenderWorker::applyBrightness(const QImage& frame, double value) {
     QImage result = frame.convertToFormat(QImage::Format_RGB888);
+    int shift = static_cast<int>(value * 255.0);
     for (int y = 0; y < result.height(); ++y) {
         uchar* line = result.scanLine(y);
         for (int x = 0; x < result.width() * 3; ++x) {
-            int v = static_cast<int>(line[x] * value);
+            int v = static_cast<int>(line[x]) + shift;
             line[x] = static_cast<uchar>(qBound(0, v, 255));
         }
     }
     return result;
 }
 
+// Контраст: value = 0..3 (1.0 = оригинал)
 QImage RenderWorker::applyContrast(const QImage& frame, double value) {
     QImage result = frame.convertToFormat(QImage::Format_RGB888);
-    double factor = (259.0 * (value * 255.0 + 255.0)) /
-                    (255.0 * (259.0 - value * 255.0));
-
     for (int y = 0; y < result.height(); ++y) {
         uchar* line = result.scanLine(y);
         for (int x = 0; x < result.width() * 3; ++x) {
-            int v = static_cast<int>(factor * (line[x] - 128) + 128);
+            int v = static_cast<int>((line[x] - 128) * value + 128);
             line[x] = static_cast<uchar>(qBound(0, v, 255));
         }
     }
     return result;
 }
 
+// Насыщенность: value = 0..2 (1.0 = оригинал, 0 = ч/б)
 QImage RenderWorker::applySaturation(const QImage& frame, double value) {
     QImage result = frame.convertToFormat(QImage::Format_RGB888);
     for (int y = 0; y < result.height(); ++y) {
@@ -410,15 +425,80 @@ QImage RenderWorker::applySaturation(const QImage& frame, double value) {
     return result;
 }
 
+// Ч/Б
 QImage RenderWorker::applyGrayscale(const QImage& frame) {
     QImage result = frame.convertToFormat(QImage::Format_RGB888);
     for (int y = 0; y < result.height(); ++y) {
         uchar* line = result.scanLine(y);
         for (int x = 0; x < result.width(); ++x) {
             int idx = x * 3;
-            int gray = static_cast<int>(
-                0.299 * line[idx] + 0.587 * line[idx+1] + 0.114 * line[idx+2]);
+            int gray = static_cast<int>(0.299*line[idx] + 0.587*line[idx+1] + 0.114*line[idx+2]);
             line[idx] = line[idx+1] = line[idx+2] = static_cast<uchar>(gray);
+        }
+    }
+    return result;
+}
+
+// Размытие: box blur, radius = 0..10
+QImage RenderWorker::applyBlur(const QImage& frame, double radius) {
+    QImage src = frame.convertToFormat(QImage::Format_RGB888);
+    QImage result = src.copy();
+    int r = qMax(1, static_cast<int>(radius));
+    int w = src.width(), h = src.height();
+
+    // Горизонтальный проход
+    QImage temp = src.copy();
+    for (int y = 0; y < h; ++y) {
+        const uchar* srcLine = src.constScanLine(y);
+        uchar* dstLine = temp.scanLine(y);
+        for (int x = 0; x < w; ++x) {
+            int sumR=0, sumG=0, sumB=0, count=0;
+            for (int dx = -r; dx <= r; ++dx) {
+                int nx = qBound(0, x+dx, w-1);
+                sumR += srcLine[nx*3];
+                sumG += srcLine[nx*3+1];
+                sumB += srcLine[nx*3+2];
+                ++count;
+            }
+            dstLine[x*3]   = sumR/count;
+            dstLine[x*3+1] = sumG/count;
+            dstLine[x*3+2] = sumB/count;
+        }
+    }
+    // Вертикальный проход
+    for (int x = 0; x < w; ++x) {
+        for (int y = 0; y < h; ++y) {
+            int sumR=0, sumG=0, sumB=0, count=0;
+            for (int dy = -r; dy <= r; ++dy) {
+                int ny = qBound(0, y+dy, h-1);
+                const uchar* l = temp.constScanLine(ny);
+                sumR += l[x*3]; sumG += l[x*3+1]; sumB += l[x*3+2];
+                ++count;
+            }
+            uchar* out = result.scanLine(y);
+            out[x*3]   = sumR/count;
+            out[x*3+1] = sumG/count;
+            out[x*3+2] = sumB/count;
+        }
+    }
+    return result;
+}
+
+// Резкость: unsharp mask — усиливаем разницу с размытым
+QImage RenderWorker::applySharpness(const QImage& frame, double strength) {
+    QImage blurred = applyBlur(frame, 1.0);
+    QImage src = frame.convertToFormat(QImage::Format_RGB888);
+    QImage blurSrc = blurred.convertToFormat(QImage::Format_RGB888);
+    QImage result = src.copy();
+    int w = src.width(), h = src.height();
+    for (int y = 0; y < h; ++y) {
+        const uchar* sLine  = src.constScanLine(y);
+        const uchar* bLine  = blurSrc.constScanLine(y);
+        uchar*       dLine  = result.scanLine(y);
+        for (int x = 0; x < w*3; ++x) {
+            int diff = static_cast<int>(sLine[x]) - static_cast<int>(bLine[x]);
+            int v    = static_cast<int>(sLine[x]) + static_cast<int>(diff * strength);
+            dLine[x] = static_cast<uchar>(qBound(0, v, 255));
         }
     }
     return result;
@@ -548,10 +628,11 @@ void RenderEngine::cancel() {
 // ===== СТАТИЧЕСКИЕ ЭФФЕКТЫ (для превью) =====
 QImage RenderEngine::applyBrightness(const QImage& frame, double value) {
     QImage result = frame.convertToFormat(QImage::Format_RGB888);
+    int shift = static_cast<int>(value * 255.0);
     for (int y = 0; y < result.height(); ++y) {
         uchar* line = result.scanLine(y);
         for (int x = 0; x < result.width() * 3; ++x) {
-            int v = static_cast<int>(line[x] * value);
+            int v = static_cast<int>(line[x]) + shift;
             line[x] = static_cast<uchar>(qBound(0, v, 255));
         }
     }
@@ -560,12 +641,10 @@ QImage RenderEngine::applyBrightness(const QImage& frame, double value) {
 
 QImage RenderEngine::applyContrast(const QImage& frame, double value) {
     QImage result = frame.convertToFormat(QImage::Format_RGB888);
-    double factor = (259.0 * (value * 255.0 + 255.0)) /
-                    (255.0 * (259.0 - value * 255.0));
     for (int y = 0; y < result.height(); ++y) {
         uchar* line = result.scanLine(y);
         for (int x = 0; x < result.width() * 3; ++x) {
-            int v = static_cast<int>(factor * (line[x] - 128) + 128);
+            int v = static_cast<int>((line[x] - 128) * value + 128);
             line[x] = static_cast<uchar>(qBound(0, v, 255));
         }
     }
@@ -598,6 +677,41 @@ QImage RenderEngine::applyGrayscale(const QImage& frame) {
                 0.299 * line[idx] + 0.587 * line[idx+1] + 0.114 * line[idx+2]);
             line[idx] = line[idx+1] = line[idx+2] = static_cast<uchar>(gray);
         }
+    }
+    return result;
+}
+
+QImage RenderEngine::applyBlur(const QImage& frame, double radius) {
+    QImage src = frame.convertToFormat(QImage::Format_RGB888);
+    QImage result = src.copy();
+    int r = qMax(1, static_cast<int>(radius));
+    int w = src.width(), h = src.height();
+    QImage temp = src.copy();
+    for (int y = 0; y < h; ++y) {
+        const uchar* srcLine = src.constScanLine(y);
+        uchar* dstLine = temp.scanLine(y);
+        for (int x = 0; x < w; ++x) {
+            int sumR=0,sumG=0,sumB=0,count=0;
+            for (int dx=-r; dx<=r; ++dx) { int nx=qBound(0,x+dx,w-1); sumR+=srcLine[nx*3]; sumG+=srcLine[nx*3+1]; sumB+=srcLine[nx*3+2]; ++count; }
+            dstLine[x*3]=sumR/count; dstLine[x*3+1]=sumG/count; dstLine[x*3+2]=sumB/count;
+        }
+    }
+    for (int x=0;x<w;++x) for (int y=0;y<h;++y) {
+            int sumR=0,sumG=0,sumB=0,count=0;
+            for (int dy=-r;dy<=r;++dy){int ny=qBound(0,y+dy,h-1);const uchar*l=temp.constScanLine(ny);sumR+=l[x*3];sumG+=l[x*3+1];sumB+=l[x*3+2];++count;}
+            uchar*out=result.scanLine(y); out[x*3]=sumR/count; out[x*3+1]=sumG/count; out[x*3+2]=sumB/count;
+        }
+    return result;
+}
+
+QImage RenderEngine::applySharpness(const QImage& frame, double strength) {
+    QImage blurred = applyBlur(frame, 1.0);
+    QImage src = frame.convertToFormat(QImage::Format_RGB888);
+    QImage blurSrc = blurred.convertToFormat(QImage::Format_RGB888);
+    QImage result = src.copy();
+    for (int y=0;y<src.height();++y) {
+        const uchar*s=src.constScanLine(y); const uchar*b=blurSrc.constScanLine(y); uchar*d=result.scanLine(y);
+        for (int x=0;x<src.width()*3;++x) { int v=(int)s[x]+(int)((s[x]-b[x])*strength); d[x]=(uchar)qBound(0,v,255); }
     }
     return result;
 }

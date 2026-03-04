@@ -357,6 +357,23 @@ bool Timeline::applyEffect(int index, const QString& effectName, double value) {
     return true;
 }
 
+bool Timeline::removeEffect(int index, const QString& effectName) {
+    if (index < 0 || index >= m_clips.size()) return false;
+    m_clips[index].effects.remove(effectName);
+    emit clipModified(index);
+    return true;
+}
+
+QVariantMap Timeline::getClipEffects(int index) const {
+    QVariantMap result;
+    if (index < 0 || index >= m_clips.size()) return result;
+    const auto& effects = m_clips[index].effects;
+    for (auto it = effects.begin(); it != effects.end(); ++it) {
+        result[it.key()] = it.value();
+    }
+    return result;
+}
+
 // ===== ПРОВЕРКА ПЕРЕСЕЧЕНИЙ =====
 bool Timeline::canAddClip(int trackIndex, double startTime, double duration, int excludeIndex) const {
     double endTime = startTime + duration;
