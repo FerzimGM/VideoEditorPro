@@ -5,6 +5,7 @@
 #include <QThread>
 #include <QImage>
 #include <QList>
+#include <QHash>
 #include <QMap>
 #include "timelineclip.h"
 
@@ -74,6 +75,11 @@ private:
     // Позиция последнего декодированного видеокадра (для sequential read)
     QMap<QString, double> m_videoPositions;
 
+    // Персистентные кольцевые буферы аудиоэффектов (нужны для delay-based эффектов)
+    // Ключ: filepath + "_" + effectName
+    QHash<QString, QVector<float>> m_audioDelayBufs;
+    QHash<QString, int>            m_audioDelayPos;
+
     // Получить или создать декодер для файла
     MediaDecoder* getVideoDecoder(const QString& filepath);
     MediaDecoder* getAudioDecoder(const QString& filepath);
@@ -105,8 +111,7 @@ private:
     QImage applyContrast(const QImage& frame, double value);
     QImage applySaturation(const QImage& frame, double value);
     QImage applyGrayscale(const QImage& frame);
-    QImage applyBlur(const QImage& frame, double radius);
-    QImage applySharpness(const QImage& frame, double strength);
+    // Audio effects applied inline in decodeAudioChunk using m_audioDelayBufs
 };
 
 
@@ -139,6 +144,14 @@ public:
     static QImage applyGrayscale(const QImage& frame);
     static QImage applyBlur(const QImage& frame, double radius);
     static QImage applySharpness(const QImage& frame, double strength);
+    static QImage applyHue(const QImage& frame, double degrees);
+    static QImage applySepia(const QImage& frame, double intensity);
+    static QImage applyVignette(const QImage& frame, double strength);
+    static QImage applyInvert(const QImage& frame);
+    static QImage applyPosterize(const QImage& frame, double levels);
+    static QImage applyPixelate(const QImage& frame, double blockSize);
+    static QImage applyTemperature(const QImage& frame, double value);
+    static QImage applyTint(const QImage& frame, double hue, double strength);
 
 signals:
     void progressChanged(int percent);
@@ -160,3 +173,4 @@ private:
 };
 
 #endif // RENDERENGINE_H
+
