@@ -603,7 +603,7 @@ Rectangle {
                             spacing: 0
 
                             EffectCategory {
-                                title: "Цвет и тон"
+                                title: "Видео: Цвет и тон"
                                 effects: [
                                     { "name": "Яркость",      "icon": "☀️" },
                                     { "name": "Контраст",     "icon": "🔆" },
@@ -616,7 +616,7 @@ Rectangle {
                             }
 
                             EffectCategory {
-                                title: "Стилизация"
+                                title: "Видео: Стилизация"
                                 effects: [
                                     { "name": "Инверсия",     "icon": "⬛" },
                                     { "name": "Постеризация", "icon": "🎭" },
@@ -625,7 +625,7 @@ Rectangle {
                             }
 
                             EffectCategory {
-                                title: "Резкость и фокус"
+                                title: "Видео: Резкость и фокус"
                                 effects: [
                                     { "name": "Размытие",     "icon": "◎"  },
                                     { "name": "Резкость",     "icon": "⬥"  },
