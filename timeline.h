@@ -136,6 +136,8 @@ private:
     AudioPlaybackEngine* m_audioEngine   = nullptr;
     QTimer*              m_videoTimer    = nullptr;
     double               m_playbackSpeed = 1.0;
+    bool                 m_forceNextFrame  = false;
+    qint64               m_lastSyncDecodeMs = 0; // разрешить sync-decode при следующем cache miss
 
     void sortClips();
     double getClipSourceDuration(const QString& filepath);

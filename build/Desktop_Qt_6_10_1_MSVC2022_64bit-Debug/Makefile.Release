@@ -491,8 +491,10 @@ release\moc_decoderthread.cpp: ..\..\decoderthread.h \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\QDeadlineTimer \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\QAtomicInt \
 		..\..\FrameCache.h \
-		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\QHash \
-		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qhash.h \
+		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\QMap \
+		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qmap.h \
+		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qshareddata.h \
+		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qshareddata_impl.h \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtGui\QImage \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtGui\qimage.h \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtGui\qtguiglobal.h \
@@ -2510,7 +2512,6 @@ release\timeline.obj: ..\..\timeline.cpp ..\..\timeline.h \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qtimer.h \
 		..\..\timelineclip.h \
 		..\..\FrameCache.h \
-		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\QHash \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\QMutex \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qmutex.h \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qtsan_impl.h \
@@ -2567,6 +2568,7 @@ release\timeline.obj: ..\..\timeline.cpp ..\..\timeline.h \
 		C:\FFmpegForQt\include\libavutil\pixdesc.h \
 		C:\FFmpegForQt\include\libavutil\opt.h \
 		..\..\renderengine.h \
+		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\QHash \
 		..\..\audioplaybackengine.h \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtMultimedia\QAudioSink \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtMultimedia\qaudiosink.h \
@@ -2630,6 +2632,7 @@ release\timeline.obj: ..\..\timeline.cpp ..\..\timeline.h \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qdir.h \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qdirlisting.h \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\QSet \
+		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\QDateTime \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\QStandardPaths \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qstandardpaths.h
 

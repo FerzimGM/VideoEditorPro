@@ -15,6 +15,7 @@
 #include <QDebug>
 #include <QDir>
 #include <QSet>
+#include <QDateTime>
 #include <QTimer>
 #include <QStandardPaths>
 
@@ -588,10 +589,12 @@ QImage Timeline::getCurrentFrameAt(double time, int trackIndex) {
         fps = m_clipMeta[clip->filepath].fps;
     }
 
-    int frameNum = (int)(clipTime * fps);
+    int frameNum = (int)(clipTime * fps + 0.5); // round вместо floor — согласованно с DecoderThread
 
-    // 1. Пробуем кэш
+    // 1. Пробуем кэш. Сообщаем текущую позицию чтобы вытеснение
+    // не удаляло кадры рядом с текущей позицией воспроизведения.
     if (m_frameCaches.contains(clip->filepath)) {
+        m_frameCaches[clip->filepath]->setPlayPosition(frameNum);
         QImage cached;
         if (m_frameCaches[clip->filepath]->getNearest(frameNum, cached)) {
             return cached;
@@ -599,9 +602,12 @@ QImage Timeline::getCurrentFrameAt(double time, int trackIndex) {
     }
 
     // 2. Промах кэша:
-    // Во время воспроизведения — не делаем sync decode, он блокирует UI
+    // Во время воспроизведения sync decode блокирует UI → запрещаем.
+    // Исключение: m_forceNextFrame=true — первый кадр после startPlayback/seek.
+    // В этот момент мы намеренно блокируем UI на 1 кадр чтобы не было чёрного.
     bool playingNow = m_audioEngine && m_audioEngine->isPlaying();
-    if (playingNow) return QImage();
+    if (playingNow && !m_forceNextFrame) return QImage();
+    m_forceNextFrame = false; // сбрасываем после первого использования
 
     // На паузе — sync decode
     qDebug() << "Cache miss for time=" << clipTime << "- sync decode";
@@ -1278,12 +1284,15 @@ void Timeline::startPlayback(double fromTime, double speed) {
         it.value()->updatePlayPosition(srcTime);
     }
 
-    // ── Sync-decode первого кадра ДО старта аудио ─────────────────────────
-    // seekTo очищает FrameCache; audioEngine ещё nullptr → isPlaying()==false
-    // → getCurrentFrameAt делает sync-decode → кадр виден мгновенно,
-    // без 100–300мс ожидания пока DecoderThread заполнит кэш.
+    // ── Sync-decode первого кадра ─────────────────────────────────────────
+    // seekTo очищает FrameCache. Устанавливаем m_forceNextFrame=true чтобы
+    // getCurrentFrameAt разрешил sync-decode даже если audioEngine isPlaying().
+    // Это нужно при смене скорости и seek во время воспроизведения — иначе
+    // isPlaying()==true блокирует sync-decode → чёрный кадр до заполнения кэша.
     {
+        m_forceNextFrame = true;
         QImage firstFrame = getCompositeFrame(fromTime);
+        m_forceNextFrame = false;
         if (!firstFrame.isNull() && m_imageProvider) {
             m_imageProvider->setFrame(firstFrame);
             emit frameReadyForDisplay();
@@ -1331,7 +1340,19 @@ void Timeline::startPlayback(double fromTime, double speed) {
                                      totalDuration());
 
             QImage frame = getCompositeFrame(renderTime);
-            if (frame.isNull()) return; // cache miss — ждём следующий тик
+            if (frame.isNull()) {
+                // Cache miss — DecoderThread ещё заполняет кэш после seek.
+                // Пробуем sync-decode ОДИН раз в 500мс чтобы не было длинного
+                // чёрного экрана (например после большого seek в длинном видео).
+                qint64 now = QDateTime::currentMSecsSinceEpoch();
+                if (now - m_lastSyncDecodeMs > 500) {
+                    m_lastSyncDecodeMs = now;
+                    m_forceNextFrame = true;
+                    frame = getCompositeFrame(renderTime);
+                    m_forceNextFrame = false;
+                }
+                if (frame.isNull()) return;
+            }
 
             m_imageProvider->setFrame(frame);
             emit frameReadyForDisplay();
@@ -1347,26 +1368,18 @@ void Timeline::stopPlayback() {
     if (m_videoTimer) m_videoTimer->stop();
 
     // Фиксируем точное время ДО остановки sink.
-    // После destroySink() processedUSecs()=0 и getCurrentAudioTime() врёт.
+    // НЕ эмитируем currentTimeChanged здесь — это триггерит QML onCurrentTimeChanged
+    // → может вызвать startPlayback снова → бесконечная петля restart.
     if (m_audioEngine && m_audioEngine->isPlaying()) {
         m_currentTime = m_audioEngine->getCurrentAudioTime();
-        emit currentTimeChanged();
     }
 
     if (m_audioEngine) m_audioEngine->stopPlayback();
 
-    // Показываем стоп-кадр на точном времени паузы
+    // Эмитируем и показываем кадр ПОСЛЕ остановки, через очередь
     QMetaObject::invokeMethod(this, [this]() {
-        // Если идёт воспроизведение — перезапускаем с точного аудио-времени.
-        // Иначе AudioPlaybackEngine работает со старой структурой клипов
-        // и аудио/видео рассинхронизируются после обрезки/перемещения.
-        if (m_audioEngine && m_audioEngine->isPlaying()) {
-            double exactTime = m_audioEngine->getCurrentAudioTime();
-            stopPlayback();
-            startPlayback(exactTime, m_playbackSpeed);
-        } else {
-            requestFrameForDisplay(m_currentTime);
-        }
+        emit currentTimeChanged();
+        requestFrameForDisplay(m_currentTime);
     }, Qt::QueuedConnection);
 }
 

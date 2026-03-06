@@ -16,9 +16,10 @@ AudioPlaybackEngine::AudioPlaybackEngine(Timeline* timeline, QObject* parent)
 
 AudioPlaybackEngine::~AudioPlaybackEngine() { destroySink(); }
 
+// createSink вызывается ОДИН РАЗ при первом startPlayback.
+// Повторные startPlayback переиспользуют существующий sink через reset().
+// Это устраняет утечку WASAPI-потоков при частых перезапусках.
 void AudioPlaybackEngine::createSink() {
-    destroySink();
-
     QAudioFormat fmt;
     fmt.setSampleRate(SAMPLE_RATE);
     fmt.setChannelCount(CHANNELS);
@@ -26,10 +27,6 @@ void AudioPlaybackEngine::createSink() {
 
     QAudioDevice dev = QMediaDevices::defaultAudioOutput();
     m_sink = new QAudioSink(dev, fmt, this);
-
-    // PUSH-режим: start() без аргумента → пишем напрямую в QIODevice*
-    // Pull-режим (start(QIODevice*)) на Windows WASAPI зависает:
-    // sink не читает данные пока внутренний буфер не заполнится целиком.
     m_sinkDevice = m_sink->start();
 
     if (m_sink->state() == QAudio::SuspendedState)
@@ -53,8 +50,21 @@ void AudioPlaybackEngine::destroySink() {
 }
 
 void AudioPlaybackEngine::startPlayback(double fromTime, double speed, double totalDuration) {
-    destroySink();
-    createSink();
+    m_feedTimer->stop();
+
+    // Создаём sink только при первом вызове или если был уничтожен.
+    // НЕ пересоздаём на каждый startPlayback — это создаёт новый WASAPI-поток.
+    // Windows лимит ~64 потока → после ~20 перемоток: AvSetMmThreadCharacteristics failed.
+    if (!m_sink) {
+        createSink();
+    } else {
+        // Сбрасываем буфер sink без пересоздания потока.
+        // reset() → StoppedState, start() → снова push-режим.
+        m_sink->reset();
+        m_sinkDevice = m_sink->start();
+        if (m_sink->state() == QAudio::SuspendedState)
+            m_sink->resume();
+    }
 
     m_startStreamTime  = fromTime;
     m_writeHead        = fromTime;
@@ -64,16 +74,20 @@ void AudioPlaybackEngine::startPlayback(double fromTime, double speed, double to
     m_silentChunks     = 0;
     m_totalDuration    = totalDuration;
 
-    // Немедленно пишем первый чанк чтобы sink вышел из IdleState
-    onFeedTimer();
-
+    onFeedTimer(); // первый чанк сразу
     m_feedTimer->start();
+
     qDebug() << "AudioPlaybackEngine: startPlayback from" << fromTime
              << "speed=" << speed << "totalDur=" << totalDuration;
 }
 
 void AudioPlaybackEngine::stopPlayback() {
-    destroySink();
+    m_feedTimer->stop();
+    m_playing = false;
+    // Не уничтожаем sink — только приостанавливаем.
+    // Sink переиспользуется при следующем startPlayback через reset()+start().
+    if (m_sink && m_sink->state() == QAudio::ActiveState)
+        m_sink->suspend();
     qDebug() << "AudioPlaybackEngine: stopped";
 }
 
@@ -89,7 +103,6 @@ void AudioPlaybackEngine::setTrackMuted(int track, bool muted) {
 double AudioPlaybackEngine::getCurrentAudioTime() const {
     if (!m_sink || !m_playing) return m_startStreamTime;
     qint64 playedUs = m_sink->processedUSecs() - m_startProcessedUs;
-    // m_speed: при x2 аудио читается вдвое быстрее → время идёт вдвое быстрее
     return m_startStreamTime + (playedUs / 1e6) * m_speed;
 }
 
@@ -99,34 +112,25 @@ void AudioPlaybackEngine::onFeedTimer() {
     if (m_sink->state() == QAudio::SuspendedState)
         m_sink->resume();
 
-    // Сколько байт sink готов принять (push-режим)
     qint64 bytesFree = m_sink->bytesFree();
     if (bytesFree < (qint64)(sizeof(float) * CHANNELS * 64)) {
-        // Буфер почти полный — только обновляем время
         emit timeUpdated(getCurrentAudioTime());
         return;
     }
 
-    // Размер чанка: не более 150мс, не более свободного места
     const double MAX_CHUNK_SEC = 0.15;
     int maxFloats  = (int)(MAX_CHUNK_SEC * SAMPLE_RATE * CHANNELS);
     int freeFloats = (int)(bytesFree / sizeof(float));
     int wantFloats = qMin(freeFloats, maxFloats);
     double chunkDur = (double)wantFloats / (SAMPLE_RATE * CHANNELS);
-
-    // При speed != 1.0: читаем аудио с той же скоростью что и время идёт.
-    // writeHead движется в единицах времени таймлайна.
-    // При x2 за 150мс реального времени нужно прочитать 300мс аудио.
-    double readDur = chunkDur * m_speed;
+    double readDur  = chunkDur * m_speed;
 
     QVector<float> audio = m_timeline->getMixedAudio(
         m_writeHead, readDur, m_track1Muted, m_track2Muted);
 
     QVector<float> toWrite;
     if (!audio.isEmpty()) {
-        // Ресемплируем под нужный размер чанка если speed != 1.0
         if (qAbs(m_speed - 1.0) > 0.01 && audio.size() != wantFloats) {
-            // Простой ресемплинг линейной интерполяцией
             toWrite.resize(wantFloats);
             double ratio = (double)audio.size() / wantFloats;
             for (int i = 0; i < wantFloats; i += CHANNELS) {
@@ -152,21 +156,18 @@ void AudioPlaybackEngine::onFeedTimer() {
         ++m_silentChunks;
     }
 
-    // Пишем в sink напрямую (push)
     m_sinkDevice->write(
         reinterpret_cast<const char*>(toWrite.constData()),
         toWrite.size() * sizeof(float));
 
     emit timeUpdated(getCurrentAudioTime());
 
-    // Детекция конца
     bool pastEnd     = (m_writeHead >= m_totalDuration - 0.05);
     bool longSilence = (m_silentChunks >= 30)
                        && (m_writeHead - m_startStreamTime > 5.0);
 
     if (pastEnd || longSilence) {
-        qDebug() << "AudioPlaybackEngine: end detected, writeHead=" << m_writeHead
-                 << "totalDur=" << m_totalDuration;
+        qDebug() << "AudioPlaybackEngine: end detected, writeHead=" << m_writeHead;
         QTimer::singleShot(300, this, [this]() {
             if (m_playing) {
                 stopPlayback();
@@ -175,5 +176,4 @@ void AudioPlaybackEngine::onFeedTimer() {
         });
     }
 }
-
 

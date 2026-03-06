@@ -29,9 +29,15 @@ public:
     // Вызывается из UI-потока (потокобезопасно)
     void seekTo(double time) {
         QMutexLocker lock(&m_mutex);
-        m_seekTime = time;
+        m_seekTime      = time;
+        m_playPosition  = time; // ВАЖНО: сброс позиции при seek!
+        // Иначе после forward-seek и backward-seek
+        // m_playPosition остаётся на старом (большом) значении
+        // → thread декодирует без PREFETCH_AHEAD-тормоза
+        // → заполняет весь кэш кадрами из середины файла
+        // → нужные кадры вытесняются → чёрный экран
         m_seekRequested = true;
-        m_condition.wakeAll();  // Будим поток если он спал
+        m_condition.wakeAll();
     }
 
     void updatePlayPosition(double time) {
@@ -74,7 +80,7 @@ protected:
 
         double currentTime  = 0.0;
         double prefetchBase = 0.0;
-        const double PREFETCH_AHEAD = 5.0;
+        const double PREFETCH_AHEAD = 8.0; // при 2x скорости нужно 8с буфера
         bool needSeek = true;  // при старте делаем один seek на начало
 
         while (true) {
@@ -98,7 +104,7 @@ protected:
                 needSeek = false;
             }
 
-            int frameNum = (int)(currentTime * m_fps);
+            int frameNum = (int)(currentTime * m_fps + 0.5); // round вместо floor
 
             // ── Декодируем следующий кадр (sequential — БЕЗ seek на каждый кадр) ──
             QImage cached;
@@ -108,6 +114,12 @@ protected:
                 if (!frame.isNull()) {
                     m_cache->put(frameNum, frame);
                     emit frameReady(frameNum);
+                    // Сообщаем кэшу текущую позицию воспроизведения
+                    // чтобы при вытеснении не удалялись нужные кадры
+                    {
+                        QMutexLocker lock(&m_mutex);
+                        m_cache->setPlayPosition((int)(m_playPosition * m_fps + 0.5));
+                    }
                 } else {
                     // Конец файла или ошибка чтения — ждём seek
                     QMutexLocker lock(&m_mutex);

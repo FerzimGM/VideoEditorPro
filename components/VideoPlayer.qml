@@ -142,11 +142,20 @@ Rectangle {
 
     onPlaybackSpeedChanged: {
         if (isPlaying) {
-            // Берём точное время из C++ (аудио-клок), а не из QML currentTime —
-            // QML-свойство может отставать на 50–100мс → рассинхрон после смены скорости
-            var exactTime = cppTimeline.getPlaybackTime()
-            cppTimeline.stopPlayback()
-            cppTimeline.startPlayback(exactTime, playbackSpeed)
+            speedDebounceTimer.restart()
+        }
+    }
+
+    Timer {
+        id: speedDebounceTimer
+        interval: 200
+        repeat: false
+        onTriggered: {
+            if (videoPlayer.isPlaying) {
+                var exactTime = cppTimeline.getPlaybackTime()
+                cppTimeline.stopPlayback()
+                cppTimeline.startPlayback(exactTime, videoPlayer.playbackSpeed)
+            }
         }
     }
 
