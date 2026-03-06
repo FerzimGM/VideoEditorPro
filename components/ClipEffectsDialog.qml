@@ -3,22 +3,15 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import "../theme.js" as Theme
 
-// ===== ПАНЕЛЬ ЭФФЕКТОВ КЛИПА =====
-// Вызывается из VideoClip.qml через onEffectsRequested.
-// Подключение в main.qml:
-//   ClipEffectsDialog {
-//       id: clipEffectsDialog
-//       parentWindow: root  // ← Window
-//   }
-// И в Timeline → Track → VideoClip:
-//   onEffectsRequested: id => clipEffectsDialog.openForClip(id)
+// ===== ДИАЛОГ ЭФФЕКТОВ КЛИПА =====
+// Секции: Видео / Аудио / Переходы. Каждый эффект — строка.
 Window {
     id: effectsDialog
     title: "Эффекты клипа"
-    width: 500
-    height: 580
-    minimumWidth: 420
-    minimumHeight: 460
+    width: 480
+    height: 560
+    minimumWidth: 400
+    minimumHeight: 420
     color: "transparent"
     flags: Qt.Dialog | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint
     modality: Qt.NonModal
@@ -26,7 +19,292 @@ Window {
     property int clipId: -1
     property string clipName: ""
     property var parentWindow: null
-    property var appliedEffects: []
+
+    property var videoEffects: []
+    property var audioEffects: []
+    property var transitionEffects: []
+    property int totalCount: videoEffects.length + audioEffects.length + transitionEffects.length
+
+    // ── Мета-данные всех эффектов ──
+    readonly property var effectMeta: ({
+                                           "brightness": {
+                                               "icon": "☀️",
+                                               "label": "Яркость",
+                                               "cat": "video",
+                                               "fmt": function (v) {
+                                                   return (v >= 0 ? "+" : "") + v.toFixed(
+                                                               2)
+                                               }
+                                           },
+                                           "contrast": {
+                                               "icon": "🔆",
+                                               "label": "Контраст",
+                                               "cat": "video",
+                                               "fmt": function (v) {
+                                                   return v.toFixed(2) + "x"
+                                               }
+                                           },
+                                           "saturation": {
+                                               "icon": "🎨",
+                                               "label": "Насыщенность",
+                                               "cat": "video",
+                                               "fmt": function (v) {
+                                                   return v.toFixed(2) + "x"
+                                               }
+                                           },
+                                           "grayscale": {
+                                               "icon": "◻️",
+                                               "label": "Ч/Б",
+                                               "cat": "video",
+                                               "fmt": function (v) {
+                                                   return v > 0.5 ? "вкл" : "выкл"
+                                               }
+                                           },
+                                           "hue": {
+                                               "icon": "🌈",
+                                               "label": "Оттенок",
+                                               "cat": "video",
+                                               "fmt": function (v) {
+                                                   return (v >= 0 ? "+" : "") + v.toFixed(
+                                                               0) + "°"
+                                               }
+                                           },
+                                           "temperature": {
+                                               "icon": "🌡️",
+                                               "label": "Температура",
+                                               "cat": "video",
+                                               "fmt": function (v) {
+                                                   return v >= 0 ? "тёплый +" + v.toFixed(
+                                                                       2) : "холодный " + v.toFixed(
+                                                                       2)
+                                               }
+                                           },
+                                           "tint_hue": {
+                                               "icon": "🖌️",
+                                               "label": "Тинт",
+                                               "cat": "video",
+                                               "fmt": function (v) {
+                                                   return v.toFixed(0) + "°"
+                                               }
+                                           },
+                                           "sepia": {
+                                               "icon": "🟤",
+                                               "label": "Сепия",
+                                               "cat": "video",
+                                               "fmt": function (v) {
+                                                   return Math.round(
+                                                               v * 100) + "%"
+                                               }
+                                           },
+                                           "invert": {
+                                               "icon": "🔄",
+                                               "label": "Инверсия",
+                                               "cat": "video",
+                                               "fmt": function (v) {
+                                                   return v > 0.5 ? "вкл" : "выкл"
+                                               }
+                                           },
+                                           "posterize": {
+                                               "icon": "🎭",
+                                               "label": "Постеризация",
+                                               "cat": "video",
+                                               "fmt": function (v) {
+                                                   return v < 2 ? "выкл" : Math.round(
+                                                                      v) + " ур."
+                                               }
+                                           },
+                                           "pixelate": {
+                                               "icon": "⊞",
+                                               "label": "Пикселизация",
+                                               "cat": "video",
+                                               "fmt": function (v) {
+                                                   return v < 2 ? "выкл" : Math.round(
+                                                                      v) + " px"
+                                               }
+                                           },
+                                           "grain": {
+                                               "icon": "📽️",
+                                               "label": "Зернистость",
+                                               "cat": "video",
+                                               "fmt": function (v) {
+                                                   return Math.round(
+                                                               v * 100) + "%"
+                                               }
+                                           },
+                                           "chroma_key": {
+                                               "icon": "💚",
+                                               "label": "Хромакей",
+                                               "cat": "video",
+                                               "fmt": function (v) {
+                                                   return v > 0.5 ? "вкл" : "выкл"
+                                               }
+                                           },
+                                           "blur": {
+                                               "icon": "◎",
+                                               "label": "Размытие",
+                                               "cat": "video",
+                                               "fmt": function (v) {
+                                                   return v.toFixed(1) + " px"
+                                               }
+                                           },
+                                           "sharpness": {
+                                               "icon": "⬥",
+                                               "label": "Резкость",
+                                               "cat": "video",
+                                               "fmt": function (v) {
+                                                   return v.toFixed(1) + "x"
+                                               }
+                                           },
+                                           "vignette": {
+                                               "icon": "🔳",
+                                               "label": "Виньетка",
+                                               "cat": "video",
+                                               "fmt": function (v) {
+                                                   return Math.round(
+                                                               v * 100) + "%"
+                                               }
+                                           },
+                                           "volume": {
+                                               "icon": "🔊",
+                                               "label": "Громкость",
+                                               "cat": "audio",
+                                               "fmt": function (v) {
+                                                   return Math.round(
+                                                               v * 100) + "%"
+                                               }
+                                           },
+                                           "reverb": {
+                                               "icon": "〰️",
+                                               "label": "Реверб",
+                                               "cat": "audio",
+                                               "fmt": function (v) {
+                                                   return Math.round(
+                                                               v * 100) + "%"
+                                               }
+                                           },
+                                           "echo": {
+                                               "icon": "↩️",
+                                               "label": "Эхо",
+                                               "cat": "audio",
+                                               "fmt": function (v) {
+                                                   return Math.round(
+                                                               150 + v * 350) + " мс"
+                                               }
+                                           },
+                                           "mono": {
+                                               "icon": "🔈",
+                                               "label": "Моно",
+                                               "cat": "audio",
+                                               "fmt": function (v) {
+                                                   return v > 0.5 ? "вкл" : "выкл"
+                                               }
+                                           },
+                                           "stereo_widen": {
+                                               "icon": "🎧",
+                                               "label": "Стерео",
+                                               "cat": "audio",
+                                               "fmt": function (v) {
+                                                   return Math.round(
+                                                               v * 100) + "%"
+                                               }
+                                           },
+                                           "pitch": {
+                                               "icon": "🎵",
+                                               "label": "Питч",
+                                               "cat": "audio",
+                                               "fmt": function (v) {
+                                                   return (v >= 0 ? "+" : "") + v.toFixed(
+                                                               1) + " пт"
+                                               }
+                                           },
+                                           "normalize": {
+                                               "icon": "📊",
+                                               "label": "Нормализация",
+                                               "cat": "audio",
+                                               "fmt": function (v) {
+                                                   return Math.round(
+                                                               v * 100) + "%"
+                                               }
+                                           },
+                                           "fade_in": {
+                                               "icon": "📈",
+                                               "label": "Фейд-ин",
+                                               "cat": "audio",
+                                               "fmt": function (v) {
+                                                   return Math.round(
+                                                               v * 100) + "% клипа"
+                                               }
+                                           },
+                                           "fade_out": {
+                                               "icon": "📉",
+                                               "label": "Фейд-аут",
+                                               "cat": "audio",
+                                               "fmt": function (v) {
+                                                   return Math.round(
+                                                               v * 100) + "% клипа"
+                                               }
+                                           },
+                                           "transition_in": {
+                                               "icon": "🌅",
+                                               "label": "Вход",
+                                               "cat": "transition",
+                                               "fmt": function (v) {
+                                                   var n = ["Нет", "Появление", "Смывка→", "←Смывка", "Приближение", "Отдаление", "Вспышка"]
+                                                   return n[Math.round(
+                                                                v)] || "Нет"
+                                               }
+                                           },
+                                           "transition_out": {
+                                               "icon": "🌆",
+                                               "label": "Выход",
+                                               "cat": "transition",
+                                               "fmt": function (v) {
+                                                   var n = ["Нет", "Затухание", "Смывка→", "←Смывка", "Приближение", "Отдаление", "Вспышка"]
+                                                   return n[Math.round(
+                                                                v)] || "Нет"
+                                               }
+                                           },
+                                           "transition_duration": {
+                                               "icon": "⏱️",
+                                               "label": "Длительность",
+                                               "cat": "transition",
+                                               "fmt": function (v) {
+                                                   return v.toFixed(2) + " с"
+                                               }
+                                           }
+                                       })
+
+    function isNeutral(key, val) {
+        if (key === "brightness" && Math.abs(val) < 0.01)
+            return true
+        if (key === "contrast" && Math.abs(val - 1.0) < 0.01)
+            return true
+        if (key === "saturation" && Math.abs(val - 1.0) < 0.01)
+            return true
+        if (key === "grayscale" && val < 0.5)
+            return true
+        if (key === "invert" && val < 0.5)
+            return true
+        if (key === "mono" && val < 0.5)
+            return true
+        if (key === "volume" && Math.abs(val - 1.0) < 0.01)
+            return true
+        if (key === "transition_in" && Math.round(val) === 0)
+            return true
+        if (key === "transition_out" && Math.round(val) === 0)
+            return true
+        if (key === "tint_strength")
+            return true
+        if (key === "chroma_threshold")
+            return true
+        if (key === "chroma_smoothness")
+            return true
+        if (key === "_frameIdx")
+            return true
+        if (key === "_uid")
+            return true
+        return false
+    }
 
     // ===== API =====
     function openForClip(id) {
@@ -44,10 +322,7 @@ Window {
         }
         if (!clipName)
             clipName = "Клип #" + id
-
-        // Загружаем реальные эффекты из C++
         refreshEffects()
-
         if (parentWindow) {
             x = parentWindow.x + (parentWindow.width - width) / 2
             y = parentWindow.y + (parentWindow.height - height) / 2
@@ -59,52 +334,102 @@ Window {
 
     function refreshEffects() {
         if (!cppTimeline || clipId < 0) {
-            appliedEffects = []
+            videoEffects = []
+            audioEffects = []
+            transitionEffects = []
             return
         }
         var fx = cppTimeline.getClipEffects(clipId)
-        var arr = []
-        var names = {
-            "brightness": {
-                "icon": "☀️",
-                "label": "Яркость"
-            },
-            "contrast": {
-                "icon": "🔆",
-                "label": "Контраст"
-            },
-            "saturation": {
-                "icon": "🎨",
-                "label": "Насыщенность"
-            },
-            "grayscale": {
-                "icon": "⬜",
-                "label": "Чёрно-белое"
-            }
-        }
+        var vid = [], aud = [], tr = []
+
+        // Обычные эффекты
         for (var key in fx) {
             var val = fx[key]
-            // Пропускаем нейтральные значения
-            if (key === "brightness" && Math.abs(val) < 0.01)
+            if (isNeutral(key, val))
                 continue
-            if (key === "contrast" && Math.abs(val - 1.0) < 0.01)
+            var meta = effectMeta[key]
+            if (!meta)
                 continue
-            if (key === "saturation" && Math.abs(val - 1.0) < 0.01)
+            // Переходы — собираем отдельно (merge ниже)
+            if (meta.cat === "transition")
                 continue
-            if (key === "grayscale" && val < 0.5)
-                continue
-            var info = names[key] || {
-                "icon": "⚙️",
-                "label": key
+            var entry = {
+                "key": key,
+                "label": meta.label,
+                "icon": meta.icon,
+                "valStr": meta.fmt(val)
             }
-            arr.push({
-                         "id": key,
-                         "name": info.label,
-                         "icon": info.icon,
-                         "params": key !== "grayscale" ? val.toFixed(2) : "вкл"
-                     })
+            if (meta.cat === "video")
+                vid.push(entry)
+            else if (meta.cat === "audio")
+                aud.push(entry)
         }
-        appliedEffects = arr
+
+        // Переходы: объединяем transition_in / transition_out / duration в 2 строки макс
+        var trNames = ["Нет", "Появление", "Смывка→", "←Смывка", "Приближение", "Отдаление", "Вспышка"]
+        var trOutNames = ["Нет", "Затухание", "Смывка→", "←Смывка", "Приближение", "Отдаление", "Вспышка"]
+        var dur = fx["transition_duration"] !== undefined ? fx["transition_duration"] : 0.5
+
+        if (fx["transition_in"] !== undefined && Math.round(
+                    fx["transition_in"]) !== 0) {
+            var inName = trNames[Math.round(fx["transition_in"])] || "?"
+            tr.push({
+                        "key": "transition_in",
+                        "label": "Вход клипа",
+                        "icon": "🌅",
+                        "valStr": inName + " · " + dur.toFixed(2) + "с",
+                        "extraKey": "transition_duration"
+                    })
+        }
+        if (fx["transition_out"] !== undefined && Math.round(
+                    fx["transition_out"]) !== 0) {
+            var outName = trOutNames[Math.round(fx["transition_out"])] || "?"
+            tr.push({
+                        "key": "transition_out",
+                        "label": "Выход клипа",
+                        "icon": "🌆",
+                        "valStr": outName + " · " + dur.toFixed(2) + "с",
+                        "extraKey": "transition_duration"
+                    })
+        }
+
+        videoEffects = vid
+        audioEffects = aud
+        transitionEffects = tr
+    }
+
+    function removeEffect(key) {
+        if (!cppTimeline || clipId < 0)
+            return
+        cppTimeline.removeEffect(clipId, key)
+        if (key === "chroma_key") {
+            cppTimeline.removeEffect(clipId, "chroma_threshold")
+            cppTimeline.removeEffect(clipId, "chroma_smoothness")
+        }
+        if (key === "tint_hue")
+            cppTimeline.removeEffect(clipId, "tint_strength")
+        // При удалении одного перехода - удаляем duration только если оба перехода убраны
+        if (key === "transition_in" || key === "transition_out") {
+            var fx = cppTimeline.getClipEffects(clipId)
+            var hasIn = key === "transition_in" ? false : (fx["transition_in"] !== undefined
+                                                           && Math.round(
+                                                               fx["transition_in"]) !== 0)
+            var hasOut = key === "transition_out" ? false : (fx["transition_out"] !== undefined
+                                                             && Math.round(
+                                                                 fx["transition_out"]) !== 0)
+            if (!hasIn && !hasOut)
+                cppTimeline.removeEffect(clipId, "transition_duration")
+        }
+        refreshEffects()
+    }
+
+    function resetAll() {
+        if (!cppTimeline || clipId < 0)
+            return
+        var keys = ["brightness", "contrast", "saturation", "grayscale", "blur", "sharpness", "hue", "sepia", "vignette", "invert", "posterize", "pixelate", "temperature", "tint_hue", "tint_strength", "grain", "chroma_key", "chroma_threshold", "chroma_smoothness", "volume", "reverb", "echo", "mono", "stereo_widen", "pitch", "normalize", "fade_in", "fade_out", "transition_in", "transition_out", "transition_duration"]
+        for (var i = 0; i < keys.length; i++)
+            cppTimeline.removeEffect(clipId, keys[i])
+        refreshEffects()
     }
 
     function closeDialog() {
@@ -113,7 +438,7 @@ Window {
         clipName = ""
     }
 
-    // ===== UI =====
+    // ===== РАЗМЕТКА =====
     Rectangle {
         anchors.fill: parent
         color: Theme.backgroundColor
@@ -128,7 +453,7 @@ Window {
             // ── Заголовок ──
             Rectangle {
                 Layout.fillWidth: true
-                height: 48
+                height: 50
                 color: Theme.backgroundDark
                 radius: Theme.borderRadius + 2
                 Rectangle {
@@ -138,11 +463,10 @@ Window {
                     height: parent.radius
                     color: parent.color
                 }
-
                 RowLayout {
                     anchors.fill: parent
-                    anchors.leftMargin: 12
-                    anchors.rightMargin: 8
+                    anchors.leftMargin: 14
+                    anchors.rightMargin: 10
                     spacing: 10
                     Text {
                         text: "✨"
@@ -172,14 +496,14 @@ Window {
                         cursorShape: Qt.SizeAllCursor
                         property real sx: 0
                         property real sy: 0
-                        onPressed: {
-                            sx = mouseX
-                            sy = mouseY
+                        onPressed: function (e) {
+                            sx = e.x
+                            sy = e.y
                         }
-                        onPositionChanged: {
+                        onPositionChanged: function (e) {
                             if (pressed) {
-                                effectsDialog.x += mouseX - sx
-                                effectsDialog.y += mouseY - sy
+                                effectsDialog.x += e.x - sx
+                                effectsDialog.y += e.y - sy
                             }
                         }
                     }
@@ -187,7 +511,7 @@ Window {
                         width: 28
                         height: 28
                         radius: 14
-                        color: closeBtnMA.containsMouse ? Theme.rubyPrimary : "transparent"
+                        color: closeMa.containsMouse ? Theme.rubyPrimary : "transparent"
                         border.color: Theme.rubyPrimary
                         border.width: 1
                         Behavior on color {
@@ -203,7 +527,7 @@ Window {
                             font.bold: true
                         }
                         MouseArea {
-                            id: closeBtnMA
+                            id: closeMa
                             anchors.fill: parent
                             hoverEnabled: true
                             cursorShape: Qt.PointingHandCursor
@@ -213,19 +537,19 @@ Window {
                 }
             }
 
-            // ── Инфо + пресеты ──
+            // ── Счётчик ──
             Rectangle {
                 Layout.fillWidth: true
-                height: 46
+                height: 34
                 color: Qt.rgba(1, 1, 1, 0.03)
-
                 RowLayout {
                     anchors.fill: parent
-                    anchors.margins: 10
+                    anchors.leftMargin: 14
+                    anchors.rightMargin: 14
                     spacing: 8
                     Text {
                         text: "🎬"
-                        font.pixelSize: 16
+                        font.pixelSize: 14
                     }
                     Text {
                         text: "ID " + (effectsDialog.clipId >= 0 ? effectsDialog.clipId : "—")
@@ -235,96 +559,19 @@ Window {
                     }
                     Rectangle {
                         width: 1
-                        height: 18
+                        height: 14
                         color: Theme.borderLight
                     }
                     Text {
-                        text: effectsDialog.appliedEffects.length
-                              > 0 ? effectsDialog.appliedEffects.length
-                                    + " эффект(ов)" : "Без эффектов"
-                        color: effectsDialog.appliedEffects.length
-                               > 0 ? Theme.rubyLight : Theme.textDisabled
+                        text: effectsDialog.totalCount
+                              > 0 ? effectsDialog.totalCount + " эффект(ов)" : "Без эффектов"
+                        color: effectsDialog.totalCount > 0 ? Theme.rubyLight : Theme.textDisabled
                         font.family: Theme.fontFamily
                         font.pixelSize: Theme.fontSizeSmall
                         font.bold: true
                     }
                     Item {
                         Layout.fillWidth: true
-                    }
-                    Text {
-                        text: "Пресеты:"
-                        color: Theme.textSecondary
-                        font.pixelSize: 11
-                    }
-                    Repeater {
-                        model: [{
-                                "label": "Ч/Б",
-                                "data": {
-                                    "icon": "⬜",
-                                    "name": "Grayscale",
-                                    "params": "",
-                                    "id": 100
-                                }
-                            }, {
-                                "label": "Sepia",
-                                "data": {
-                                    "icon": "🟤",
-                                    "name": "Sepia Tone",
-                                    "params": "intensity=0.8",
-                                    "id": 101
-                                }
-                            }, {
-                                "label": "Ярче",
-                                "data": {
-                                    "icon": "☀️",
-                                    "name": "Brightness",
-                                    "params": "value=+40%",
-                                    "id": 102
-                                }
-                            }, {
-                                "label": "Blur",
-                                "data": {
-                                    "icon": "💧",
-                                    "name": "Blur",
-                                    "params": "radius=5",
-                                    "id": 103
-                                }
-                            }]
-                        Rectangle {
-                            height: 26
-                            width: pt.implicitWidth + 16
-                            radius: 4
-                            color: pma.containsMouse ? Theme.rubyPrimary : Theme.backgroundDark
-                            border.color: Theme.rubyPrimary
-                            border.width: 1
-                            Behavior on color {
-                                ColorAnimation {
-                                    duration: 80
-                                }
-                            }
-                            Text {
-                                id: pt
-                                anchors.centerIn: parent
-                                text: modelData.label
-                                color: Theme.textPrimary
-                                font.pixelSize: 11
-                            }
-                            MouseArea {
-                                id: pma
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: {
-                                    var arr = effectsDialog.appliedEffects.slice()
-                                    for (var k = 0; k < arr.length; k++)
-                                        if (arr[k].id === modelData.data.id)
-                                            return
-                                    arr.push(modelData.data)
-                                    effectsDialog.appliedEffects = arr
-                                    // TODO: cppTimeline.addEffect(effectsDialog.clipId, modelData.data)
-                                }
-                            }
-                        }
                     }
                 }
             }
@@ -335,22 +582,22 @@ Window {
                 color: Theme.borderLight
             }
 
-            // ── Список эффектов ──
+            // ── Тело ──
             Rectangle {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 color: "transparent"
 
-                // Пусто
+                // Пустое состояние
                 ColumnLayout {
                     anchors.centerIn: parent
-                    spacing: 12
-                    visible: effectsDialog.appliedEffects.length === 0
+                    spacing: 10
+                    visible: effectsDialog.totalCount === 0
                     Text {
                         text: "🎞️"
-                        font.pixelSize: 48
+                        font.pixelSize: 42
                         Layout.alignment: Qt.AlignHCenter
-                        opacity: 0.3
+                        opacity: 0.22
                     }
                     Text {
                         text: "Эффекты не применены"
@@ -360,9 +607,9 @@ Window {
                         Layout.alignment: Qt.AlignHCenter
                     }
                     Text {
-                        text: "Настройте эффект в левой панели\nи нажмите «Применить к клипу»,\nили добавьте пресет выше."
+                        text: "Настройте эффект в левой панели\nи нажмите «✓ Применить»"
                         color: Theme.textDisabled
-                        opacity: 0.7
+                        opacity: 0.6
                         font.family: Theme.fontFamily
                         font.pixelSize: Theme.fontSizeSmall
                         Layout.alignment: Qt.AlignHCenter
@@ -370,11 +617,10 @@ Window {
                     }
                 }
 
-                // Список
                 ScrollView {
                     anchors.fill: parent
                     clip: true
-                    visible: effectsDialog.appliedEffects.length > 0
+                    visible: effectsDialog.totalCount > 0
                     ScrollBar.vertical: ScrollBar {
                         policy: ScrollBar.AsNeeded
                         contentItem: Rectangle {
@@ -387,188 +633,139 @@ Window {
 
                     Column {
                         width: parent.width
-                        topPadding: 6
-                        bottomPadding: 6
+                        topPadding: 8
+                        bottomPadding: 8
                         spacing: 0
 
-                        Repeater {
-                            model: effectsDialog.appliedEffects
+                        // ВИДЕО
+                        Column {
+                            width: parent.width
+                            spacing: 0
+                            visible: effectsDialog.videoEffects.length > 0
 
-                            delegate: Rectangle {
-                                width: parent.width - 12
-                                x: 6
-                                height: 64
-                                color: rh.containsMouse ? Qt.rgba(
-                                                              1, 1, 1,
-                                                              0.05) : "transparent"
-                                radius: Theme.borderRadius
-
-                                // Цветная полоска
-                                Rectangle {
-                                    anchors.left: parent.left
-                                    anchors.top: parent.top
-                                    anchors.topMargin: 10
-                                    anchors.bottom: parent.bottom
-                                    anchors.bottomMargin: 10
-                                    width: 3
-                                    radius: 2
-                                    color: Theme.rubyPrimary
-                                }
-
+                            Rectangle {
+                                width: parent.width
+                                height: 26
+                                color: Qt.rgba(0.8, 0.1, 0.2, 0.15)
                                 RowLayout {
                                     anchors.fill: parent
                                     anchors.leftMargin: 14
                                     anchors.rightMargin: 10
-                                    anchors.margins: 6
-                                    spacing: 10
-
-                                    // Иконка
-                                    Rectangle {
-                                        width: 36
-                                        height: 36
-                                        radius: 8
-                                        color: Qt.rgba(Theme.rubyPrimary.r,
-                                                       Theme.rubyPrimary.g,
-                                                       Theme.rubyPrimary.b,
-                                                       0.15)
-                                        border.color: Theme.rubyPrimary
-                                        border.width: 1
-                                        Text {
-                                            anchors.centerIn: parent
-                                            text: modelData.icon || "⚙️"
-                                            font.pixelSize: 18
-                                        }
+                                    spacing: 6
+                                    Text {
+                                        text: "🎬"
+                                        font.pixelSize: 11
                                     }
-
-                                    // Название + параметры
-                                    ColumnLayout {
+                                    Text {
+                                        text: "ВИДЕО"
+                                        color: Theme.rubyLight
+                                        font.family: Theme.fontFamily
+                                        font.pixelSize: 10
+                                        font.bold: true
+                                        font.letterSpacing: 1
+                                    }
+                                    Text {
+                                        text: effectsDialog.videoEffects.length + " эфф."
+                                        color: Theme.textSecondary
+                                        font.pixelSize: 9
+                                    }
+                                    Item {
                                         Layout.fillWidth: true
-                                        spacing: 4
-                                        Text {
-                                            text: modelData.name
-                                            color: Theme.textPrimary
-                                            font.family: Theme.fontFamily
-                                            font.pixelSize: Theme.fontSize
-                                            font.bold: true
-                                        }
-                                        Text {
-                                            visible: (modelData.params
-                                                      || "") !== ""
-                                            text: modelData.params || ""
-                                            color: Theme.textSecondary
-                                            font.family: Theme.fontFamily
-                                            font.pixelSize: Theme.fontSizeSmall
-                                            font.italic: true
-                                            elide: Text.ElideRight
-                                            Layout.fillWidth: true
-                                        }
-                                    }
-
-                                    // ▲▼ переставить
-                                    ColumnLayout {
-                                        spacing: 2
-                                        Text {
-                                            text: "▲"
-                                            font.pixelSize: 10
-                                            font.bold: true
-                                            color: uma.containsMouse ? Theme.textPrimary : Theme.textDisabled
-                                            MouseArea {
-                                                id: uma
-                                                anchors.fill: parent
-                                                hoverEnabled: true
-                                                cursorShape: Qt.PointingHandCursor
-                                                onClicked: {
-                                                    if (index > 0) {
-                                                        var a = effectsDialog.appliedEffects.slice()
-                                                        var t = a[index - 1]
-                                                        a[index - 1] = a[index]
-                                                        a[index] = t
-                                                        effectsDialog.appliedEffects = a
-                                                    }
-                                                }
-                                            }
-                                        }
-                                        Text {
-                                            text: "▼"
-                                            font.pixelSize: 10
-                                            font.bold: true
-                                            color: dma2.containsMouse ? Theme.textPrimary : Theme.textDisabled
-                                            MouseArea {
-                                                id: dma2
-                                                anchors.fill: parent
-                                                hoverEnabled: true
-                                                cursorShape: Qt.PointingHandCursor
-                                                onClicked: {
-                                                    var a = effectsDialog.appliedEffects.slice()
-                                                    if (index < a.length - 1) {
-                                                        var t2 = a[index + 1]
-                                                        a[index + 1] = a[index]
-                                                        a[index] = t2
-                                                        effectsDialog.appliedEffects = a
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-
-                                    // Удалить
-                                    Rectangle {
-                                        width: 28
-                                        height: 28
-                                        radius: 6
-                                        color: delma.containsMouse ? Qt.rgba(
-                                                                         0.94,
-                                                                         0.33,
-                                                                         0.31,
-                                                                         0.25) : "transparent"
-                                        border.color: "#EF5350"
-                                        border.width: 1
-                                        Behavior on color {
-                                            ColorAnimation {
-                                                duration: 80
-                                            }
-                                        }
-                                        Text {
-                                            anchors.centerIn: parent
-                                            text: "✕"
-                                            color: "#EF5350"
-                                            font.pixelSize: 12
-                                            font.bold: true
-                                        }
-                                        MouseArea {
-                                            id: delma
-                                            anchors.fill: parent
-                                            hoverEnabled: true
-                                            cursorShape: Qt.PointingHandCursor
-                                            onClicked: {
-                                                if (cppTimeline
-                                                        && effectsDialog.clipId >= 0) {
-                                                    cppTimeline.removeEffect(
-                                                                effectsDialog.clipId,
-                                                                modelData.id)
-                                                    effectsDialog.refreshEffects()
-                                                }
-                                            }
-                                        }
                                     }
                                 }
-
-                                Rectangle {
-                                    anchors.bottom: parent.bottom
-                                    anchors.left: parent.left
-                                    anchors.right: parent.right
-                                    anchors.leftMargin: 14
-                                    anchors.rightMargin: 14
-                                    height: 1
-                                    color: Theme.borderLight
-                                    opacity: 0.4
-                                    visible: index < effectsDialog.appliedEffects.length - 1
+                            }
+                            Repeater {
+                                model: effectsDialog.videoEffects
+                                delegate: EffectRow {
+                                    effectData: modelData
+                                    eWidth: parent.width
                                 }
-                                MouseArea {
-                                    id: rh
+                            }
+                        }
+
+                        // АУДИО
+                        Column {
+                            width: parent.width
+                            spacing: 0
+                            visible: effectsDialog.audioEffects.length > 0
+
+                            Rectangle {
+                                width: parent.width
+                                height: 26
+                                color: Qt.rgba(0.1, 0.3, 0.9, 0.12)
+                                RowLayout {
                                     anchors.fill: parent
-                                    hoverEnabled: true
-                                    acceptedButtons: Qt.NoButton
+                                    anchors.leftMargin: 14
+                                    anchors.rightMargin: 10
+                                    spacing: 6
+                                    Text {
+                                        text: "🎵"
+                                        font.pixelSize: 11
+                                    }
+                                    Text {
+                                        text: "АУДИО"
+                                        color: "#7CA8FF"
+                                        font.family: Theme.fontFamily
+                                        font.pixelSize: 10
+                                        font.bold: true
+                                        font.letterSpacing: 1
+                                    }
+                                    Text {
+                                        text: effectsDialog.audioEffects.length + " эфф."
+                                        color: Theme.textSecondary
+                                        font.pixelSize: 9
+                                    }
+                                    Item {
+                                        Layout.fillWidth: true
+                                    }
+                                }
+                            }
+                            Repeater {
+                                model: effectsDialog.audioEffects
+                                delegate: EffectRow {
+                                    effectData: modelData
+                                    eWidth: parent.width
+                                }
+                            }
+                        }
+
+                        // ПЕРЕХОДЫ
+                        Column {
+                            width: parent.width
+                            spacing: 0
+                            visible: effectsDialog.transitionEffects.length > 0
+
+                            Rectangle {
+                                width: parent.width
+                                height: 26
+                                color: Qt.rgba(0.9, 0.7, 0.1, 0.12)
+                                RowLayout {
+                                    anchors.fill: parent
+                                    anchors.leftMargin: 14
+                                    anchors.rightMargin: 10
+                                    spacing: 6
+                                    Text {
+                                        text: "✨"
+                                        font.pixelSize: 11
+                                    }
+                                    Text {
+                                        text: "ПЕРЕХОДЫ"
+                                        color: "#FFD54F"
+                                        font.family: Theme.fontFamily
+                                        font.pixelSize: 10
+                                        font.bold: true
+                                        font.letterSpacing: 1
+                                    }
+                                    Item {
+                                        Layout.fillWidth: true
+                                    }
+                                }
+                            }
+                            Repeater {
+                                model: effectsDialog.transitionEffects
+                                delegate: EffectRow {
+                                    effectData: modelData
+                                    eWidth: parent.width
                                 }
                             }
                         }
@@ -585,7 +782,7 @@ Window {
             // ── Кнопки ──
             Rectangle {
                 Layout.fillWidth: true
-                height: 56
+                height: 52
                 color: Theme.backgroundDark
                 radius: Theme.borderRadius + 2
                 Rectangle {
@@ -595,16 +792,15 @@ Window {
                     height: parent.radius
                     color: parent.color
                 }
-
                 RowLayout {
                     anchors.fill: parent
                     anchors.margins: 12
                     spacing: 8
-
                     Button {
                         text: "🗑  Сбросить все"
-                        enabled: effectsDialog.appliedEffects.length > 0
-                        Layout.preferredHeight: 34
+                        enabled: effectsDialog.totalCount > 0
+                        Layout.preferredHeight: 32
+                        onClicked: effectsDialog.resetAll()
                         contentItem: Text {
                             text: parent.text
                             color: parent.enabled ? "#EF5350" : Theme.textDisabled
@@ -617,35 +813,21 @@ Window {
                         background: Rectangle {
                             radius: Theme.borderRadius
                             color: parent.down ? Qt.rgba(
-                                                     0.94, 0.33, 0.31,
-                                                     0.25) : parent.hovered ? Qt.rgba(0.94, 0.33, 0.31, 0.12) : "transparent"
+                                                     .94, .33, .31,
+                                                     .3) : (parent.hovered ? Qt.rgba(.94, .33, .31, .12) : "transparent")
                             border.color: "#EF5350"
                             border.width: 1
-                            opacity: parent.enabled ? 1.0 : 0.4
-                        }
-                        onClicked: {
-                            if (cppTimeline && effectsDialog.clipId >= 0) {
-                                cppTimeline.removeEffect(effectsDialog.clipId,
-                                                         "brightness")
-                                cppTimeline.removeEffect(effectsDialog.clipId,
-                                                         "contrast")
-                                cppTimeline.removeEffect(effectsDialog.clipId,
-                                                         "saturation")
-                                cppTimeline.removeEffect(effectsDialog.clipId,
-                                                         "grayscale")
-                                effectsDialog.refreshEffects()
-                            }
+                            opacity: parent.enabled ? 1 : 0.4
                         }
                     }
-
                     Item {
                         Layout.fillWidth: true
                     }
-
                     Button {
                         text: "Закрыть"
-                        Layout.preferredHeight: 34
-                        Layout.preferredWidth: 90
+                        Layout.preferredHeight: 32
+                        Layout.preferredWidth: 88
+                        onClicked: effectsDialog.closeDialog()
                         contentItem: Text {
                             text: parent.text
                             color: Theme.textPrimary
@@ -657,17 +839,142 @@ Window {
                         }
                         background: Rectangle {
                             radius: Theme.borderRadius
-                            color: parent.down ? Theme.rubyDark : parent.hovered ? Theme.rubyLight : Theme.rubyPrimary
+                            color: parent.down ? Theme.rubyDark : (parent.hovered ? Theme.rubyLight : Theme.rubyPrimary)
                             Behavior on color {
                                 ColorAnimation {
                                     duration: 100
                                 }
                             }
                         }
-                        onClicked: effectsDialog.closeDialog()
                     }
                 }
             }
+        }
+    }
+
+    // ═══════════════════════════════════
+    //  КОМПОНЕНТ: Строка одного эффекта
+    // ═══════════════════════════════════
+    component EffectRow: Rectangle {
+        id: efRowRoot
+        property var effectData: null
+        property real eWidth: 460
+
+        width: eWidth
+        height: 42
+        color: rowHover.containsMouse ? Qt.rgba(1, 1, 1, 0.04) : "transparent"
+
+        // Левая полоска
+        Rectangle {
+            anchors.left: parent.left
+            anchors.leftMargin: 6
+            anchors.verticalCenter: parent.verticalCenter
+            width: 2
+            height: 26
+            radius: 1
+            color: Theme.rubyPrimary
+        }
+
+        RowLayout {
+            anchors.fill: parent
+            anchors.leftMargin: 16
+            anchors.rightMargin: 10
+            spacing: 10
+
+            // Иконка
+            Text {
+                text: efRowRoot.effectData ? efRowRoot.effectData.icon : "⚙️"
+                font.pixelSize: 16
+                width: 22
+                horizontalAlignment: Text.AlignHCenter
+            }
+
+            // Название
+            Text {
+                text: efRowRoot.effectData ? efRowRoot.effectData.label : ""
+                color: Theme.textPrimary
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontSize
+                font.bold: true
+                Layout.preferredWidth: 130
+                elide: Text.ElideRight
+            }
+
+            // Значение — бейдж
+            Rectangle {
+                height: 22
+                Layout.preferredWidth: valBadge.implicitWidth + 18
+                radius: 4
+                color: Qt.rgba(0.8, 0.1, 0.2, 0.18)
+                border.color: Qt.rgba(0.8, 0.1, 0.2, 0.45)
+                border.width: 1
+                Text {
+                    id: valBadge
+                    anchors.centerIn: parent
+                    text: efRowRoot.effectData ? efRowRoot.effectData.valStr : ""
+                    color: Theme.rubyLight
+                    font.family: Theme.fontFamily
+                    font.pixelSize: 10
+                    font.bold: true
+                }
+            }
+
+            Item {
+                Layout.fillWidth: true
+            }
+
+            // Удалить
+            Rectangle {
+                width: 24
+                height: 24
+                radius: 5
+                color: delMa.containsMouse ? Qt.rgba(.94, .33, .31,
+                                                     .25) : "transparent"
+                border.color: Qt.rgba(.94, .33, .31,
+                                      delMa.containsMouse ? 0.8 : 0.3)
+                border.width: 1
+                Behavior on color {
+                    ColorAnimation {
+                        duration: 80
+                    }
+                }
+                Text {
+                    anchors.centerIn: parent
+                    text: "✕"
+                    color: "#EF5350"
+                    font.pixelSize: 10
+                    font.bold: true
+                }
+                MouseArea {
+                    id: delMa
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: {
+                        if (efRowRoot.effectData)
+                            effectsDialog.removeEffect(efRowRoot.effectData.key)
+                    }
+                }
+            }
+        }
+
+        // Разделитель
+        Rectangle {
+            anchors.bottom: parent.bottom
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.leftMargin: 16
+            anchors.rightMargin: 16
+            height: 1
+            color: Theme.borderLight
+            opacity: 0.25
+        }
+
+        MouseArea {
+            id: rowHover
+            anchors.fill: parent
+            hoverEnabled: true
+            acceptedButtons: Qt.NoButton
         }
     }
 }

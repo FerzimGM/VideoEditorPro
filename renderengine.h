@@ -152,6 +152,24 @@ public:
     static QImage applyPixelate(const QImage& frame, double blockSize);
     static QImage applyTemperature(const QImage& frame, double value);
     static QImage applyTint(const QImage& frame, double hue, double strength);
+    static QImage applyGrain(const QImage& frame, double strength, int frameIndex = 0);
+    static QImage applyChromaKey(const QImage& frame, double threshold, double smoothness);
+
+    // Переходы (для превью)
+    // type: 1=fade 2=wipe_right 3=wipe_left 4=zoom_in 5=zoom_out 6=flash
+    static QImage applyTransition(const QImage& frameFrom, const QImage& frameTo,
+                                  int type, float progress);
+
+    // Перевод строкового имени перехода (из QML) в числовой код
+    static int transitionNameToCode(const QString& name) {
+        if (name == "fade_in"  || name == "fade_out") return 1;
+        if (name == "wipe_right") return 2;
+        if (name == "wipe_left")  return 3;
+        if (name == "zoom_in")    return 4;
+        if (name == "zoom_out")   return 5;
+        if (name == "flash")      return 6;
+        return 0; // none
+    }
 
 signals:
     void progressChanged(int percent);

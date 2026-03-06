@@ -53,6 +53,30 @@ void Timeline::startDecoderThread(const QString& filepath, double fps) {
 }
 
 // ===== ПОЛУЧИТЬ КЛИПЫ ДЛЯ ДОРОЖКИ (для QML) =====
+
+// ─────────────────────────────────────────────────────────────────
+// Найти индекс клипа по стабильному UID (хранится в effects["_uid"])
+// Если UID не найден — возвращает -1
+// ─────────────────────────────────────────────────────────────────
+static int findClipIndex(const QList<TimelineClip>& clips, int uid) {
+    for (int i = 0; i < clips.size(); ++i) {
+        if (static_cast<int>(clips[i].effects.value("_uid", -1)) == uid)
+            return i;
+    }
+    return -1;
+}
+
+// Вспомогательная: разрешить "uid-or-index" —
+// если clip.effects["_uid"] существует → ищем по uid, иначе — по индексу (обратная совместимость)
+static int resolveIndex(const QList<TimelineClip>& clips, int uidOrIndex) {
+    // Сначала ищем как UID
+    int byUid = findClipIndex(clips, uidOrIndex);
+    if (byUid >= 0) return byUid;
+    // Fallback: прямой индекс
+    if (uidOrIndex >= 0 && uidOrIndex < clips.size()) return uidOrIndex;
+    return -1;
+}
+
 QVariantList Timeline::getClipsForTrack(int trackIndex) {
     QVariantList result;
 
@@ -62,7 +86,9 @@ QVariantList Timeline::getClipsForTrack(int trackIndex) {
         if (clip.trackIndex == trackIndex) {
             QVariantMap clipMap;
 
-            clipMap["id"] = i;
+            // Стабильный UID (если есть) или индекс как fallback
+            int uid = static_cast<int>(clip.effects.value("_uid", -1));
+            clipMap["id"] = (uid >= 0) ? uid : i;
             clipMap["filepath"] = clip.filepath;
             clipMap["startTime"] = clip.startTime;
             clipMap["duration"] = clip.duration;
@@ -151,6 +177,8 @@ bool Timeline::addClip(const QString& filepath, int trackIndex, double startTime
     }
 
     // 5. Добавить клип в список
+    // Назначаем стабильный UID (не меняется при sortClips)
+    newClip.effects["_uid"] = static_cast<double>(++m_nextUid);
     m_clips.append(newClip);
 
     // Запустить поток декодирования
@@ -183,8 +211,9 @@ bool Timeline::addClip(const QString& filepath, int trackIndex, double startTime
 }
 
 // ===== УДАЛИТЬ КЛИП =====
-bool Timeline::removeClip(int index) {
-    qDebug() << "removeClip:" << index;
+bool Timeline::removeClip(int uidOrIndex) {
+    int index = resolveIndex(m_clips, uidOrIndex);
+    qDebug() << "removeClip: uid/idx=" << uidOrIndex << "→ index=" << index;
 
     if (index < 0 || index >= m_clips.size()) {
         qWarning() << "Invalid index:" << index;
@@ -202,8 +231,10 @@ bool Timeline::removeClip(int index) {
 }
 
 // ===== ПЕРЕМЕСТИТЬ КЛИП =====
-bool Timeline::moveClip(int index, int newTrackIndex, double newStartTime) {
-    qDebug() << "moveClip:" << index << "-> track" << newTrackIndex << "time" << newStartTime;
+bool Timeline::moveClip(int uidOrIndex, int newTrackIndex, double newStartTime) {
+    int index = resolveIndex(m_clips, uidOrIndex);
+    qDebug() << "moveClip: uid/idx=" << uidOrIndex << "→ index=" << index
+             << "-> track" << newTrackIndex << "time" << newStartTime;
 
     if (index < 0 || index >= m_clips.size()) {
         qWarning() << "Invalid index:" << index;
@@ -230,8 +261,9 @@ bool Timeline::moveClip(int index, int newTrackIndex, double newStartTime) {
 }
 
 // ===== РАЗРЕЗАТЬ КЛИП =====
-bool Timeline::splitClip(int index, double splitTime) {
-    qDebug() << "splitClip:" << index << "at" << splitTime;
+bool Timeline::splitClip(int uidOrIndex, double splitTime) {
+    int index = resolveIndex(m_clips, uidOrIndex);
+    qDebug() << "splitClip: uid/idx=" << uidOrIndex << "→ index=" << index << "at" << splitTime;
 
     if (index < 0 || index >= m_clips.size()) {
         qWarning() << "Invalid index:" << index;
@@ -255,6 +287,17 @@ bool Timeline::splitClip(int index, double splitTime) {
     secondClip.duration  = secondClip.duration - cutOffset;
     secondClip.trimStart = secondClip.trimStart + cutOffset;
 
+    // Part A сохраняет ОРИГИНАЛЬНЫЙ UID — QML не теряет ссылку после разреза.
+    // Part B получает новый UID.
+    // firstClip.effects["_uid"] уже содержит оригинальный UID — не трогаем.
+    secondClip.effects["_uid"] = static_cast<double>(++m_nextUid);
+
+    // Переходы: Part A сохраняет вход, Part B сохраняет выход
+    // (разрез посередине не должен наследовать оба перехода)
+    firstClip.effects.remove("transition_out");   // вход у первой части остаётся
+    secondClip.effects.remove("transition_in");   // выход у второй части остаётся
+    // duration оставляем у обоих (если нужно вернуть переходы вручную)
+
     m_clips[index] = firstClip;
     m_clips.append(secondClip);
     sortClips();
@@ -274,8 +317,10 @@ bool Timeline::splitClip(int index, double splitTime) {
 }
 
 // ===== ОБРЕЗАТЬ КЛИП =====
-bool Timeline::trimClip(int index, double newTrimStart, double newTrimEnd) {
-    qDebug() << "trimClip:" << index << "trim" << newTrimStart << "-" << newTrimEnd;
+bool Timeline::trimClip(int uidOrIndex, double newTrimStart, double newTrimEnd) {
+    int index = resolveIndex(m_clips, uidOrIndex);
+    qDebug() << "trimClip: uid/idx=" << uidOrIndex << "→ index=" << index
+             << "trim" << newTrimStart << "-" << newTrimEnd;
 
     if (index < 0 || index >= m_clips.size()) {
         qWarning() << "Invalid index:" << index;
@@ -307,9 +352,10 @@ bool Timeline::trimClip(int index, double newTrimStart, double newTrimEnd) {
 }
 
 // ===== ОБРЕЗКА ЛЕВОГО КРАЯ КЛИПА =====
-bool Timeline::setClipLeftTrim(int index, double newStartTime, double newTrimStart)
+bool Timeline::setClipLeftTrim(int uidOrIndex, double newStartTime, double newTrimStart)
 {
-    qDebug() << "setClipLeftTrim: index=" << index
+    int index = resolveIndex(m_clips, uidOrIndex);
+    qDebug() << "setClipLeftTrim: uid/idx=" << uidOrIndex << "→ index=" << index
              << "newStart=" << newStartTime
              << "newTrimStart=" << newTrimStart;
 
@@ -342,8 +388,9 @@ bool Timeline::setClipLeftTrim(int index, double newStartTime, double newTrimSta
 }
 
 // ===== ПРИМЕНИТЬ ЭФФЕКТ =====
-bool Timeline::applyEffect(int index, const QString& effectName, double value) {
-    qDebug() << "applyEffect:" << index << effectName << "=" << value;
+bool Timeline::applyEffect(int uidOrIndex, const QString& effectName, double value) {
+    int index = resolveIndex(m_clips, uidOrIndex);
+    qDebug() << "applyEffect: uid/idx=" << uidOrIndex << "→ index=" << index << effectName << "=" << value;
 
     if (index < 0 || index >= m_clips.size()) {
         qWarning() << "Invalid index:" << index;
@@ -357,15 +404,17 @@ bool Timeline::applyEffect(int index, const QString& effectName, double value) {
     return true;
 }
 
-bool Timeline::removeEffect(int index, const QString& effectName) {
+bool Timeline::removeEffect(int uidOrIndex, const QString& effectName) {
+    int index = resolveIndex(m_clips, uidOrIndex);
     if (index < 0 || index >= m_clips.size()) return false;
     m_clips[index].effects.remove(effectName);
     emit clipModified(index);
     return true;
 }
 
-QVariantMap Timeline::getClipEffects(int index) const {
+QVariantMap Timeline::getClipEffects(int uidOrIndex) const {
     QVariantMap result;
+    int index = resolveIndex(m_clips, uidOrIndex);
     if (index < 0 || index >= m_clips.size()) return result;
     const auto& effects = m_clips[index].effects;
     for (auto it = effects.begin(); it != effects.end(); ++it) {
@@ -648,6 +697,13 @@ bool Timeline::fromJson(const QJsonObject& json) {
             clip.effects[it.key()] = it.value().toDouble();
         }
 
+        // Восстанавливаем UID или назначаем новый
+        if (!clip.effects.contains("_uid")) {
+            clip.effects["_uid"] = static_cast<double>(++m_nextUid);
+        } else {
+            int existingUid = static_cast<int>(clip.effects.value("_uid"));
+            if (existingUid > m_nextUid) m_nextUid = existingUid;
+        }
         m_clips.append(clip);
     }
 
@@ -723,14 +779,15 @@ bool Timeline::splitClipAt(double time, int trackIndex) {
     return false;
 }
 
-bool Timeline::setClipMuted(int index, bool muted) {
+bool Timeline::setClipMuted(int uidOrIndex, bool muted) {
+    int index = resolveIndex(m_clips, uidOrIndex);
     if (index < 0 || index >= m_clips.size()) {
         qWarning() << "setClipMuted: invalid index" << index;
         return false;
     }
     m_clips[index].isMuted = muted;
     emit clipModified(index);
-    qDebug() << "Clip" << index << (muted ? "muted" : "unmuted");
+    qDebug() << "Clip uid/idx=" << uidOrIndex << "→" << index << (muted ? "muted" : "unmuted");
     return true;
 }
 
@@ -749,13 +806,15 @@ double Timeline::getTrackEndTime(int trackIndex) const {
 // ВИДИМОСТЬ КЛИПОВ (для рендеринга)
 // ============================================================
 
-void Timeline::setClipVideoHidden(int index, bool hidden) {
+void Timeline::setClipVideoHidden(int uidOrIndex, bool hidden) {
+    int index = resolveIndex(m_clips, uidOrIndex);
     if (index >= 0 && index < m_clips.size()) {
         m_clips[index].isVideoHidden = hidden;
     }
 }
 
-void Timeline::setClipAudioHidden(int index, bool hidden) {
+void Timeline::setClipAudioHidden(int uidOrIndex, bool hidden) {
+    int index = resolveIndex(m_clips, uidOrIndex);
     if (index >= 0 && index < m_clips.size()) {
         m_clips[index].isAudioHidden = hidden;
     }
@@ -766,16 +825,32 @@ void Timeline::syncClipStatesForRender(QVariantMap hiddenMap, QVariantMap mutedM
              << mutedMap.size() << "muted";
 
     for (int i = 0; i < m_clips.size(); ++i) {
-        QString vKey = QString::number(i) + "_v";
-        QString aKey = QString::number(i) + "_a";
-        QString mKey = QString::number(i);
+        // Пробуем ключи по UID (новый формат) и по индексу (обратная совместимость)
+        int uid = static_cast<int>(m_clips[i].effects.value("_uid", -1));
+        QString uidStr   = (uid >= 0) ? QString::number(uid) : QString();
+        QString idxStr   = QString::number(i);
 
-        m_clips[i].isVideoHidden = hiddenMap.value(vKey, false).toBool();
-        m_clips[i].isAudioHidden = hiddenMap.value(aKey, false).toBool();
+        // Video hidden
+        QString vKeyUid = uidStr + "_v";
+        QString vKeyIdx = idxStr + "_v";
+        if (!uidStr.isEmpty() && hiddenMap.contains(vKeyUid))
+            m_clips[i].isVideoHidden = hiddenMap.value(vKeyUid).toBool();
+        else
+            m_clips[i].isVideoHidden = hiddenMap.value(vKeyIdx, false).toBool();
 
-        if (mutedMap.contains(mKey)) {
-            m_clips[i].isMuted = mutedMap.value(mKey, false).toBool();
-        }
+        // Audio hidden
+        QString aKeyUid = uidStr + "_a";
+        QString aKeyIdx = idxStr + "_a";
+        if (!uidStr.isEmpty() && hiddenMap.contains(aKeyUid))
+            m_clips[i].isAudioHidden = hiddenMap.value(aKeyUid).toBool();
+        else
+            m_clips[i].isAudioHidden = hiddenMap.value(aKeyIdx, false).toBool();
+
+        // Muted
+        if (!uidStr.isEmpty() && mutedMap.contains(uidStr))
+            m_clips[i].isMuted = mutedMap.value(uidStr).toBool();
+        else if (mutedMap.contains(idxStr))
+            m_clips[i].isMuted = mutedMap.value(idxStr).toBool();
     }
 }
 

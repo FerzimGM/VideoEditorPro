@@ -115,6 +115,7 @@ private:
 
     QList<TimelineClip> m_clips;
     double m_currentTime;
+    int m_nextUid = 0;  // Стабильный уникальный идентификатор клипа
 
     // Рендер-движок (живёт пока идёт рендеринг)
     RenderEngine* m_renderEngine;

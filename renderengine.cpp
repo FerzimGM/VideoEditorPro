@@ -10,6 +10,17 @@
 //  RenderWorker — выполняется в фоновом потоке
 // =====================================================================
 
+
+// Forward declarations for Effects functions used before namespace definition
+namespace Effects {
+    QImage transitionFade(const QImage& frame, float progress, bool fadeIn);
+    QImage transitionWipe(const QImage& from, const QImage& to, float progress, bool rightToLeft);
+    QImage transitionZoom(const QImage& from, const QImage& to, float progress, bool zoomIn);
+    QImage transitionFlash(const QImage& from, const QImage& to, float progress);
+    QImage grain(const QImage& frame, double strength, int frameIndex);
+    QImage chromaKey(const QImage& frame, double threshold, double smoothness);
+}
+
 RenderWorker::RenderWorker(QObject* parent)
     : QObject(parent)
     , m_outputWidth(1920)
@@ -127,12 +138,13 @@ TimelineClip* RenderWorker::findActiveClip(double time, int trackIndex) {
 
 QImage RenderWorker::compositeVideoAt(double time) {
     auto scaleFrame = [&](QImage frame) -> QImage {
+        if (frame.isNull()) return frame;
         if (frame.width() == m_outputWidth && frame.height() == m_outputHeight) return frame;
         frame = frame.scaled(m_outputWidth, m_outputHeight, Qt::KeepAspectRatio, Qt::SmoothTransformation);
         if (frame.width() == m_outputWidth && frame.height() == m_outputHeight) return frame;
         QImage canvas(m_outputWidth, m_outputHeight, QImage::Format_RGB888);
         canvas.fill(Qt::black);
-        int dx = (m_outputWidth - frame.width()) / 2;
+        int dx = (m_outputWidth  - frame.width())  / 2;
         int dy = (m_outputHeight - frame.height()) / 2;
         for (int y = 0; y < frame.height(); ++y) {
             const uchar* src = frame.constScanLine(y);
@@ -142,19 +154,118 @@ QImage RenderWorker::compositeVideoAt(double time) {
         return canvas;
     };
 
+    // ── Вычислить прогресс перехода для клипа ──
+    auto transitionProgress = [&](const TimelineClip* clip, bool forIn) -> float {
+        if (!clip) return -1.0f;
+        QString key = forIn ? "transition_in" : "transition_out";
+        QString durKey = "transition_duration";
+        if (!clip->effects.contains(key) || clip->effects.value(key, 0.0) < 0.5) return -1.0f;
+        double dur = clip->effects.value(durKey, 0.5);
+        if (dur < 0.01) return -1.0f;
+        if (forIn) {
+            double t = time - clip->startTime;
+            if (t < 0 || t > dur) return -1.0f;
+            return static_cast<float>(t / dur);
+        } else {
+            double clipEnd = clip->startTime + clip->duration;
+            double t = dur - (clipEnd - time);
+            if (t < 0 || t > dur) return -1.0f;
+            return static_cast<float>(t / dur);
+        }
+    };
+
+    // ── Получить тип перехода (int-enum) ──
+    // Хранится как числа: 0=none,1=fade,2=wipe_right,3=wipe_left,4=zoom_in,5=zoom_out,6=flash
+    auto transitionType = [&](const TimelineClip* clip, bool forIn) -> int {
+        if (!clip) return 0;
+        QString key = forIn ? "transition_in" : "transition_out";
+        return static_cast<int>(clip->effects.value(key, 0.0));
+    };
+
+    // ── Применить переход к кадру ──
+    auto applyTransition = [&](QImage frame, const TimelineClip* clip, bool forIn) -> QImage {
+        float prog = transitionProgress(clip, forIn);
+        if (prog < 0.0f) return frame;
+        int type = transitionType(clip, forIn);
+        QImage black(frame.size(), QImage::Format_RGB888);
+        black.fill(Qt::black);
+        switch (type) {
+            case 1: return Effects::transitionFade(frame, prog, forIn);       // fade_in / fade_out
+            case 2: return Effects::transitionWipe(black, frame, prog, false); // wipe →
+            case 3: return Effects::transitionWipe(frame, black, prog, true);  // wipe ←
+            case 4: return Effects::transitionZoom(black, frame, prog, true);  // zoom in
+            case 5: return Effects::transitionZoom(frame, black, prog, false); // zoom out
+            case 6: return Effects::transitionFlash(black, frame, prog);       // flash
+            default: return frame;
+        }
+    };
+
+    // ── Получить и обработать кадры дорожек ──
+    QImage frame1, frame2;
+    const TimelineClip* c1 = nullptr;
+    const TimelineClip* c2 = nullptr;
+
     TimelineClip* clip1 = findActiveClip(time, 1);
     if (clip1 && !clip1->isVideoHidden) {
-        QImage frame = decodeVideoFrame(clip1, time);
-        if (!frame.isNull()) return scaleFrame(applyClipEffects(frame, *clip1));
+        c1 = clip1;
+        QImage raw = decodeVideoFrame(clip1, time);
+        if (!raw.isNull()) {
+            frame1 = applyClipEffects(raw, *clip1); // может вернуть ARGB32 (хромакей)
+            frame1 = scaleFrame(frame1);
+        }
     }
 
     TimelineClip* clip2 = findActiveClip(time, 2);
     if (clip2 && !clip2->isVideoHidden) {
-        QImage frame = decodeVideoFrame(clip2, time);
-        if (!frame.isNull()) return scaleFrame(applyClipEffects(frame, *clip2));
+        c2 = clip2;
+        QImage raw = decodeVideoFrame(clip2, time);
+        if (!raw.isNull()) {
+            frame2 = applyClipEffects(raw, *clip2);
+            frame2 = scaleFrame(frame2);
+        }
     }
 
-    return QImage();
+    // ── Альфа-композитинг: Track1 (с хромакеем) поверх Track2 ──
+    QImage result;
+
+    bool track1HasAlpha = !frame1.isNull() && frame1.format() == QImage::Format_ARGB32;
+
+    if (!frame2.isNull() && track1HasAlpha) {
+        // Хромакей: накладываем frame1 (ARGB) поверх frame2 (фон)
+        QImage bg  = frame2.convertToFormat(QImage::Format_ARGB32);
+        QImage fg  = frame1; // уже ARGB32
+        QImage composite(bg.size(), QImage::Format_RGB888);
+        for (int y = 0; y < bg.height(); ++y) {
+            const QRgb* bgLine = reinterpret_cast<const QRgb*>(bg.constScanLine(y));
+            const QRgb* fgLine = reinterpret_cast<const QRgb*>(fg.constScanLine(y));
+            uchar* dstLine = composite.scanLine(y);
+            for (int x = 0; x < bg.width(); ++x) {
+                float a = qAlpha(fgLine[x]) / 255.0f;
+                float ia = 1.0f - a;
+                dstLine[x*3]   = (uchar)(qRed(fgLine[x])   * a + qRed(bgLine[x])   * ia);
+                dstLine[x*3+1] = (uchar)(qGreen(fgLine[x]) * a + qGreen(bgLine[x]) * ia);
+                dstLine[x*3+2] = (uchar)(qBlue(fgLine[x])  * a + qBlue(bgLine[x])  * ia);
+            }
+        }
+        result = composite;
+    } else if (!frame1.isNull()) {
+        result = frame1.convertToFormat(QImage::Format_RGB888);
+    } else if (!frame2.isNull()) {
+        result = frame2.convertToFormat(QImage::Format_RGB888);
+    } else {
+        return QImage(); // оба пусты
+    }
+
+    // ── Переходы ──
+    if (c1) result = applyTransition(result, c1, true);   // вход клипа
+    if (c1) result = applyTransition(result, c1, false);  // выход клипа
+    if (result.isNull() && c2) {
+        if (!frame2.isNull()) result = frame2.convertToFormat(QImage::Format_RGB888);
+        if (c2) result = applyTransition(result, c2, true);
+        if (c2) result = applyTransition(result, c2, false);
+    }
+
+    return result;
 }
 
 QImage RenderWorker::decodeVideoFrame(TimelineClip* clip, double timelineTime) {
@@ -177,8 +288,8 @@ QImage RenderWorker::decodeVideoFrame(TimelineClip* clip, double timelineTime) {
 }
 
 QVector<float> RenderWorker::mixAudioAt(double time, double frameDuration) {
-    int totalFloats = static_cast<int>(frameDuration * MediaDecoder::OUTPUT_SAMPLE_RATE)
-    * MediaDecoder::OUTPUT_CHANNELS;
+    int totalFloats = static_cast<int>(frameDuration * MediaDecoder::OUTPUT_SAMPLE_RATE
+                                   * MediaDecoder::OUTPUT_CHANNELS);
     QVector<float> mixed(totalFloats, 0.0f);
     bool hasAudio = false;
 
@@ -584,6 +695,186 @@ QImage tint(const QImage& frame, double hue, double strength) {
 }
 
 
+// ─────────────────────────────────────────────────────────────────────
+// ЗЕРНИСТОСТЬ (Film Grain) — псевдослучайный шум, seed зависит от
+// координаты пикселя + номер кадра (детерминировано, но "живой" шум)
+// strength 0..1
+// ─────────────────────────────────────────────────────────────────────
+QImage grain(const QImage& frame, double strength, int frameIndex = 0) {
+    QImage result = frame.convertToFormat(QImage::Format_RGB888);
+    int w = result.width(), h = result.height();
+    float s = static_cast<float>(strength * 60.0); // max ±60 единиц
+    for (int y = 0; y < h; ++y) {
+        uchar* line = result.scanLine(y);
+        for (int x = 0; x < w; ++x) {
+            // Быстрый детерминированный шум без rand() (thread-safe)
+            uint32_t seed = static_cast<uint32_t>(y * 7919 + x * 6271 + frameIndex * 1013);
+            seed ^= seed << 13; seed ^= seed >> 17; seed ^= seed << 5;
+            float noise = (static_cast<float>(seed & 0xFFFF) / 32767.5f - 1.0f) * s;
+            int idx = x * 3;
+            line[idx]   = (uchar)qBound(0, (int)line[idx]   + (int)noise, 255);
+            line[idx+1] = (uchar)qBound(0, (int)line[idx+1] + (int)noise, 255);
+            line[idx+2] = (uchar)qBound(0, (int)line[idx+2] + (int)noise, 255);
+        }
+    }
+    return result;
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// ХРОМАКЕЙ (Green Screen Removal)
+//
+// Алгоритм: цветовое пространство YCbCr
+//   1. Вычисляем «зелёность» пикселя через Cb/Cr хроминанс
+//   2. Если попадает в диапазон зелёного — делаем прозрачным
+//   3. smoothness — размытие края маски (spill suppression)
+//
+// threshold : 0.05..0.8  (чувствительность, типично 0.3–0.5)
+// smoothness: 0.0..0.3   (размытие границы маски)
+//
+// Возвращает ARGB32 — прозрачные пиксели там, где был зелёный фон.
+// compositeVideoAt() затем накладывает Track1 поверх Track2.
+// ─────────────────────────────────────────────────────────────────────
+QImage chromaKey(const QImage& frame, double threshold, double smoothness) {
+    QImage result = frame.convertToFormat(QImage::Format_ARGB32);
+    int w = result.width(), h = result.height();
+    float thr  = static_cast<float>(threshold);
+    float soft = static_cast<float>(qMax(smoothness, 0.01)); // зона мягкого края
+
+    for (int y = 0; y < h; ++y) {
+        QRgb* line = reinterpret_cast<QRgb*>(result.scanLine(y));
+        for (int x = 0; x < w; ++x) {
+            QRgb px = line[x];
+            float r = qRed(px)   / 255.0f;
+            float g = qGreen(px) / 255.0f;
+            float b = qBlue(px)  / 255.0f;
+
+            // YCbCr хроминанс — именно Cb и Cr определяют «цветность»
+            // Зелёный цвет: высокий G, низкий R и B относительно G
+            float greenness = g - qMax(r, b); // > 0 когда G доминирует
+
+            float alpha;
+            if (greenness < thr - soft) {
+                alpha = 1.0f; // точно не зелёный → оставляем
+            } else if (greenness > thr + soft) {
+                alpha = 0.0f; // точно зелёный → убираем
+            } else {
+                // Мягкий переход (anti-aliasing края)
+                alpha = 1.0f - (greenness - (thr - soft)) / (2.0f * soft);
+                alpha = qBound(0.0f, alpha, 1.0f);
+            }
+
+            // Spill suppression: убираем зелёный отблеск с краёв
+            // Если есть остаточное зеленение — нейтрализуем G каналом
+            if (alpha > 0.0f && alpha < 1.0f) {
+                float spillG = qMin(r, b); // заменяем G средним соседей
+                r = qBound(0.0f, r, 1.0f);
+                b = qBound(0.0f, b, 1.0f);
+                g = qBound(0.0f, qMin(g, spillG * 1.2f), 1.0f);
+            }
+
+            line[x] = qRgba(
+                static_cast<int>(r * 255),
+                static_cast<int>(g * 255),
+                static_cast<int>(b * 255),
+                static_cast<int>(alpha * 255)
+            );
+        }
+    }
+    return result;
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// ПЕРЕХОДЫ — генерация промежуточного кадра
+//
+// progress: 0.0 (начало перехода) → 1.0 (конец перехода)
+// Все переходы принимают два кадра и возвращают смешанный.
+// ─────────────────────────────────────────────────────────────────────
+
+// Вспомогательная: альфа-смешивание двух кадров
+static QImage blendFrames(const QImage& a, const QImage& b, float alpha) {
+    QImage fa = a.convertToFormat(QImage::Format_RGB888);
+    QImage fb = b.convertToFormat(QImage::Format_RGB888).scaled(fa.size());
+    QImage result(fa.size(), QImage::Format_RGB888);
+    float ia = 1.0f - alpha;
+    for (int y = 0; y < fa.height(); ++y) {
+        const uchar* la = fa.constScanLine(y);
+        const uchar* lb = fb.constScanLine(y);
+        uchar*       lr = result.scanLine(y);
+        int n = fa.width() * 3;
+        for (int i = 0; i < n; ++i)
+            lr[i] = (uchar)(la[i] * ia + lb[i] * alpha);
+    }
+    return result;
+}
+
+// Fade (появление/затухание через чёрный)
+QImage transitionFade(const QImage& frame, float progress, bool fadeIn) {
+    QImage black(frame.size(), QImage::Format_RGB888);
+    black.fill(Qt::black);
+    return fadeIn ? blendFrames(black, frame, progress)
+                  : blendFrames(frame, black, progress);
+}
+
+// Wipe (шторка)
+QImage transitionWipe(const QImage& from, const QImage& to, float progress, bool rightToLeft) {
+    QImage fa = from.convertToFormat(QImage::Format_RGB888);
+    QImage fb = to.convertToFormat(QImage::Format_RGB888).scaled(fa.size());
+    QImage result = fa.copy();
+    int cutX = static_cast<int>(fa.width() * progress);
+    for (int y = 0; y < fa.height(); ++y) {
+        uchar* lr = result.scanLine(y);
+        const uchar* lb = fb.constScanLine(y);
+        if (rightToLeft) {
+            // справа налево: правая часть показывает новый кадр
+            int startX = fa.width() - cutX;
+            for (int x = startX; x < fa.width(); ++x)
+                for (int c = 0; c < 3; ++c) lr[x*3+c] = lb[x*3+c];
+        } else {
+            for (int x = 0; x < cutX; ++x)
+                for (int c = 0; c < 3; ++c) lr[x*3+c] = lb[x*3+c];
+        }
+    }
+    return result;
+}
+
+// Zoom In (приближение — следующий кадр появляется из центра)
+QImage transitionZoom(const QImage& from, const QImage& to, float progress, bool zoomIn) {
+    QImage fa = from.convertToFormat(QImage::Format_RGB888);
+    QImage fb = to.convertToFormat(QImage::Format_RGB888).scaled(fa.size());
+    int w = fa.width(), h = fa.height();
+    float scale = zoomIn ? (0.1f + 0.9f * progress) : (1.0f + 0.5f * progress);
+    int sw = static_cast<int>(w * scale), sh = static_cast<int>(h * scale);
+    if (sw < 1) sw = 1; if (sh < 1) sh = 1;
+    QImage scaled = zoomIn
+        ? fb.scaled(sw, sh, Qt::IgnoreAspectRatio, Qt::SmoothTransformation)
+        : fa.scaled(sw, sh, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+    QImage result = zoomIn ? fa.copy() : fb.copy();
+    int ox = (w - sw) / 2, oy = (h - sh) / 2;
+    for (int y = 0; y < sh && oy+y < h; ++y) {
+        if (oy+y < 0) continue;
+        const uchar* src = scaled.constScanLine(y);
+        uchar* dst = result.scanLine(oy + y);
+        int startX = qMax(0, ox), endX = qMin(w, ox + sw);
+        int srcOff = (startX - ox) * 3;
+        memcpy(dst + startX * 3, src + srcOff, (endX - startX) * 3);
+    }
+    // Плавное смешивание по краям зума
+    return blendFrames(zoomIn ? fa : result, zoomIn ? result : fb, progress);
+}
+
+// Flash (вспышка — белый кадр на пике)
+QImage transitionFlash(const QImage& from, const QImage& to, float progress) {
+    QImage white(from.size(), QImage::Format_RGB888);
+    white.fill(Qt::white);
+    if (progress < 0.5f) {
+        float t = progress * 2.0f; // 0→1 нарастание к белому
+        return blendFrames(from, white, t);
+    } else {
+        float t = (progress - 0.5f) * 2.0f; // 0→1 спад от белого
+        return blendFrames(white, to, t);
+    }
+}
+
 } // namespace Effects
 
 // =====================================================================
@@ -612,6 +903,18 @@ QImage RenderWorker::applyClipEffects(const QImage& frame, const TimelineClip& c
         else if (name == "tint_hue"                  )  {
             double tintStr = clip.effects.value("tint_strength", 0.5);
             if (tintStr > 0.0) result = Effects::tint(result, value, tintStr);
+        }
+        else if (name == "grain"      && value > 0.0) {
+            // frameIndex: делаем уникальным по времени для "живого" зерна
+            int fi = static_cast<int>(clip.effects.value("_frameIdx", 0));
+            result = Effects::grain(result, value, fi);
+        }
+        else if (name == "chroma_key" && value > 0.5) {
+            // Хромакей: убираем зелёный фон, результат ARGB32
+            double thr  = clip.effects.value("chroma_threshold",  0.35);
+            double soft = clip.effects.value("chroma_smoothness", 0.10);
+            result = Effects::chromaKey(result, thr, soft);
+            // Флаг — композитор знает что нужно альфа-наложение
         }
         // volume/reverb/echo/mono/stereo/pitch/normalize/fade обрабатываются в decodeAudioChunk
     }
@@ -781,3 +1084,18 @@ QImage RenderEngine::applyPosterize(const QImage& frame, double levels)    { ret
 QImage RenderEngine::applyPixelate(const QImage& frame, double blockSize)  { return Effects::pixelate(frame, blockSize); }
 QImage RenderEngine::applyTemperature(const QImage& frame, double value)   { return Effects::temperature(frame, value); }
 QImage RenderEngine::applyTint(const QImage& frame, double hue, double s)  { return Effects::tint(frame, hue, s); }
+QImage RenderEngine::applyGrain(const QImage& frame, double strength, int fi)         { return Effects::grain(frame, strength, fi); }
+QImage RenderEngine::applyChromaKey(const QImage& frame, double thr, double smooth)   { return Effects::chromaKey(frame, thr, smooth); }
+QImage RenderEngine::applyTransition(const QImage& from, const QImage& to, int type, float prog) {
+    switch (type) {
+        case 1: return prog < 0.5f ? Effects::transitionFade(from, prog*2.0f, false)
+                                   : Effects::transitionFade(to,   (prog-0.5f)*2.0f, true);
+        case 2: return Effects::transitionWipe(from, to, prog, false);
+        case 3: return Effects::transitionWipe(from, to, prog, true);
+        case 4: return Effects::transitionZoom(from, to, prog, true);
+        case 5: return Effects::transitionZoom(from, to, prog, false);
+        case 6: return Effects::transitionFlash(from, to, prog);
+        default: return from;
+    }
+}
+
