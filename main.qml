@@ -586,130 +586,301 @@ QtObject {
             }
         }
 
-        Dialog {
+        // ── Окно рендера — frameless, поверх всех, не скрывается ──
+        Window {
             id: exportDialog
             title: "Экспорт видео"
-            width: 500
-            height: 400
-            anchors.centerIn: parent
-            modal: true
+            width: 400
+            height: 420
+            color: "transparent"
+            flags: Qt.Window | Qt.FramelessWindowHint
+            modality: Qt.NonModal
+
             property int renderProgress: 0
             property bool isRendering: false
 
-            background: Rectangle {
-                color: Theme.backgroundColor
-                border.color: Theme.rubyPrimary
-                border.width: 2
-                radius: Theme.borderRadius
+            function open() {
+                if (root) {
+                    x = root.x + (root.width - width) / 2
+                    y = root.y + (root.height - height) / 2
+                }
+                visible = true
+                raise()
+                requestActivate()
+            }
+            function close() {
+                visible = false
             }
 
-            ColumnLayout {
-                anchors.fill: parent
-                anchors.margins: Theme.spacingLarge
-                spacing: Theme.spacingLarge
-
-                Text {
-                    text: exportDialog.isRendering ? "Рендеринг..." : "Настройки экспорта"
-                    color: Theme.textPrimary
-                    font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontSizeLarge
-                    font.bold: true
-                    Layout.alignment: Qt.AlignHCenter
+            // Запрещаем закрытие во время рендера через сигнал
+            Connections {
+                target: exportDialog
+                function onClosing(close) {
+                    if (exportDialog.isRendering)
+                        close.accepted = false
                 }
+            }
+
+            // ── Фон ──
+            Rectangle {
+                anchors.fill: parent
+                color: Theme.backgroundColor
+                radius: Theme.borderRadius + 2
+                border.color: Theme.rubyPrimary
+                border.width: 2
 
                 ColumnLayout {
-                    Layout.fillWidth: true
-                    spacing: Theme.spacing
-                    visible: !exportDialog.isRendering
-                    Text {
-                        text: "Разрешение"
-                        color: Theme.textSecondary
-                        font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fontSize
-                    }
-                    ComboBox {
-                        id: resolutionCombo
-                        Layout.fillWidth: true
-                        model: ["1920×1080 (Full HD)", "1280×720 (HD)", "3840×2160 (4K)", "2560×1440 (2K)"]
-                        contentItem: Text {
-                            text: parent.displayText
-                            color: Theme.textPrimary
-                            font.family: Theme.fontFamily
-                            font.pixelSize: Theme.fontSize
-                            verticalAlignment: Text.AlignVCenter
-                            leftPadding: 8
-                        }
-                        background: Rectangle {
-                            color: Theme.backgroundDark
-                            border.color: Theme.borderLight
-                            border.width: 1
-                            radius: Theme.borderRadius
-                        }
-                    }
-                }
+                    anchors.fill: parent
+                    spacing: 0
 
-                ProgressBar {
-                    Layout.fillWidth: true
-                    visible: exportDialog.isRendering
-                    value: exportDialog.renderProgress / 100.0
-                    background: Rectangle {
+                    // Заголовок (с drag)
+                    Rectangle {
+                        Layout.fillWidth: true
+                        height: 46
                         color: Theme.backgroundDark
-                        radius: Theme.borderRadius
-                    }
-                    contentItem: Item {
+                        radius: Theme.borderRadius + 2
                         Rectangle {
-                            width: parent.width * exportDialog.renderProgress / 100.0
-                            height: parent.height
-                            radius: Theme.borderRadius
-                            gradient: Gradient {
-                                orientation: Gradient.Horizontal
-                                GradientStop {
-                                    position: 0.0
-                                    color: Theme.rubyGradientStart
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.bottom: parent.bottom
+                            height: parent.radius
+                            color: parent.color
+                        }
+
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.leftMargin: 14
+                            anchors.rightMargin: 10
+                            spacing: 10
+                            Text {
+                                text: "🎬"
+                                font.pixelSize: 18
+                            }
+                            Text {
+                                text: exportDialog.isRendering ? "Рендеринг..." : "Экспорт видео"
+                                color: Theme.textPrimary
+                                font.family: Theme.fontFamily
+                                font.pixelSize: Theme.fontSizeLarge
+                                font.bold: true
+                                Layout.fillWidth: true
+                            }
+                            // Drag-зона
+                            MouseArea {
+                                Layout.fillWidth: true
+                                Layout.fillHeight: true
+                                cursorShape: Qt.SizeAllCursor
+                                property real sx: 0
+                                property real sy: 0
+                                onPressed: function (e) {
+                                    sx = e.x
+                                    sy = e.y
                                 }
-                                GradientStop {
-                                    position: 1.0
-                                    color: Theme.rubyGradientEnd
+                                onPositionChanged: function (e) {
+                                    if (pressed) {
+                                        exportDialog.x += e.x - sx
+                                        exportDialog.y += e.y - sy
+                                    }
+                                }
+                            }
+                            // Крестик — только когда НЕ рендерим
+                            Rectangle {
+                                visible: !exportDialog.isRendering
+                                width: 28
+                                height: 28
+                                radius: 14
+                                color: expCloseMa.containsMouse ? Theme.rubyPrimary : "transparent"
+                                border.color: Theme.rubyPrimary
+                                border.width: 1
+                                Behavior on color {
+                                    ColorAnimation {
+                                        duration: 100
+                                    }
+                                }
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: "✕"
+                                    color: Theme.textPrimary
+                                    font.pixelSize: 13
+                                    font.bold: true
+                                }
+                                MouseArea {
+                                    id: expCloseMa
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: exportDialog.close()
                                 }
                             }
                         }
                     }
-                }
 
-                Text {
-                    visible: exportDialog.isRendering
-                    text: exportDialog.renderProgress + "%"
-                    color: Theme.rubyLight
-                    font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontSize
-                    Layout.alignment: Qt.AlignHCenter
-                }
+                    // Настройки экспорта (только когда не рендерим)
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        Layout.margins: 20
+                        spacing: 12
+                        visible: !exportDialog.isRendering
 
-                Button {
-                    text: exportDialog.isRendering ? "Отмена" : "Экспортировать"
-                    Layout.alignment: Qt.AlignHCenter
-                    onClicked: {
-                        if (exportDialog.isRendering) {
-                            cppTimeline.cancelRender(
-                                        ) // ← НОВОЕ: отменяем рендер
-                            exportDialog.isRendering = false
-                            exportDialog.close()
-                        } else {
-                            exportFileDialog.open()
+                        Text {
+                            text: "Разрешение"
+                            color: Theme.textSecondary
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.fontSize
+                        }
+                        ComboBox {
+                            id: resolutionCombo
+                            Layout.fillWidth: true
+                            model: ["1920×1080 (Full HD)", "1280×720 (HD)", "3840×2160 (4K)", "2560×1440 (2K)"]
+                            contentItem: Text {
+                                text: parent.displayText
+                                color: Theme.textPrimary
+                                font.family: Theme.fontFamily
+                                font.pixelSize: Theme.fontSize
+                                verticalAlignment: Text.AlignVCenter
+                                leftPadding: 8
+                            }
+                            background: Rectangle {
+                                color: Theme.backgroundDark
+                                border.color: Theme.borderLight
+                                border.width: 1
+                                radius: Theme.borderRadius
+                            }
+                        }
+
+                        Button {
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: 36
+                            text: "▶  Экспортировать"
+                            onClicked: exportFileDialog.open()
+                            contentItem: Text {
+                                text: parent.text
+                                color: Theme.textPrimary
+                                font.family: Theme.fontFamily
+                                font.pixelSize: Theme.fontSize
+                                font.bold: true
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
+                            }
+                            background: Rectangle {
+                                color: parent.down ? Theme.rubyDark : (parent.hovered ? Theme.rubyLight : Theme.rubyPrimary)
+                                radius: Theme.borderRadius
+                                Behavior on color {
+                                    ColorAnimation {
+                                        duration: 100
+                                    }
+                                }
+                            }
                         }
                     }
-                    contentItem: Text {
-                        text: parent.text
-                        color: Theme.textPrimary
-                        font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fontSize
-                        font.bold: true
-                        horizontalAlignment: Text.AlignHCenter
-                        verticalAlignment: Text.AlignVCenter
+
+                    // ── Круговой прогресс ──
+                    Item {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        visible: exportDialog.isRendering
+
+                        // Круг прогресса
+                        Canvas {
+                            id: progressRing
+                            anchors.centerIn: parent
+                            width: 160
+                            height: 160
+
+                            property real progress: exportDialog.renderProgress / 100.0
+
+                            onProgressChanged: requestPaint()
+
+                            onPaint: {
+                                var ctx = getContext("2d")
+                                ctx.clearRect(0, 0, width, height)
+                                var cx = width / 2, cy = height / 2
+                                var r = 68
+                                var lw = 10
+
+                                // Фон кольца
+                                ctx.beginPath()
+                                ctx.arc(cx, cy, r, 0, Math.PI * 2)
+                                ctx.strokeStyle = "#1a1a2e"
+                                ctx.lineWidth = lw
+                                ctx.stroke()
+
+                                // Прогресс кольца
+                                if (progress > 0) {
+                                    var grad = ctx.createLinearGradient(
+                                                cx - r, cy, cx + r, cy)
+                                    grad.addColorStop(0, "#EF5350")
+                                    grad.addColorStop(1, "#FF8A65")
+                                    ctx.beginPath()
+                                    ctx.arc(cx, cy, r, -Math.PI / 2,
+                                            -Math.PI / 2 + progress * Math.PI * 2)
+                                    ctx.strokeStyle = grad
+                                    ctx.lineWidth = lw
+                                    ctx.lineCap = "round"
+                                    ctx.stroke()
+                                }
+
+                                // Внутренний блик
+                                ctx.beginPath()
+                                ctx.arc(cx, cy, r - lw / 2 - 4, 0, Math.PI * 2)
+                                ctx.strokeStyle = Qt.rgba(1, 1, 1, 0.04)
+                                ctx.lineWidth = 1
+                                ctx.stroke()
+                            }
+
+                            // Процент в центре
+                            Column {
+                                anchors.centerIn: parent
+                                spacing: 2
+                                Text {
+                                    anchors.horizontalCenter: parent.horizontalCenter
+                                    text: exportDialog.renderProgress + "%"
+                                    color: Theme.rubyLight
+                                    font.family: Theme.fontFamily
+                                    font.pixelSize: 28
+                                    font.bold: true
+                                }
+                                Text {
+                                    anchors.horizontalCenter: parent.horizontalCenter
+                                    text: "рендер"
+                                    color: Theme.textSecondary
+                                    font.family: Theme.fontFamily
+                                    font.pixelSize: 10
+                                    font.letterSpacing: 1
+                                }
+                            }
+                        }
                     }
-                    background: Rectangle {
-                        color: parent.down ? Theme.rubyDark : (parent.hovered ? Theme.rubyLight : Theme.rubyPrimary)
-                        radius: Theme.borderRadius
+
+                    // Кнопка отмены
+                    Button {
+                        Layout.alignment: Qt.AlignHCenter
+                        Layout.bottomMargin: 20
+                        Layout.preferredHeight: 34
+                        Layout.preferredWidth: 140
+                        visible: exportDialog.isRendering
+                        text: "✕  Отмена"
+                        onClicked: {
+                            cppTimeline.cancelRender()
+                            exportDialog.isRendering = false
+                            exportDialog.close()
+                        }
+                        contentItem: Text {
+                            text: parent.text
+                            color: "#EF5350"
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.fontSize
+                            font.bold: true
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
+                        background: Rectangle {
+                            color: parent.down ? Qt.rgba(
+                                                     .94, .33, .31,
+                                                     .3) : (parent.hovered ? Qt.rgba(.94, .33, .31, .15) : "transparent")
+                            border.color: "#EF5350"
+                            border.width: 1
+                            radius: Theme.borderRadius
+                        }
                     }
                 }
             }
@@ -721,7 +892,8 @@ QtObject {
                 }
                 function onRenderFinished(success) {
                     exportDialog.isRendering = false
-                    console.log(success ? "✅ Экспорт OK" : "❌ Ошибка")
+                    if (success)
+                        exportDialog.close()
                 }
             }
         }

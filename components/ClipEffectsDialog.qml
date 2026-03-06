@@ -271,6 +271,15 @@ Window {
                                                "fmt": function (v) {
                                                    return v.toFixed(2) + " с"
                                                }
+                                           },
+                                           "auto_enhance": {
+                                               "icon": "✨",
+                                               "label": "Авто-улучшение",
+                                               "cat": "video",
+                                               "fmt": function (v) {
+                                                   return Math.round(
+                                                               v * 100) + "%"
+                                               }
                                            }
                                        })
 
@@ -302,6 +311,8 @@ Window {
         if (key === "_frameIdx")
             return true
         if (key === "_uid")
+            return true
+        if (key === "auto_enhance" && val < 0.01)
             return true
         return false
     }

@@ -916,6 +916,13 @@ QImage RenderWorker::applyClipEffects(const QImage& frame, const TimelineClip& c
             result = Effects::chromaKey(result, thr, soft);
             // Флаг — композитор знает что нужно альфа-наложение
         }
+        else if (name == "auto_enhance" && value > 0.0) {
+            // Авто-улучшение: резкость + контраст + насыщенность пропорционально силе
+            double s = value;  // 0..1
+            if (s > 0.01) result = Effects::sharpness(result, 0.3 + s * 0.7);
+            if (s > 0.01) result = applyContrast(result, 1.0 + s * 0.15);
+            if (s > 0.01) result = applySaturation(result, 1.0 + s * 0.2);
+        }
         // volume/reverb/echo/mono/stereo/pitch/normalize/fade обрабатываются в decodeAudioChunk
     }
     return result;

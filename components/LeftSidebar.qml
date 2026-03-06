@@ -32,6 +32,7 @@ Rectangle {
     property real effectTintHue: 0.0
     property real effectTintStr: 0.0
     property real effectGrain: 0.0
+    property real effectAutoEnhance: 0.5  // сила авто-улучшения 0..1
     property bool effectChromaKey: false
     property real effectChromaThreshold: 0.35
     property real effectChromaSmoothness: 0.1
@@ -110,6 +111,7 @@ Rectangle {
         effectTintHue = fx["tint_hue"] !== undefined ? fx["tint_hue"] : 0.0
         effectTintStr = fx["tint_strength"] !== undefined ? fx["tint_strength"] : 0.0
         effectGrain = fx["grain"] !== undefined ? fx["grain"] : 0.0
+        effectAutoEnhance = fx["auto_enhance"] !== undefined ? fx["auto_enhance"] : 0.5
         effectChromaKey = fx["chroma_key"] !== undefined ? fx["chroma_key"] > 0.5 : false
         effectChromaThreshold = fx["chroma_threshold"] !== undefined ? fx["chroma_threshold"] : 0.35
         effectChromaSmoothness = fx["chroma_smoothness"]
@@ -197,13 +199,15 @@ Rectangle {
             cppTimeline.applyEffect(id, "stereo_widen", root.effectStereoWiden)
         else if (e === "Питч")
             cppTimeline.applyEffect(id, "pitch", root.effectPitch)
+        else if (e === "Авто-улучшение")
+            cppTimeline.applyEffect(id, "auto_enhance", root.effectAutoEnhance)
     }
 
     function resetAllEffects() {
         if (!cppTimeline || root.selectedClipId < 0)
             return
         var id = root.selectedClipId
-        var keys = ["brightness", "contrast", "saturation", "grayscale", "blur", "sharpness", "hue", "sepia", "vignette", "invert", "posterize", "pixelate", "temperature", "tint_hue", "tint_strength", "grain", "chroma_key", "chroma_threshold", "chroma_smoothness", "volume", "reverb", "echo", "mono", "stereo_widen", "pitch", "normalize", "fade_in", "fade_out"]
+        var keys = ["brightness", "contrast", "saturation", "grayscale", "blur", "sharpness", "hue", "sepia", "vignette", "invert", "posterize", "pixelate", "temperature", "tint_hue", "tint_strength", "grain", "chroma_key", "chroma_threshold", "chroma_smoothness", "volume", "reverb", "echo", "mono", "stereo_widen", "pitch", "normalize", "fade_in", "fade_out", "auto_enhance"]
         for (var i = 0; i < keys.length; ++i)
             cppTimeline.removeEffect(id, keys[i])
         loadEffectsFromClip(id)
@@ -693,6 +697,42 @@ Rectangle {
                             }
                         }
 
+                        // АВТО-УЛУЧШЕНИЕ
+                        Column {
+                            visible: root.selectedEffect === "Авто-улучшение"
+                            spacing: 6
+                            width: parent.width
+                            height: visible ? implicitHeight : 0
+
+                            FxSlider {
+                                label: "Сила улучшения"
+                                valText: Math.round(root.effectAutoEnhance * 100) + "%"
+                                from: 0.0
+                                to: 1.0
+                                step: 0.05
+                                val: root.effectAutoEnhance
+                                onMv: function(v) { root.effectAutoEnhance = v }
+                            }
+                            Rectangle {
+                                width: parent.width
+                                height: aeHint.implicitHeight + 10
+                                color: Qt.rgba(0.8, 0.5, 0.1, 0.12)
+                                radius: 4
+                                border.color: Qt.rgba(0.9, 0.6, 0.1, 0.4)
+                                border.width: 1
+                                Text {
+                                    id: aeHint
+                                    anchors.fill: parent
+                                    anchors.margins: 5
+                                    text: "✨ Повышает резкость, контраст и насыщенность одним ползунком"
+                                    color: "#FFD54F"
+                                    font.family: Theme.fontFamily
+                                    font.pixelSize: 9
+                                    wrapMode: Text.WordWrap
+                                }
+                            }
+                        }
+
                         // РАЗМЫТИЕ
                         FxSlider {
                             visible: root.selectedEffect === "Размытие"
@@ -1010,6 +1050,9 @@ Rectangle {
                                     }, {
                                         "name": "Ч/Б",
                                         "icon": "◻️"
+                                    }, {
+                                        "name": "Авто-улучшение",
+                                        "icon": "✨"
                                     }]
                             }
 
