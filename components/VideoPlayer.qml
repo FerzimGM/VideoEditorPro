@@ -136,7 +136,14 @@ Rectangle {
             cppTimeline.startPlayback(currentTime, playbackSpeed)
         } else {
             cppTimeline.stopPlayback()
-            Qt.callLater(requestPreview) // показать стоп-кадр
+            // C++ уже рендерит стоп-кадр в stopPlayback().
+            // Синхронизируем QML-время с точным временем паузы из C++.
+            // Это устраняет откат видео назад при паузе.
+            Qt.callLater(function () {
+                var exact = cppTimeline.currentTime
+                if (Math.abs(videoPlayer.currentTime - exact) > 0.05)
+                    videoPlayer.timePositionChanged(exact)
+            })
         }
     }
 

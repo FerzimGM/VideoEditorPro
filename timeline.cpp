@@ -467,7 +467,6 @@ double Timeline::totalDuration() const {
 void Timeline::setCurrentTime(double time) {
     if (qAbs(m_currentTime - time) < 0.01) return;
     m_currentTime = time;
-    // Во время воспроизведения НЕ делаем seekTo — это сбрасывает кэш и вызывает Cache miss
     bool playing = m_audioEngine && m_audioEngine->isPlaying();
     if (!playing) {
         for (auto* thread : m_decoderThreads) {
@@ -516,7 +515,7 @@ QImage Timeline::getCurrentFrameAt(double time, int trackIndex) {
     // При 2x скорости прыгаем на 2 кадра за тик → нужна бо́льшая дистанция поиска.
     // При 1x: maxDist=3 (±0.1с при 30fps), при 2x: maxDist=10 (±0.33с при 30fps).
     bool playingNow = m_audioEngine && m_audioEngine->isPlaying();
-    int nearestDist = playingNow ? (m_playbackSpeed > 1.5 ? 12 : 6) : 3;
+    int nearestDist = playingNow ? (m_playbackSpeed > 1.5 ? 15 : 8) : 4;
 
     if (m_frameCaches.contains(clip->filepath)) {
         QImage cached;
@@ -1176,23 +1175,6 @@ void Timeline::requestFrameForDisplay(double time, int selectedClipId,
         frame.fill(Qt::black);
     }
 
-    // Не заменяем кадр если получили пустой во время воспроизведения
-    // (cache miss → провайдер хранит предыдущий кадр → нет моргания)
-    bool isBlack = true;
-    {
-        // Быстрая проверка: смотрим центральный пиксель
-        QRgb center = frame.pixel(frame.width()/2, frame.height()/2);
-        if (qRed(center) > 5 || qGreen(center) > 5 || qBlue(center) > 5)
-            isBlack = false;
-    }
-    bool playingNow = m_audioEngine && m_audioEngine->isPlaying();
-    if (playingNow && isBlack) {
-        // Cache miss во время воспроизведения — оставляем предыдущий кадр,
-        // не показываем чёрный. DecoderThread догонит за следующий тик.
-        emit frameReadyForDisplay(); // всё равно сигналим чтобы QML не завис
-        return;
-    }
-
     m_imageProvider->setFrame(frame);
     emit frameReadyForDisplay();
 }
@@ -1204,15 +1186,28 @@ void Timeline::startPlayback(double fromTime, double speed) {
     qDeleteAll(m_audioDecoders);
     m_audioDecoders.clear();
 
-    m_playbackSpeed         = speed;
-    m_lastVideoRenderTime   = -1.0;   // сброс — иначе после стопа видео не
-    // обновится пока аудио не догонит старое время
+    m_playbackSpeed       = speed;
+    m_lastVideoRenderTime = -1.0;
 
-    // Seekим DecoderThread и сообщаем текущую позицию (иначе поток не знает
-    // где мы и может спать пока нам нужны кадры — prefetch не работает)
+    // ШАГ 1: Sync-рендер первого кадра ДО запуска таймеров.
+    // seekTo чистит кэш и запускает FFmpeg-seek в DecoderThread (~50–200мс).
+    // Если сразу стартовать видео-таймер — кэш пустой, первые тики дают null.
+    // Решение: декодируем первый кадр синхронно здесь, до startPlayback.
+    // Для этого временно выключаем флаг isPlaying (audioEngine ещё не запущен)
+    // чтобы getCurrentFrameAt мог сделать sync-decode при cache miss.
     for (auto* thread : m_decoderThreads) {
         thread->seekTo(fromTime);
         thread->updatePlayPosition(fromTime);
+    }
+
+    // Sync-decode первого кадра: audioEngine ещё nullptr → isPlaying() == false
+    // → getCurrentFrameAt разрешает sync-decode → кадр сразу виден
+    {
+        QImage firstFrame = getCompositeFrame(fromTime);
+        if (!firstFrame.isNull() && m_imageProvider) {
+            m_imageProvider->setFrame(firstFrame);
+            emit frameReadyForDisplay();
+        }
     }
 
     if (!m_audioEngine) {
@@ -1253,39 +1248,52 @@ void Timeline::startPlayback(double fromTime, double speed) {
         m_videoTimer->setSingleShot(true);
         m_videoTimer->setTimerType(Qt::PreciseTimer);
         connect(m_videoTimer, &QTimer::timeout, this, [this]() {
+            // Перезапускаем ПЕРВЫМ ДЕЛОМ — до любых return.
+            // singleShot: если return сработает раньше start() — таймер остановится
+            // и видео замрёт навсегда. Перезапуск в начале это исключает.
+            if (m_audioEngine && m_audioEngine->isPlaying())
+                m_videoTimer->start(33);
+
             if (!m_audioEngine || !m_audioEngine->isPlaying()) return;
+            if (!m_imageProvider) return;
 
-            // Берём ЖИВОЕ время аудио-клока (не дискретный m_currentTime)
-            // getCurrentAudioTime() интерполирует между тиками через processedUSecs()
             double audioNow = m_audioEngine->getCurrentAudioTime();
-
-            // Компенсация QML render latency (~16мс = 1 vsync frame).
-            // Пока Qt рендерит кадр в UI-потоке, аудио уходит вперёд.
-            // Берём кадр чуть вперёд чтобы он попал на экран точно вовремя.
-            const double RENDER_LATENCY = 0.016; // 16мс
+            const double RENDER_LATENCY = 0.016;
             double renderTime = qMin(audioNow + RENDER_LATENCY * m_playbackSpeed,
                                      totalDuration());
 
-            requestFrameForDisplay(renderTime);
+            QImage frame = getCompositeFrame(renderTime);
+            if (frame.isNull()) return; // cache miss — ждём следующий тик (уже запланирован)
 
-            // Планируем следующий тик ПОСЛЕ завершения рендера
-            if (m_audioEngine && m_audioEngine->isPlaying())
-                m_videoTimer->start(33);
+            m_imageProvider->setFrame(frame);
+            emit frameReadyForDisplay();
         });
     }
     m_videoTimer->start(33);
 
     m_currentTime = fromTime;
     m_audioEngine->startPlayback(fromTime, speed, totalDuration());
-
-    // Первый кадр сразу
-    requestFrameForDisplay(fromTime);
 }
 
 void Timeline::stopPlayback() {
     if (m_videoTimer) m_videoTimer->stop();
-    m_frameProcessing = false;   // снимаем лок если вдруг остался
+    m_frameProcessing = false;
+
+    // Фиксируем точное аудио-время ДО остановки sink.
+    // После stopPlayback() processedUSecs() сбрасывается в 0 и
+    // getCurrentAudioTime() вернёт неверное значение.
+    // Сохраняем его как m_currentTime — QML возьмёт это значение при паузе.
+    if (m_audioEngine && m_audioEngine->isPlaying()) {
+        double exactTime = m_audioEngine->getCurrentAudioTime();
+        m_currentTime = exactTime;
+        emit currentTimeChanged();
+    }
+
     if (m_audioEngine) m_audioEngine->stopPlayback();
+
+    // Показываем стоп-кадр на точном времени паузы
+    if (m_imageProvider)
+        requestFrameForDisplay(m_currentTime);
 }
 
 void Timeline::setPlaybackVolume(double volume) {
