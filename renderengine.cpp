@@ -225,44 +225,63 @@ QImage RenderWorker::compositeVideoAt(double time) {
         }
     }
 
-    // ── Альфа-композитинг: Track1 (с хромакеем) поверх Track2 ──
+    // ── Композитинг: Track2 — фон, Track1 — основной слой сверху ──────────
+    //
+    // Логика слоёв:
+    //   • Только Track1              → показываем Track1
+    //   • Только Track2              → показываем Track2
+    //   • Track1 + Track2 (нет α)   → Track2 как фон, Track1 поверх целиком
+    //   • Track1 (ARGB, хромакей)   → попиксельный альфа-блендинг над Track2
+    //
     QImage result;
 
-    bool track1HasAlpha = !frame1.isNull() && frame1.format() == QImage::Format_ARGB32;
-
-    if (!frame2.isNull() && track1HasAlpha) {
-        // Хромакей: накладываем frame1 (ARGB) поверх frame2 (фон)
-        QImage bg  = frame2.convertToFormat(QImage::Format_ARGB32);
-        QImage fg  = frame1; // уже ARGB32
-        QImage composite(bg.size(), QImage::Format_RGB888);
-        for (int y = 0; y < bg.height(); ++y) {
-            const QRgb* bgLine = reinterpret_cast<const QRgb*>(bg.constScanLine(y));
-            const QRgb* fgLine = reinterpret_cast<const QRgb*>(fg.constScanLine(y));
-            uchar* dstLine = composite.scanLine(y);
-            for (int x = 0; x < bg.width(); ++x) {
-                float a = qAlpha(fgLine[x]) / 255.0f;
-                float ia = 1.0f - a;
-                dstLine[x*3]   = (uchar)(qRed(fgLine[x])   * a + qRed(bgLine[x])   * ia);
-                dstLine[x*3+1] = (uchar)(qGreen(fgLine[x]) * a + qGreen(bgLine[x]) * ia);
-                dstLine[x*3+2] = (uchar)(qBlue(fgLine[x])  * a + qBlue(bgLine[x])  * ia);
+    auto alphaBlend = [&](QImage fg, QImage bg) -> QImage {
+        // fg — ARGB32 (с альфой от хромакея), bg — фон
+        QImage b = bg.convertToFormat(QImage::Format_ARGB32);
+        QImage f = fg; // уже ARGB32
+        if (f.size() != b.size())
+            f = f.scaled(b.size(), Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+        QImage out(b.size(), QImage::Format_RGB888);
+        for (int y = 0; y < b.height(); ++y) {
+            const QRgb* bl = reinterpret_cast<const QRgb*>(b.constScanLine(y));
+            const QRgb* fl = reinterpret_cast<const QRgb*>(f.constScanLine(y));
+            uchar* dl = out.scanLine(y);
+            for (int x = 0; x < b.width(); ++x) {
+                float a = qAlpha(fl[x]) / 255.0f, ia = 1.0f - a;
+                dl[x*3]   = (uchar)(qRed(fl[x])   * a + qRed(bl[x])   * ia);
+                dl[x*3+1] = (uchar)(qGreen(fl[x]) * a + qGreen(bl[x]) * ia);
+                dl[x*3+2] = (uchar)(qBlue(fl[x])  * a + qBlue(bl[x])  * ia);
             }
         }
-        result = composite;
+        return out;
+    };
+
+    bool f1HasAlpha = !frame1.isNull() && frame1.format() == QImage::Format_ARGB32;
+
+    if (!frame1.isNull() && !frame2.isNull()) {
+        if (f1HasAlpha) {
+            // Хромакей: track1 (прозрачный FG) над track2 (фон)
+            result = alphaBlend(frame1, frame2);
+        } else {
+            // Оба непрозрачны: track2 фон, track1 полностью сверху
+            // (track2 видна только там где нет track1 по времени)
+            result = frame1.convertToFormat(QImage::Format_RGB888);
+        }
     } else if (!frame1.isNull()) {
         result = frame1.convertToFormat(QImage::Format_RGB888);
     } else if (!frame2.isNull()) {
         result = frame2.convertToFormat(QImage::Format_RGB888);
     } else {
-        return QImage(); // оба пусты
+        return QImage();
     }
 
-    // ── Переходы ──
-    if (c1) result = applyTransition(result, c1, true);   // вход клипа
-    if (c1) result = applyTransition(result, c1, false);  // выход клипа
-    if (result.isNull() && c2) {
-        if (!frame2.isNull()) result = frame2.convertToFormat(QImage::Format_RGB888);
-        if (c2) result = applyTransition(result, c2, true);
-        if (c2) result = applyTransition(result, c2, false);
+    // ── Переходы ──────────────────────────────────────────────────────────
+    if (c1) {
+        result = applyTransition(result, c1, true);
+        result = applyTransition(result, c1, false);
+    } else if (c2) {
+        result = applyTransition(result, c2, true);
+        result = applyTransition(result, c2, false);
     }
 
     return result;

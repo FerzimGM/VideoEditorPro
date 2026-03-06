@@ -134,15 +134,12 @@ private:
     RenderEngine*        m_renderEngine  = nullptr;
     EffectImageProvider* m_imageProvider = nullptr;
     AudioPlaybackEngine* m_audioEngine   = nullptr;
-
-    // Отдельный таймер для видео — НЕ зависит от аудио-таймера.
-    // Рендер кадра не блокирует аудио-поток.
-    QTimer* m_videoTimer            = nullptr;
-    double  m_lastVideoRenderTime   = -1.0;  // заменяет static в лямбде
-    double  m_playbackSpeed         = 1.0;
+    QTimer*              m_videoTimer    = nullptr;
+    double               m_playbackSpeed = 1.0;
 
     void sortClips();
     double getClipSourceDuration(const QString& filepath);
+    double toSourceTime(const QString& filepath, double timelineTime) const;
     void startDecoderThread(const QString& filepath, double fps);
     MediaDecoder* getOrCreateAudioDecoder(const QString& filepath);
 
@@ -153,5 +150,4 @@ private:
 };
 
 #endif // TIMELINE_H
-
 
