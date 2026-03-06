@@ -370,8 +370,10 @@ QVector<float> MediaDecoder::decodeAudioRange(double startTime, double duration)
         if (ret < 0) continue;
 
         while (avcodec_receive_frame(m_audioCodecContext, audioFrame) == 0) {
-            // Пропускаем кадры до начала нашего окна
-            if (audioFrame->pts != AV_NOPTS_VALUE) {
+            // Пропускаем кадры до начала нашего окна.
+            // При startTime близком к 0 НЕ пропускаем — AAC/MP3 кодеки дают
+            // отрицательный или нулевой PTS для первых кадров, иначе result пустой.
+            if (audioFrame->pts != AV_NOPTS_VALUE && startTime > 0.1) {
                 double frameEnd = audioFrame->pts * av_q2d(m_audioStream->time_base)
                 + (double)audioFrame->nb_samples
                     / m_audioCodecContext->sample_rate;

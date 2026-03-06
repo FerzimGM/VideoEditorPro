@@ -35,19 +35,18 @@ class MediaEncoder;
 // ===== РАБОЧИЙ ОБЪЕКТ (выполняется в QThread) =====
 class RenderWorker : public QObject {
     Q_OBJECT
-
 public:
     explicit RenderWorker(QObject* parent = nullptr);
     ~RenderWorker();
 
-    void setClips(const QList<TimelineClip>& clips)       { m_clips = clips; }
-    void setOutputPath(const QString& path)                { m_outputPath = path; }
-    void setOutputResolution(int w, int h)                 { m_outputWidth = w; m_outputHeight = h; }
-    void setFps(double fps)                                { m_fps = fps; }
-    void setBitrate(int bitrate)                           { m_bitrate = bitrate; }
+    void setClips(const QList<TimelineClip>& clips)  { m_clips = clips; }
+    void setOutputPath(const QString& path)           { m_outputPath = path; }
+    void setOutputResolution(int w, int h)            { m_outputWidth = w; m_outputHeight = h; }
+    void setFps(double fps)                           { m_fps = fps; }
+    void setBitrate(int bitrate)                      { m_bitrate = bitrate; }
 
 public slots:
-    void process();  // Основной метод — запускается в потоке
+    void process();
     void cancel();
 
 signals:
@@ -64,67 +63,38 @@ private:
     int m_bitrate;
     bool m_cancelled;
 
-    // РАЗДЕЛЬНЫЕ кэши декодеров для видео и аудио.
-    // Нельзя использовать один декодер на файл: av_read_frame читает пакеты
-    // обоих потоков вперемешку. Если аудиодекодер читает аудиопакеты,
-    // он пропускает (выбрасывает) видеопакеты — следующий getNextFrame()
-    // получает неверную позицию и возвращает только keyframes.
-    QMap<QString, MediaDecoder*> m_videoDecoders;  // только видео
-    QMap<QString, MediaDecoder*> m_audioDecoders;  // только аудио
-
-    // Позиция последнего декодированного видеокадра (для sequential read)
-    QMap<QString, double> m_videoPositions;
-
-    // Персистентные кольцевые буферы аудиоэффектов (нужны для delay-based эффектов)
-    // Ключ: filepath + "_" + effectName
+    QMap<QString, MediaDecoder*> m_videoDecoders;
+    QMap<QString, MediaDecoder*> m_audioDecoders;
+    QMap<QString, double>        m_videoPositions;
     QHash<QString, QVector<float>> m_audioDelayBufs;
     QHash<QString, int>            m_audioDelayPos;
 
-    // Получить или создать декодер для файла
-    MediaDecoder* getVideoDecoder(const QString& filepath);
-    MediaDecoder* getAudioDecoder(const QString& filepath);
+    MediaDecoder*  getVideoDecoder(const QString& filepath);
+    MediaDecoder*  getAudioDecoder(const QString& filepath);
+    void           closeAllDecoders();
 
-    // Закрыть все кэшированные декодеры
-    void closeAllDecoders();
-
-    // ===== КОМПОЗИТИНГ =====
-
-    // Найти активный клип на данной дорожке в данное время
-    TimelineClip* findActiveClip(double time, int trackIndex);
-
-    // Получить видеокадр для момента времени (композитинг двух дорожек)
-    QImage compositeVideoAt(double time);
-
-    // Получить аудио для момента времени (микширование двух дорожек)
+    TimelineClip*  findActiveClip(double time, int trackIndex);
+    QImage         compositeVideoAt(double time);
     QVector<float> mixAudioAt(double time, double frameDuration);
+    QImage         decodeVideoFrame(TimelineClip* clip, double timelineTime);
+    QVector<float> decodeAudioChunk(TimelineClip* clip, double timelineTime, double duration);
 
-    // Получить видеокадр одного клипа
-    QImage decodeVideoFrame(TimelineClip* clip, double timelineTime);
-
-    // Получить аудио одного клипа
-    QVector<float> decodeAudioChunk(TimelineClip* clip, double timelineTime,
-                                    double duration);
-
-    // ===== ЭФФЕКТЫ =====
     QImage applyClipEffects(const QImage& frame, const TimelineClip& clip);
     QImage applyBrightness(const QImage& frame, double value);
     QImage applyContrast(const QImage& frame, double value);
     QImage applySaturation(const QImage& frame, double value);
     QImage applyGrayscale(const QImage& frame);
-    // Audio effects applied inline in decodeAudioChunk using m_audioDelayBufs
 };
 
 
-// ===== МЕНЕДЖЕР РЕНДЕРИНГА (создаёт поток, управляет жизненным циклом) =====
+// ===== МЕНЕДЖЕР РЕНДЕРИНГА =====
 class RenderEngine : public QObject
 {
     Q_OBJECT
-
 public:
     explicit RenderEngine(QObject *parent = nullptr);
     ~RenderEngine();
 
-    // Настройка
     void setClips(const QList<TimelineClip>& clips);
     void setOutputPath(const QString& path);
     void setOutputResolution(int width, int height);
@@ -133,11 +103,15 @@ public:
     void setFps(double fps);
     void setBitrate(int bitrate);
 
-    // Запуск / отмена
-    bool startRender();   // Запускает рендер в отдельном потоке
+    bool startRender();
     void cancel();
 
-    // Статические эффекты (для превью, без потока)
+    // ── Статические эффекты для превью и live-display ────────────────────
+    // Применяет весь стек эффектов из effects-карты к кадру.
+    static QImage applyEffectsToFrame(const QImage& frame,
+                                      const QMap<QString, double>& effects,
+                                      int frameIndex = 0);
+
     static QImage applyBrightness(const QImage& frame, double value);
     static QImage applyContrast(const QImage& frame, double value);
     static QImage applySaturation(const QImage& frame, double value);
@@ -155,12 +129,9 @@ public:
     static QImage applyGrain(const QImage& frame, double strength, int frameIndex = 0);
     static QImage applyChromaKey(const QImage& frame, double threshold, double smoothness);
 
-    // Переходы (для превью)
-    // type: 1=fade 2=wipe_right 3=wipe_left 4=zoom_in 5=zoom_out 6=flash
     static QImage applyTransition(const QImage& frameFrom, const QImage& frameTo,
                                   int type, float progress);
 
-    // Перевод строкового имени перехода (из QML) в числовой код
     static int transitionNameToCode(const QString& name) {
         if (name == "fade_in"  || name == "fade_out") return 1;
         if (name == "wipe_right") return 2;
@@ -168,7 +139,7 @@ public:
         if (name == "zoom_in")    return 4;
         if (name == "zoom_out")   return 5;
         if (name == "flash")      return 6;
-        return 0; // none
+        return 0;
     }
 
 signals:
@@ -186,9 +157,8 @@ private:
     double m_fps;
     int m_bitrate;
 
-    QThread* m_thread;
+    QThread*      m_thread;
     RenderWorker* m_worker;
 };
 
 #endif // RENDERENGINE_H
-

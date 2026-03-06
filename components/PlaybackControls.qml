@@ -20,6 +20,7 @@ Rectangle {
     signal snapToggled
     signal cutClicked
     signal clearEffectsClicked
+    property real volume: 1.0
 
     Rectangle {
         anchors.top: parent.top
@@ -248,6 +249,52 @@ Rectangle {
                     font.family: "Consolas, monospace"
                     font.pixelSize: Theme.fontSizeLarge
                     font.bold: true
+                }
+            }
+
+            // ── Громкость ────────────────────────────────────────────
+            Row {
+                spacing: 4
+                Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: root.volume <= 0 ? "🔇" : (root.volume < 0.5 ? "🔉" : "🔊")
+                    font.pixelSize: 16
+                }
+                Slider {
+                    id: volumeSlider
+                    width: 80
+                    height: 32
+                    from: 0.0
+                    to: 1.0
+                    value: root.volume
+                    onMoved: root.volume = value
+
+                    background: Rectangle {
+                        x: volumeSlider.leftPadding
+                        y: volumeSlider.topPadding + volumeSlider.availableHeight / 2 - height / 2
+                        width: volumeSlider.availableWidth
+                        height: 4
+                        radius: 2
+                        color: Theme.backgroundDark
+                        border.color: Theme.borderLight
+                        Rectangle {
+                            width: volumeSlider.visualPosition * parent.width
+                            height: parent.height
+                            radius: 2
+                            color: Theme.rubyPrimary
+                        }
+                    }
+                    handle: Rectangle {
+                        x: volumeSlider.leftPadding + volumeSlider.visualPosition
+                           * volumeSlider.availableWidth - width / 2
+                        y: volumeSlider.topPadding + volumeSlider.availableHeight / 2 - height / 2
+                        width: 14
+                        height: 14
+                        radius: 7
+                        color: volumeSlider.pressed ? Theme.rubyDark : Theme.rubyPrimary
+                        border.color: Theme.rubyLight
+                        border.width: 1
+                    }
                 }
             }
         }

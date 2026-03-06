@@ -5,6 +5,7 @@
 #include <QQuickStyle>
 #include <QQuickWindow>
 #include "timeline.h"  // ← Подключаем наш Timeline!
+#include "EffectImageProvider.h"   // ← ДОБАВИТЬ этот include
 
 int main(int argc, char *argv[])
 {
@@ -25,17 +26,24 @@ int main(int argc, char *argv[])
     app.setOrganizationName("MyDiplomWork");
     app.setApplicationName("VideoEditor Pro");
 
-    // ===== СОЗДАНИЕ C++ ОБЪЕКТА TIMELINE =====
-    Timeline timeline;  // Создаём наш C++ объект!
+    // ── C++ объект таймлайна ──────────────────────────────────────────────
+    Timeline timeline;
 
-    qDebug() << "✅ Timeline создан в C++";
+    // ── Image Provider для live-превью кадров ────────────────────────────
+    // QQmlEngine ВЛАДЕЕТ провайдером (удаляет при деструкции engine).
+    // Timeline хранит не-владеющий указатель.
+    auto* frameProvider = new EffectImageProvider();
+    timeline.setImageProvider(frameProvider);
 
     QQmlApplicationEngine engine;
 
-    qDebug() << "✅ Timeline зарегистрирован в QML как 'cppTimeline'";
+    // Регистрация: в QML доступно "image://effects/..."
+    engine.addImageProvider("effects", frameProvider);
 
-    // Зарегистрировать в QML
+    // Регистрация cppTimeline
     engine.rootContext()->setContextProperty("cppTimeline", &timeline);
+
+    qDebug() << "✅ Timeline + EffectImageProvider зарегистрированы";
 
     const QUrl url(QStringLiteral("qrc:/main.qml"));
     QObject::connect(&engine, &QQmlApplicationEngine::objectCreated,
@@ -44,10 +52,8 @@ int main(int argc, char *argv[])
                              QCoreApplication::exit(-1);
                      }, Qt::QueuedConnection);
 
-
     engine.load(url);
 
-    // ===== ЗАПУСК ПРИЛОЖЕНИЯ =====
     qDebug() << "Приложение запущено!";
     return app.exec();
 }

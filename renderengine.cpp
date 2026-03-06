@@ -1106,3 +1106,66 @@ QImage RenderEngine::applyTransition(const QImage& from, const QImage& to, int t
     }
 }
 
+// RenderEngine::applyEffectsToFrame
+// Применяет весь стек видео-эффектов из QMap<QString,double> к кадру.
+// Порядок совпадает с RenderWorker::applyClipEffects — результат идентичен.
+// Используется Timeline для live-превью без рендера.
+
+QImage RenderEngine::applyEffectsToFrame(const QImage& frame,
+                                         const QMap<QString, double>& effects,
+                                         int frameIndex)
+{
+    QImage result = frame;
+
+    for (auto it = effects.constBegin(); it != effects.constEnd(); ++it) {
+        const QString& name = it.key();
+        double value = it.value();
+
+        // Служебные поля — пропускаем
+        if (name.startsWith('_')) continue;
+
+        if      (name == "brightness"  && qAbs(value) > 0.001)
+            result = applyBrightness(result, value);
+        else if (name == "contrast"    && qAbs(value - 1.0) > 0.001)
+            result = applyContrast(result, value);
+        else if (name == "saturation"  && qAbs(value - 1.0) > 0.001)
+            result = applySaturation(result, value);
+        else if (name == "grayscale"   && value > 0.5)
+            result = applyGrayscale(result);
+        else if (name == "blur"        && value > 0.1)
+            result = applyBlur(result, value);
+        else if (name == "sharpness"   && value > 0.1)
+            result = applySharpness(result, value);
+        else if (name == "hue"         && qAbs(value) > 0.1)
+            result = applyHue(result, value);
+        else if (name == "sepia"       && value > 0.01)
+            result = applySepia(result, value);
+        else if (name == "vignette"    && value > 0.01)
+            result = applyVignette(result, value);
+        else if (name == "invert"      && value > 0.5)
+            result = applyInvert(result);
+        else if (name == "posterize"   && value > 0.5)
+            result = applyPosterize(result, value);
+        else if (name == "pixelate"    && value > 1.0)
+            result = applyPixelate(result, value);
+        else if (name == "temperature" && qAbs(value) > 0.01)
+            result = applyTemperature(result, value);
+        else if (name == "tint_hue"    && effects.value("tint_str", 0.0) > 0.01)
+            result = applyTint(result, value, effects.value("tint_str", 0.0));
+        else if (name == "grain"       && value > 0.01)
+            result = applyGrain(result, value, frameIndex);
+        else if (name == "chroma_key"  && value > 0.5) {
+            double thr  = effects.value("chroma_threshold",  0.35);
+            double soft = effects.value("chroma_smoothness", 0.10);
+            result = applyChromaKey(result, thr, soft);
+        }
+        else if (name == "auto_enhance" && value > 0.0) {
+            double s = value;
+            if (s > 0.01) result = applySharpness(result, 0.3 + s * 0.7);
+            if (s > 0.01) result = applyContrast(result,  1.0 + s * 0.15);
+            if (s > 0.01) result = applySaturation(result, 1.0 + s * 0.2);
+        }
+    }
+    return result;
+}
+

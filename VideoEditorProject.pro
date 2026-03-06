@@ -9,6 +9,7 @@ TEMPLATE = app
 RESOURCES += qml.qrc
 
 SOURCES += \
+    audioplaybackengine.cpp \
     main.cpp \
     mediadecoder.cpp \
     mediaencoder.cpp \
@@ -37,8 +38,10 @@ else: unix:!android: target.path = /opt/$${TARGET}/bin
 DISTFILES +=
 
 HEADERS += \
+    Effectimageprovider.h \
     FrameCache.h \
     TimelineClip.h \
+    audioplaybackengine.h \
     decoderthread.h \
     mediadecoder.h \
     mediaencoder.h \

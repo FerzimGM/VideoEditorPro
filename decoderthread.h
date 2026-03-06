@@ -34,6 +34,12 @@ public:
         m_condition.wakeAll();  // Будим поток если он спал
     }
 
+    void updatePlayPosition(double time) {
+        QMutexLocker lock(&m_mutex);
+        if (time > m_playPosition) m_playPosition = time;
+        m_condition.wakeAll();
+    }
+
     // Остановить поток (блокирует до завершения, макс 2с)
     void stop() {
         {
@@ -55,57 +61,73 @@ protected:
     void run() override {
         MediaDecoder decoder;
         if (!decoder.openFile(m_filepath)) {
-            //qWarning() << "DecoderThread: не могу открыть" << m_filepath;
             return;
         }
 
+        // ИСПРАВЛЕНИЕ 1: ставим m_running=true ДО входа в цикл
+        // и синхронизируем m_seekTime с начальным currentTime
         {
             QMutexLocker lock(&m_mutex);
-            m_running = true;
+            m_running  = true;
+            m_seekTime = 0.0;  // явная инициализация
         }
 
-        double currentTime = 0.0;
-        // Декодируем на 3 секунды вперёд от текущей позиции
-        const double PREFETCH_AHEAD = 3.0;
+        double currentTime  = 0.0;
+        double prefetchBase = 0.0;
+        const double PREFETCH_AHEAD = 5.0;
+        bool needSeek = true;  // при старте делаем один seek на начало
 
-        //while (m_running) {
         while (true) {
-            // Проверяем запрос перемотки
+            // ── Проверяем запрос перемотки ────────────────────────────
             {
                 QMutexLocker lock(&m_mutex);
                 if (!m_running) break;
 
-                // Проверяем seek запрос
                 if (m_seekRequested) {
                     currentTime     = m_seekTime;
+                    prefetchBase    = m_seekTime;
                     m_seekRequested = false;
-                    m_cache->clear();   // Старые кадры больше не нужны
+                    m_cache->clear();
+                    needSeek = true;  // после seek нужно позиционировать декодер
                 }
+            }
+
+            // Одиночный seek только при смене позиции, дальше — getNextFrame()
+            if (needSeek) {
+                decoder.seekTo(currentTime);
+                needSeek = false;
             }
 
             int frameNum = (int)(currentTime * m_fps);
 
-            // Проверяем: уже есть в кэше?
+            // ── Декодируем следующий кадр (sequential — БЕЗ seek на каждый кадр) ──
             QImage cached;
             if (!m_cache->get(frameNum, cached)) {
-                // Нет — декодируем
-                QImage frame = decoder.getFrameAt(currentTime);
+                // getNextFrame() читает следующий пакет без seek — в 10-100x быстрее
+                QImage frame = decoder.getNextFrame();
                 if (!frame.isNull()) {
                     m_cache->put(frameNum, frame);
                     emit frameReady(frameNum);
+                } else {
+                    // Конец файла или ошибка чтения — ждём seek
+                    QMutexLocker lock(&m_mutex);
+                    m_condition.wait(&m_mutex, 100);
+                    continue;
                 }
             }
 
             currentTime += 1.0 / m_fps;
 
-            // Проверяем: не ушли ли слишком далеко вперёд?
+            // ── Ждём если ушли далеко вперёд ─────────────────────────
             {
                 QMutexLocker lock(&m_mutex);
                 if (!m_running) break;
 
-                double aheadOf = currentTime - m_seekTime;
+                if (m_playPosition > prefetchBase)
+                    prefetchBase = m_playPosition;
+                double aheadOf = currentTime - prefetchBase;
                 if (!m_seekRequested && aheadOf > PREFETCH_AHEAD) {
-                    m_condition.wait(&m_mutex, 50);
+                    m_condition.wait(&m_mutex, 30);
                 }
             }
         }
@@ -120,8 +142,11 @@ private:
     bool m_running;
     bool m_seekRequested;
     double m_seekTime;
+    double m_playPosition = 0.0;
     QMutex m_mutex;
     QWaitCondition m_condition;
 };
 
 #endif // DECODERTHREAD_H
+
+

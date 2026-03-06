@@ -20,10 +20,9 @@
 #include <QMutexLocker>
 
 struct FrameCache {
-    // Сколько кадров держим в памяти на одно видео
-    // 150 кадров × ~2MB (720p RGB) = ~300MB макс
-    // Можно уменьшить до 60 если мало RAM
-    static const int MAX_FRAMES = 150;
+    // 300 кадров × ~2MB (720p RGB) = ~600MB макс
+    // 300 кадров при 30fps = 10 секунд буфера — достаточно для плавного воспроизведения
+    static const int MAX_FRAMES = 300;
 
     // Сохранить кадр (ключ = номер кадра = time * fps)
     void put(int frameNumber, const QImage& image) {
@@ -31,7 +30,7 @@ struct FrameCache {
         // Вытесняем старые кадры если кэш заполнен
         if (m_frames.size() >= MAX_FRAMES) {
             // Удаляем самый ранний кадр
-           m_frames.erase(m_frames.begin()); // вытесняем самый старый
+            m_frames.erase(m_frames.begin()); // вытесняем самый старый
         }
         m_frames[frameNumber] = image;
     }

@@ -11,43 +11,63 @@
 #include "timelineclip.h"
 #include <QMap>
 
-// Forward declarations (тяжёлые хедеры только в .cpp)
+// Forward declarations
 struct FrameCache;
 class DecoderThread;
 class RenderEngine;
+class EffectImageProvider;
+class AudioPlaybackEngine;
+class MediaDecoder;
 
 class Timeline : public QObject
 {
     Q_OBJECT
-    Q_PROPERTY(double currentTime READ currentTime WRITE setCurrentTime NOTIFY currentTimeChanged)
+    Q_PROPERTY(double currentTime   READ currentTime   WRITE setCurrentTime NOTIFY currentTimeChanged)
     Q_PROPERTY(double totalDuration READ totalDuration NOTIFY totalDurationChanged)
-    Q_PROPERTY(int clipCount READ clipCount NOTIFY clipsChanged)
+    Q_PROPERTY(int    clipCount     READ clipCount     NOTIFY clipsChanged)
 
 public:
     explicit Timeline(QObject *parent = nullptr);
     ~Timeline();
 
-    // ===== ГЕТТЕРЫ =====
-    double currentTime() const { return m_currentTime; }
+    double currentTime()  const { return m_currentTime; }
     double totalDuration() const;
-    int clipCount() const { return m_clips.size(); }
+    int    clipCount()    const { return m_clips.size(); }
     const QList<TimelineClip>& clips() const { return m_clips; }
     TimelineClip* getClip(int index);
     TimelineClip* getClipAt(double time, int trackIndex);
 
-    // ===== СЕТТЕРЫ =====
     void setCurrentTime(double time);
 
-    // ===== КАДРЫ ДЛЯ PREVIEW =====
-    Q_INVOKABLE QImage getCurrentFrameAt(double time, int trackIndex = 1);
+    // ── Image Provider ────────────────────────────────────────────────────
+    void setImageProvider(EffectImageProvider* provider);
+
+    // ── Live preview ──────────────────────────────────────────────────────
+    Q_INVOKABLE void requestFrameForDisplay(double time,
+                                            int selectedClipId = -1,
+                                            const QVariantMap& previewEffects = {});
+
+    // ── Совместимость ─────────────────────────────────────────────────────
+    Q_INVOKABLE QImage  getCurrentFrameAt(double time, int trackIndex = 1);
     Q_INVOKABLE QString getFramePathAt(double time, int trackIndex = 1);
-    Q_INVOKABLE void requestFrame(double time, int trackIndex = 1);
+    Q_INVOKABLE void    requestFrame(double time, int trackIndex = 1);
 
-    // ===== МЕТАДАННЫЕ =====
     Q_INVOKABLE QVariantMap getClipInfoAt(double time, int trackIndex = 1);
-    Q_INVOKABLE QString getActiveClipPath(double time, int trackIndex = 1);
+    Q_INVOKABLE QString     getActiveClipPath(double time, int trackIndex = 1);
 
-    // ===== УПРАВЛЕНИЕ КЛИПАМИ =====
+    // ── Воспроизведение ───────────────────────────────────────────────────
+    Q_INVOKABLE void   startPlayback(double fromTime, double speed = 1.0);
+    Q_INVOKABLE void   stopPlayback();
+    Q_INVOKABLE void   setPlaybackVolume(double volume);
+    Q_INVOKABLE void   setTrackAudioMuted(int track, bool muted);
+    Q_INVOKABLE void   setTrackVideoHidden(int track, bool hidden);
+    Q_INVOKABLE double getPlaybackTime() const;
+
+    // ── Аудио-микс для AudioPlaybackEngine ───────────────────────────────
+    QVector<float> getMixedAudio(double time, double duration,
+                                 bool t1muted = false, bool t2muted = false);
+
+    // ── Клипы ─────────────────────────────────────────────────────────────
     Q_INVOKABLE bool addClip(const QString& filepath, int trackIndex, double startTime);
     Q_INVOKABLE bool removeClip(int index);
     Q_INVOKABLE bool moveClip(int index, int newTrackIndex, double newStartTime);
@@ -62,33 +82,20 @@ public:
     Q_INVOKABLE double getTrackEndTime(int trackIndex) const;
     Q_INVOKABLE QVariantList getClipsForTrack(int trackIndex);
 
-    // ===== ВИДИМОСТЬ КЛИПОВ (синхронизация из QML для рендера) =====
-    // QML вызывает перед рендером чтобы передать состояние из clipStates
     Q_INVOKABLE void setClipVideoHidden(int index, bool hidden);
     Q_INVOKABLE void setClipAudioHidden(int index, bool hidden);
-
-    // ===== СИНХРОНИЗАЦИЯ ВСЕХ СОСТОЯНИЙ ПЕРЕД РЕНДЕРОМ =====
-    // QML передаёт объект { "clipId_v": true, "clipId_a": false, ... }
-    // и карту muted { clipId: true/false }
     Q_INVOKABLE void syncClipStatesForRender(QVariantMap hiddenMap, QVariantMap mutedMap);
 
-    // ===== ПРОВЕРКА ПЕРЕСЕЧЕНИЙ =====
     bool canAddClip(int trackIndex, double startTime, double duration, int excludeIndex = -1) const;
 
-    // ===== СОХРАНЕНИЕ / ЗАГРУЗКА =====
     Q_INVOKABLE bool saveProject(const QString& filepath);
     Q_INVOKABLE bool loadProject(const QString& filepath);
     QJsonObject toJson() const;
     bool fromJson(const QJsonObject& json);
 
-    // ===== РЕНДЕРИНГ =====
-    // outputPath — путь к файлу
-    // width, height — разрешение (из exportDialog)
     Q_INVOKABLE bool renderToFile(const QString& outputPath,
                                   int width = 1920, int height = 1080,
                                   const QString& format = "MP4");
-
-    // Отменить текущий рендеринг
     Q_INVOKABLE void cancelRender();
 
 signals:
@@ -100,11 +107,15 @@ signals:
     void clipModified(int index);
     void renderProgress(int percent);
     void renderFinished(bool success);
+    void frameReadyForDisplay();
+    void playbackTimeUpdated(double time);
+    void playbackEnded();
     void frameReady(const QImage &frame, double time);
 
 private:
     QMap<QString, FrameCache*>    m_frameCaches;
     QMap<QString, DecoderThread*> m_decoderThreads;
+    QMap<QString, MediaDecoder*>  m_audioDecoders;
 
     struct ClipMeta {
         int    width  = 0;
@@ -114,15 +125,25 @@ private:
     QMap<QString, ClipMeta> m_clipMeta;
 
     QList<TimelineClip> m_clips;
-    double m_currentTime;
-    int m_nextUid = 0;  // Стабильный уникальный идентификатор клипа
+    double m_currentTime       = 0.0;
+    double m_lastVideoTime     = -1.0;
+    int    m_nextUid           = 0;
+    int    m_previewFrameIndex = 0;
 
-    // Рендер-движок (живёт пока идёт рендеринг)
-    RenderEngine* m_renderEngine;
+    RenderEngine*        m_renderEngine  = nullptr;
+    EffectImageProvider* m_imageProvider = nullptr;
+    AudioPlaybackEngine* m_audioEngine   = nullptr;
 
     void sortClips();
     double getClipSourceDuration(const QString& filepath);
     void startDecoderThread(const QString& filepath, double fps);
+    MediaDecoder* getOrCreateAudioDecoder(const QString& filepath);
+
+    QImage getCompositeFrame(double time,
+                             int selectedClipId = -1,
+                             const QVariantMap& previewEffects = {});
+    QImage alphaComposite(const QImage& fg, const QImage& bg);
 };
 
 #endif // TIMELINE_H
+

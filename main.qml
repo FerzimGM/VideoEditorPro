@@ -212,6 +212,9 @@ QtObject {
                 clipsCache.track1 = cppTimeline.getClipsForTrack(1)
                 clipsCache.track2 = cppTimeline.getClipsForTrack(2)
             }
+            // currentTime обновляется через onTimePositionChanged (из playbackTimeUpdated)
+            // Здесь НЕ обновляем — иначе двойной цикл обновлений
+            // function onCurrentTimeChanged() { ... }
             function onRenderProgress(percent) {
                 exportDialog.renderProgress = percent
             }
@@ -444,6 +447,7 @@ QtObject {
                                                       cppTimeline.totalDuration) : 60
             property bool isPlaying: false
             property real playbackSpeed: 1.0
+            property real volume: 1.0
             property int zoomLevel: 100
             property bool snapEnabled: true
         }
@@ -990,7 +994,7 @@ QtObject {
                             isPlaying: playbackManager.isPlaying
                             // *** Передаём скорость → QMediaPlayer.playbackRate ***
                             playbackSpeed: playbackManager.playbackSpeed
-                            volume: 1.0
+                            volume: playbackManager.volume
                             // hideVideo=true только если track1 скрыт И track2 пустой → чёрный экран
                             hideVideo: {
                                 var _hv = clipStates._hidden
@@ -1069,12 +1073,15 @@ QtObject {
                                 return false
                             }
 
-                            // Обновляем playhead из QMediaPlayer
+                            // Обновляем playhead — только UI, не пишем в C++ во время воспроизведения
                             onTimePositionChanged: time => {
                                                        if (Math.abs(
                                                                playbackManager.currentTime
                                                                - time) > 0.05) {
                                                            playbackManager.currentTime = time
+                                                           // НЕ пишем cppTimeline.currentTime во время воспроизведения:
+                                                           // это вызывает setCurrentTime → seekTo → сброс кэша → Cache miss
+                                                           if (!playbackManager.isPlaying)
                                                            cppTimeline.currentTime = time
                                                        }
                                                    }
@@ -1082,6 +1089,8 @@ QtObject {
                             // (сломает QML binding). Вместо этого — сигнал.
                             onPlaybackStopped: {
                                 playbackManager.isPlaying = false
+                                playbackManager.currentTime = 0
+                                cppTimeline.currentTime = 0
                             }
                         }
                     }
@@ -1097,6 +1106,7 @@ QtObject {
                         duration: playbackManager.duration
                         playbackSpeed: playbackManager.playbackSpeed
                         snapEnabled: playbackManager.snapEnabled
+                        volume: playbackManager.volume
 
                         onPlayPauseClicked: playbackManager.isPlaying = !playbackManager.isPlaying
 
@@ -1114,7 +1124,16 @@ QtObject {
 
                         onSpeedChanged: speed => {
                                             playbackManager.playbackSpeed = speed
+                                            if (playbackManager.isPlaying)
+                                            cppTimeline.startPlayback(
+                                                playbackManager.currentTime,
+                                                speed)
                                         }
+
+                        onVolumeChanged: {
+                            playbackManager.volume = volume
+                            cppTimeline.setPlaybackVolume(volume)
+                        }
                         onSnapToggled: {
                             playbackManager.snapEnabled = !playbackManager.snapEnabled
                             // ✅ ДОБАВИТЬ: передача в timeline
@@ -1165,6 +1184,13 @@ QtObject {
                         onTimeChanged: time => {
                                            playbackManager.currentTime = time
                                            cppTimeline.currentTime = time
+                                           // Seek во время воспроизведения — перезапустить с новой позиции
+                                           if (playbackManager.isPlaying) {
+                                               cppTimeline.stopPlayback()
+                                               cppTimeline.startPlayback(
+                                                   time,
+                                                   playbackManager.playbackSpeed)
+                                           }
                                        }
                         onZoomChanged: zoom => {
                                            playbackManager.zoomLevel = zoom

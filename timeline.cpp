@@ -5,6 +5,8 @@
 #include "decoderthread.h"
 #include "mediadecoder.h"
 #include "renderengine.h"
+#include "audioplaybackengine.h"
+#include "EffectImageProvider.h"
 
 #include <QFile>
 #include <QJsonDocument>
@@ -25,10 +27,12 @@ Timeline::Timeline(QObject *parent)
 Timeline::~Timeline() {
     cancelRender();
 
+    if (m_audioEngine) { m_audioEngine->stopPlayback(); delete m_audioEngine; }
     for (auto* thread : m_decoderThreads) {
         thread->stop();
         delete thread;
     }
+    for (auto* d : m_audioDecoders) { d->closeFile(); delete d; }
     qDeleteAll(m_frameCaches);
 
     qDebug() << "Timeline destructor";
@@ -462,8 +466,12 @@ double Timeline::totalDuration() const {
 void Timeline::setCurrentTime(double time) {
     if (qAbs(m_currentTime - time) < 0.01) return;
     m_currentTime = time;
-    for (auto* thread : m_decoderThreads) {
-        thread->seekTo(time);
+    // Во время воспроизведения НЕ делаем seekTo — это сбрасывает кэш и вызывает Cache miss
+    bool playing = m_audioEngine && m_audioEngine->isPlaying();
+    if (!playing) {
+        for (auto* thread : m_decoderThreads) {
+            thread->seekTo(time);
+        }
     }
     emit currentTimeChanged();
 }
@@ -511,7 +519,12 @@ QImage Timeline::getCurrentFrameAt(double time, int trackIndex) {
         }
     }
 
-    // 2. Промах кэша
+    // 2. Промах кэша:
+    // Во время воспроизведения — не делаем sync decode, он блокирует UI
+    bool playingNow = m_audioEngine && m_audioEngine->isPlaying();
+    if (playingNow) return QImage();
+
+    // На паузе — sync decode
     qDebug() << "Cache miss for time=" << clipTime << "- sync decode";
     MediaDecoder decoder;
     if (!decoder.openFile(clip->filepath)) return QImage();
@@ -922,4 +935,252 @@ void Timeline::cancelRender() {
         m_renderEngine->deleteLater();
         m_renderEngine = nullptr;
     }
+}
+// ═══════════════════════════════════════════════════════════════════════
+//  setImageProvider — вызвать из main.cpp ПОСЛЕ регистрации провайдера
+// ═══════════════════════════════════════════════════════════════════════
+void Timeline::setImageProvider(EffectImageProvider* provider) {
+    m_imageProvider = provider;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  getOrCreateAudioDecoder — ленивое создание декодера аудио
+// ═══════════════════════════════════════════════════════════════════════
+MediaDecoder* Timeline::getOrCreateAudioDecoder(const QString& filepath) {
+    if (m_audioDecoders.contains(filepath))
+        return m_audioDecoders[filepath];
+
+    auto* dec = new MediaDecoder();
+    if (!dec->openFile(filepath)) {
+        delete dec;
+        return nullptr;
+    }
+    m_audioDecoders[filepath] = dec;
+    return dec;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  getMixedAudio — аудио-микс двух дорожек для live воспроизведения
+// ═══════════════════════════════════════════════════════════════════════
+QVector<float> Timeline::getMixedAudio(double time, double duration,
+                                       bool t1muted, bool t2muted)
+{
+    const int SR = 44100, CH = 2;
+    int totalFloats = static_cast<int>(duration * SR * CH);
+    if (totalFloats <= 0) return {};
+
+    QVector<float> mixed(totalFloats, 0.0f);
+    bool hasAudio = false;
+
+    auto mixTrack = [&](int trackIndex, bool muted) {
+        if (muted) return;
+        TimelineClip* clip = getClipAt(time, trackIndex);
+        if (!clip || clip->isMuted || clip->isAudioHidden) return;
+
+        // Клип есть на дорожке — двигатель должен продолжать работать
+        // даже если декодер ещё не вернул данные (прогрев)
+        hasAudio = true;
+
+        MediaDecoder* dec = getOrCreateAudioDecoder(clip->filepath);
+        if (!dec || !dec->hasAudio()) return;
+
+        double srcTime = clip->sourceTimeAt(time);
+        QVector<float> audio = dec->decodeAudioRange(srcTime, duration);
+        if (audio.isEmpty()) return;
+
+        double vol = clip->effects.value("volume", 1.0);
+        int len = qMin(mixed.size(), audio.size());
+        for (int i = 0; i < len; ++i)
+            mixed[i] += audio[i] * (float)vol;
+    };
+
+    mixTrack(1, t1muted);
+    mixTrack(2, t2muted);
+
+    if (!hasAudio) return {};
+    for (float& s : mixed) s = qBound(-1.0f, s, 1.0f);
+    return mixed;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  alphaComposite — Porter-Duff «src over» для хромакея
+// ═══════════════════════════════════════════════════════════════════════
+QImage Timeline::alphaComposite(const QImage& fg, const QImage& bg) {
+    QImage fgA = fg.convertToFormat(QImage::Format_ARGB32);
+    QImage bgA = bg.convertToFormat(QImage::Format_ARGB32);
+    QImage result(qMin(fgA.width(),  bgA.width()),
+                  qMin(fgA.height(), bgA.height()),
+                  QImage::Format_RGB888);
+
+    for (int y = 0; y < result.height(); ++y) {
+        const QRgb* fgLine = reinterpret_cast<const QRgb*>(fgA.constScanLine(y));
+        const QRgb* bgLine = reinterpret_cast<const QRgb*>(bgA.constScanLine(y));
+        uchar*      dstLine = result.scanLine(y);
+        for (int x = 0; x < result.width(); ++x) {
+            float a  = qAlpha(fgLine[x]) / 255.0f;
+            float ia = 1.0f - a;
+            dstLine[x*3]   = (uchar)(qRed(fgLine[x])   * a + qRed(bgLine[x])   * ia);
+            dstLine[x*3+1] = (uchar)(qGreen(fgLine[x]) * a + qGreen(bgLine[x]) * ia);
+            dstLine[x*3+2] = (uchar)(qBlue(fgLine[x])  * a + qBlue(bgLine[x])  * ia);
+        }
+    }
+    return result;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  getCompositeFrame — декодируем оба трека + применяем эффекты
+// ═══════════════════════════════════════════════════════════════════════
+QImage Timeline::getCompositeFrame(double time,
+                                   int selectedClipId,
+                                   const QVariantMap& previewEffects)
+{
+    ++m_previewFrameIndex;
+
+    auto getEffectsFor = [&](const TimelineClip* clip) -> QMap<QString, double> {
+        QMap<QString, double> eff = clip->effects;
+
+        // Если это выделенный клип И есть preview-эффекты — переопределяем
+        if (selectedClipId >= 0 && !previewEffects.isEmpty()) {
+            int uid = static_cast<int>(clip->effects.value("_uid", -1));
+            if (uid == selectedClipId) {
+                for (auto it = previewEffects.constBegin();
+                     it != previewEffects.constEnd(); ++it)
+                {
+                    eff[it.key()] = it.value().toDouble();
+                }
+            }
+        }
+        return eff;
+    };
+
+    QImage frame1, frame2;
+    bool playingFast = m_audioEngine && m_audioEngine->isPlaying();
+
+    auto renderClip = [&](QImage& out, int track) {
+        TimelineClip* clip = getClipAt(time, track);
+        if (!clip || clip->isVideoHidden) return;
+        QImage raw = getCurrentFrameAt(time, track);
+        if (raw.isNull()) return;
+        auto eff = getEffectsFor(clip);
+        bool hasEffects = false;
+        for (auto it = eff.constBegin(); it != eff.constEnd(); ++it)
+            if (it.key() != "_uid") { hasEffects = true; break; }
+        if (playingFast && !hasEffects)
+            out = raw.convertToFormat(QImage::Format_RGB888);
+        else
+            out = RenderEngine::applyEffectsToFrame(raw, eff, m_previewFrameIndex);
+    };
+
+    renderClip(frame1, 1);
+    renderClip(frame2, 2);
+
+    // ── Композитинг ───────────────────────────────────────────────────
+    if (!frame1.isNull() && !frame2.isNull()) {
+        // Хромакей на дорожке 1 → ARGB32 → альфа-наложение на дорожку 2
+        if (frame1.format() == QImage::Format_ARGB32)
+            return alphaComposite(frame1, frame2);
+        return frame1.convertToFormat(QImage::Format_RGB888);
+    }
+    if (!frame1.isNull())
+        return frame1.convertToFormat(QImage::Format_RGB888);
+    if (!frame2.isNull())
+        return frame2.convertToFormat(QImage::Format_RGB888);
+
+    // Нет клипов — чёрный кадр
+    if (m_clipMeta.isEmpty()) return {};
+    auto& meta = m_clipMeta.constBegin().value();
+    if (meta.width > 0 && meta.height > 0) {
+        QImage black(meta.width, meta.height, QImage::Format_RGB888);
+        black.fill(Qt::black);
+        return black;
+    }
+    return {};
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  requestFrameForDisplay — основной публичный метод обновления превью
+// ═══════════════════════════════════════════════════════════════════════
+void Timeline::requestFrameForDisplay(double time, int selectedClipId,
+                                      const QVariantMap& previewEffects)
+{
+    if (!m_imageProvider) return;
+
+    QImage frame = getCompositeFrame(time, selectedClipId, previewEffects);
+    if (frame.isNull()) {
+        // Пустой таймлайн — чёрный кадр 1280×720
+        frame = QImage(1280, 720, QImage::Format_RGB888);
+        frame.fill(Qt::black);
+    }
+    m_imageProvider->setFrame(frame);
+    emit frameReadyForDisplay();
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  Управление воспроизведением
+// ═══════════════════════════════════════════════════════════════════════
+void Timeline::startPlayback(double fromTime, double speed) {
+    qDeleteAll(m_audioDecoders);
+    m_audioDecoders.clear();
+
+    for (auto* thread : m_decoderThreads)
+        thread->seekTo(fromTime);
+
+    // Пересоздаём engine каждый раз — гарантирует правильный connect и сброс состояния
+    if (m_audioEngine) {
+        m_audioEngine->stopPlayback();
+        delete m_audioEngine;
+        m_audioEngine = nullptr;
+    }
+    m_audioEngine = new AudioPlaybackEngine(this, this);
+    m_lastVideoTime = -1.0;
+
+    connect(m_audioEngine, &AudioPlaybackEngine::timeUpdated,
+            this, [this](double t) {
+                m_currentTime = t;
+                emit currentTimeChanged();
+                emit playbackTimeUpdated(t);
+                for (auto* thread : m_decoderThreads)
+                    thread->updatePlayPosition(t);
+                if (t - m_lastVideoTime >= 1.0 / 25.0) {
+                    m_lastVideoTime = t;
+                    requestFrameForDisplay(t);
+                }
+            });
+
+    connect(m_audioEngine, &AudioPlaybackEngine::playbackEnded,
+            this, &Timeline::playbackEnded);
+
+    m_currentTime = fromTime;
+    double dur = totalDuration() - 20.0;
+    if (dur <= 0) dur = totalDuration();
+    m_audioEngine->startPlayback(fromTime, speed, dur);
+
+    requestFrameForDisplay(fromTime);
+}
+
+void Timeline::stopPlayback() {
+    if (m_audioEngine) m_audioEngine->stopPlayback();
+}
+
+void Timeline::setPlaybackVolume(double volume) {
+    if (m_audioEngine) m_audioEngine->setVolume((float)volume);
+}
+
+void Timeline::setTrackAudioMuted(int track, bool muted) {
+    if (m_audioEngine) m_audioEngine->setTrackMuted(track, muted);
+}
+
+void Timeline::setTrackVideoHidden(int track, bool hidden) {
+    for (auto& clip : m_clips) {
+        if (clip.trackIndex == track)
+            clip.isVideoHidden = hidden;
+    }
+    if (!m_audioEngine || !m_audioEngine->isPlaying())
+        requestFrameForDisplay(m_currentTime);
+}
+
+double Timeline::getPlaybackTime() const {
+    if (m_audioEngine && m_audioEngine->isPlaying())
+        return m_audioEngine->getCurrentAudioTime();
+    return m_currentTime;
 }
