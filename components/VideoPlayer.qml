@@ -58,7 +58,9 @@ Rectangle {
     function seek(time) {
         var t = Math.max(0, time)
         if (isPlaying) {
-            cppTimeline.stopPlayback()
+            cppTimeline.setPlaybackVolume(volume)
+            cppTimeline.setTrackAudioMuted(1, hideAudio1)
+            cppTimeline.setTrackAudioMuted(2, hideAudio2)
             cppTimeline.startPlayback(t, playbackSpeed)
         } else {
             scrubTimer.restart()
@@ -126,22 +128,15 @@ Rectangle {
     }
 
     // ── Play / Pause ──────────────────────────────────────────────────────
-    // Точное время паузы — сохраняем при остановке чтобы старт не откатывался
-    property double _pausedAt: 0.0
-
     onIsPlayingChanged: {
         if (isPlaying) {
-            var resumeTime = _pausedAt > 0 ? _pausedAt : currentTime
-            _pausedAt = 0.0
             cppTimeline.setPlaybackVolume(volume)
             cppTimeline.setTrackAudioMuted(1, hideAudio1)
             cppTimeline.setTrackAudioMuted(2, hideAudio2)
-            cppTimeline.startPlayback(resumeTime, playbackSpeed)
+            cppTimeline.startPlayback(currentTime, playbackSpeed)
         } else {
-            // Сохраняем точную позицию перед остановкой
-            _pausedAt = cppTimeline.getPlaybackTime()
             cppTimeline.stopPlayback()
-            Qt.callLater(requestPreview)
+            Qt.callLater(requestPreview) // показать стоп-кадр
         }
     }
 

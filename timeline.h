@@ -8,6 +8,7 @@
 #include <QImage>
 #include <QVariantList>
 #include <QVariantMap>
+#include <QTimer>
 #include "timelineclip.h"
 #include <QMap>
 
@@ -126,13 +127,19 @@ private:
 
     QList<TimelineClip> m_clips;
     double m_currentTime       = 0.0;
-    double m_lastVideoTime     = -1.0;
+    bool   m_frameProcessing   = false;  // защита от накопления кадров
     int    m_nextUid           = 0;
     int    m_previewFrameIndex = 0;
 
     RenderEngine*        m_renderEngine  = nullptr;
     EffectImageProvider* m_imageProvider = nullptr;
     AudioPlaybackEngine* m_audioEngine   = nullptr;
+
+    // Отдельный таймер для видео — НЕ зависит от аудио-таймера.
+    // Рендер кадра не блокирует аудио-поток.
+    QTimer* m_videoTimer            = nullptr;
+    double  m_lastVideoRenderTime   = -1.0;  // заменяет static в лямбде
+    double  m_playbackSpeed         = 1.0;
 
     void sortClips();
     double getClipSourceDuration(const QString& filepath);
@@ -146,4 +153,5 @@ private:
 };
 
 #endif // TIMELINE_H
+
 

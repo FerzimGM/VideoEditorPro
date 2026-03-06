@@ -1111,15 +1111,26 @@ QtObject {
                         onPlayPauseClicked: playbackManager.isPlaying = !playbackManager.isPlaying
 
                         onStopClicked: {
-                            playbackManager.isPlaying = false
+                            if (playbackManager.isPlaying) {
+                                cppTimeline.stopPlayback()
+                                playbackManager.isPlaying = false
+                            }
                             playbackManager.currentTime = 0
-                            // ***  cppTimeline.currentTime, не setCurrentTime ***
                             cppTimeline.currentTime = 0
                         }
 
                         onSeek: time => {
-                                    playbackManager.currentTime = time
-                                    cppTimeline.currentTime = time
+                                    var t = Math.max(
+                                        0, Math.min(time,
+                                                    playbackManager.duration))
+                                    playbackManager.currentTime = t
+                                    if (playbackManager.isPlaying) {
+                                        // Перезапускаем с новой позиции
+                                        cppTimeline.startPlayback(
+                                            t, playbackManager.playbackSpeed)
+                                    } else {
+                                        cppTimeline.currentTime = t
+                                    }
                                 }
 
                         onSpeedChanged: speed => {

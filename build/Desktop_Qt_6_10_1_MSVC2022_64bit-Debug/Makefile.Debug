@@ -1256,6 +1256,8 @@ debug\moc_timeline.cpp: ..\..\timeline.h \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\QVariantMap \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qvariantmap.h \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\QMap \
+		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\QTimer \
+		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qtimer.h \
 		..\..\timelineclip.h \
 		debug\moc_predefs.h \
 		P:\QTCreator\6.10.1\msvc2022_64\bin\moc.exe
@@ -1738,6 +1740,8 @@ debug\main.obj: ..\..\main.cpp P:\QTCreator\6.10.1\msvc2022_64\include\QtGui\QGu
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\QVariantMap \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qvariantmap.h \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\QMap \
+		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\QTimer \
+		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qtimer.h \
 		..\..\timelineclip.h \
 		..\..\EffectImageProvider.h \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtQuick\QQuickImageProvider \
@@ -2503,6 +2507,8 @@ debug\timeline.obj: ..\..\timeline.cpp ..\..\timeline.h \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\QVariantMap \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qvariantmap.h \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\QMap \
+		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\QTimer \
+		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qtimer.h \
 		..\..\timelineclip.h \
 		..\..\FrameCache.h \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\QHash \
@@ -2563,8 +2569,6 @@ debug\timeline.obj: ..\..\timeline.cpp ..\..\timeline.h \
 		C:\FFmpegForQt\include\libavutil\opt.h \
 		..\..\renderengine.h \
 		..\..\audioplaybackengine.h \
-		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\QTimer \
-		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qtimer.h \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtMultimedia\QAudioSink \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtMultimedia\qaudiosink.h \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qiodevice.h \
@@ -2626,6 +2630,7 @@ debug\timeline.obj: ..\..\timeline.cpp ..\..\timeline.h \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\QDir \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qdir.h \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qdirlisting.h \
+		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\QSet \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\QStandardPaths \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qstandardpaths.h
 

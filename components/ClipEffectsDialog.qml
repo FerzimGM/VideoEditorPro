@@ -629,9 +629,11 @@ Window {
                 }
 
                 ScrollView {
+                    id: effectsScrollView
                     anchors.fill: parent
                     clip: true
                     visible: effectsDialog.totalCount > 0
+                    contentWidth: availableWidth // фикс Qt6: явная ширина контента
                     ScrollBar.vertical: ScrollBar {
                         policy: ScrollBar.AsNeeded
                         contentItem: Rectangle {
@@ -643,7 +645,7 @@ Window {
                     }
 
                     Column {
-                        width: parent.width
+                        width: effectsScrollView.availableWidth
                         topPadding: 8
                         bottomPadding: 8
                         spacing: 0
@@ -689,7 +691,7 @@ Window {
                                 model: effectsDialog.videoEffects
                                 delegate: EffectRow {
                                     effectData: modelData
-                                    eWidth: parent.width
+                                    eWidth: effectsScrollView.availableWidth
                                 }
                             }
                         }
@@ -735,7 +737,7 @@ Window {
                                 model: effectsDialog.audioEffects
                                 delegate: EffectRow {
                                     effectData: modelData
-                                    eWidth: parent.width
+                                    eWidth: effectsScrollView.availableWidth
                                 }
                             }
                         }
@@ -776,7 +778,7 @@ Window {
                                 model: effectsDialog.transitionEffects
                                 delegate: EffectRow {
                                     effectData: modelData
-                                    eWidth: parent.width
+                                    eWidth: effectsScrollView.availableWidth
                                 }
                             }
                         }
