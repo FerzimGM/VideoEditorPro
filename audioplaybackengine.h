@@ -11,6 +11,7 @@
 #include <QMutexLocker>
 #include <QMediaDevices>
 #include <QAudioDevice>
+#include <QDateTime>
 
 class Timeline;
 
@@ -49,7 +50,8 @@ private:
     QTimer*      m_feedTimer;
 
     double  m_startStreamTime  = 0.0;
-    qint64  m_startProcessedUs = 0;
+    double  m_playStartTime    = 0.0;
+    qint64  m_playStartMs      = 0;
     double  m_speed            = 1.0;
     double  m_writeHead        = 0.0;
     bool    m_playing          = false;

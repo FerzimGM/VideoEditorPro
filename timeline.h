@@ -9,6 +9,8 @@
 #include <QVariantList>
 #include <QVariantMap>
 #include <QTimer>
+#include <QHash>
+#include <vector>
 #include "timelineclip.h"
 #include <QMap>
 
@@ -136,7 +138,11 @@ private:
     AudioPlaybackEngine* m_audioEngine   = nullptr;
     QTimer*              m_videoTimer    = nullptr;
     double               m_playbackSpeed = 1.0;
+    bool                 m_stopping      = false;
     bool                 m_forceNextFrame  = false;
+    // Персистентные кольцевые буферы для аудиоэффектов (reverb/echo) в live-режиме
+    QHash<QString, std::vector<float>> m_audioDelayBufs;
+    QHash<QString, int>                m_audioDelayPos;
     qint64               m_lastSyncDecodeMs = 0; // разрешить sync-decode при следующем cache miss
 
     void sortClips();

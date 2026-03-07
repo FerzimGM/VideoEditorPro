@@ -369,6 +369,24 @@ debug\moc_audioplaybackengine.cpp: ..\..\audioplaybackengine.h \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtMultimedia\QMediaDevices \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtMultimedia\qmediadevices.h \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtMultimedia\QAudioDevice \
+		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\QDateTime \
+		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qdatetime.h \
+		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qcalendar.h \
+		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qlocale.h \
+		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qvariant.h \
+		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qdebug.h \
+		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qtextstream.h \
+		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qcontiguouscache.h \
+		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qsharedpointer.h \
+		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qsharedpointer_impl.h \
+		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qmap.h \
+		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qshareddata_impl.h \
+		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qset.h \
+		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qhash.h \
+		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qvarlengtharray.h \
+		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qalloc.h \
+		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\q23utility.h \
+		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\q20utility.h \
 		debug\moc_predefs.h \
 		P:\QTCreator\6.10.1\msvc2022_64\bin\moc.exe
 	P:\QTCreator\6.10.1\msvc2022_64\bin\moc.exe $(DEFINES) --compiler-flavor=msvc --include P:/qtProject/VideoEditorProject/VideoEditorProject/build/Desktop_Qt_6_10_1_MSVC2022_64bit-Debug/debug/moc_predefs.h -IP:/QTCreator/6.10.1/msvc2022_64/mkspecs/win32-msvc -IP:/qtProject/VideoEditorProject/VideoEditorProject -IC:/FFmpegForQt/include -IP:/QTCreator/6.10.1/msvc2022_64/include -IP:/QTCreator/6.10.1/msvc2022_64/include/QtQuickControls2 -IP:/QTCreator/6.10.1/msvc2022_64/include/QtQuick -IP:/QTCreator/6.10.1/msvc2022_64/include/QtOpenGL -IP:/QTCreator/6.10.1/msvc2022_64/include/QtMultimedia -IP:/QTCreator/6.10.1/msvc2022_64/include/QtWidgets -IP:/QTCreator/6.10.1/msvc2022_64/include/QtGui -IP:/QTCreator/6.10.1/msvc2022_64/include/QtQml -IP:/QTCreator/6.10.1/msvc2022_64/include/QtQmlIntegration -IP:/QTCreator/6.10.1/msvc2022_64/include/QtNetwork -IP:/QTCreator/6.10.1/msvc2022_64/include/QtCore -I. -I"C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC\14.38.33130\include" -I"C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC\14.38.33130\ATLMFC\include" -I"C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\VS\include" -I"C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt" -I"C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um" -I"C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared" -I"C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\winrt" -I"C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\cppwinrt" -I"C:\Program Files (x86)\Windows Kits\NETFXSDK\4.8\include\um" ..\..\audioplaybackengine.h -o debug\moc_audioplaybackengine.cpp
@@ -1260,6 +1278,7 @@ debug\moc_timeline.cpp: ..\..\timeline.h \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\QMap \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\QTimer \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qtimer.h \
+		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\QHash \
 		..\..\timelineclip.h \
 		debug\moc_predefs.h \
 		P:\QTCreator\6.10.1\msvc2022_64\bin\moc.exe
@@ -1422,14 +1441,7 @@ debug\audioplaybackengine.obj: ..\..\audioplaybackengine.cpp ..\..\AudioPlayback
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtMultimedia\QMediaDevices \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtMultimedia\qmediadevices.h \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtMultimedia\QAudioDevice \
-		..\..\timeline.h \
-		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\QList \
-		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\QString \
-		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\QJsonObject \
-		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qjsonobject.h \
-		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qjsonvalue.h \
-		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qcborvalue.h \
-		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qcborcommon.h \
+		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\QDateTime \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qdatetime.h \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qcalendar.h \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qlocale.h \
@@ -1447,6 +1459,14 @@ debug\audioplaybackengine.obj: ..\..\audioplaybackengine.cpp ..\..\AudioPlayback
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qalloc.h \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\q23utility.h \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\q20utility.h \
+		..\..\timeline.h \
+		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\QList \
+		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\QString \
+		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\QJsonObject \
+		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qjsonobject.h \
+		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qjsonvalue.h \
+		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qcborvalue.h \
+		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qcborcommon.h \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qregularexpression.h \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qurl.h \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\quuid.h \
@@ -1477,6 +1497,7 @@ debug\audioplaybackengine.obj: ..\..\audioplaybackengine.cpp ..\..\AudioPlayback
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\QVariantMap \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qvariantmap.h \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\QMap \
+		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\QHash \
 		..\..\timelineclip.h \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\QDebug
 
@@ -1744,6 +1765,7 @@ debug\main.obj: ..\..\main.cpp P:\QTCreator\6.10.1\msvc2022_64\include\QtGui\QGu
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\QMap \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\QTimer \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qtimer.h \
+		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\QHash \
 		..\..\timelineclip.h \
 		..\..\EffectImageProvider.h \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtQuick\QQuickImageProvider \
@@ -2511,6 +2533,7 @@ debug\timeline.obj: ..\..\timeline.cpp ..\..\timeline.h \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\QMap \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\QTimer \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qtimer.h \
+		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\QHash \
 		..\..\timelineclip.h \
 		..\..\FrameCache.h \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\QMutex \
@@ -2569,7 +2592,6 @@ debug\timeline.obj: ..\..\timeline.cpp ..\..\timeline.h \
 		C:\FFmpegForQt\include\libavutil\pixdesc.h \
 		C:\FFmpegForQt\include\libavutil\opt.h \
 		..\..\renderengine.h \
-		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\QHash \
 		..\..\audioplaybackengine.h \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtMultimedia\QAudioSink \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtMultimedia\qaudiosink.h \
@@ -2586,6 +2608,7 @@ debug\timeline.obj: ..\..\timeline.cpp ..\..\timeline.h \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtMultimedia\QMediaDevices \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtMultimedia\qmediadevices.h \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtMultimedia\QAudioDevice \
+		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\QDateTime \
 		..\..\EffectImageProvider.h \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtQuick\QQuickImageProvider \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtQuick\qquickimageprovider.h \
@@ -2633,7 +2656,6 @@ debug\timeline.obj: ..\..\timeline.cpp ..\..\timeline.h \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qdir.h \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qdirlisting.h \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\QSet \
-		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\QDateTime \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\QStandardPaths \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qstandardpaths.h
 

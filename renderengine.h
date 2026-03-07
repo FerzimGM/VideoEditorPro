@@ -44,6 +44,7 @@ public:
     void setOutputResolution(int w, int h)            { m_outputWidth = w; m_outputHeight = h; }
     void setFps(double fps)                           { m_fps = fps; }
     void setBitrate(int bitrate)                      { m_bitrate = bitrate; }
+    void setFormat(const QString& fmt)                { m_format = fmt; }
 
 public slots:
     void process();
@@ -61,6 +62,7 @@ private:
     int m_outputHeight;
     double m_fps;
     int m_bitrate;
+    QString m_format;     // "MP4","MKV","WebM" — передаётся из RenderEngine
     bool m_cancelled;
 
     QMap<QString, MediaDecoder*> m_videoDecoders;
@@ -162,3 +164,4 @@ private:
 };
 
 #endif // RENDERENGINE_H
+

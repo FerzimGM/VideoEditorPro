@@ -39,8 +39,21 @@ bool MediaEncoder::createOutputFile(const QString& filepath, int width, int heig
     m_width  = width;
     m_height = height;
 
-    // 1. Выделить output context (формат определяется по расширению)
-    avformat_alloc_output_context2(&m_formatContext, nullptr, nullptr,
+    m_filepath  = filepath;
+    m_usedFormat = m_format; // сохраняем выбранный формат для initializeVideo/Audio
+
+    // Определяем format-hint для FFmpeg контейнера.
+    // По умолчанию FFmpeg угадывает по расширению файла, но нам нужен явный контроль.
+    const char* fmtHint = nullptr;
+    QString fmtLower = m_format.toLower();
+    if      (fmtLower == "mp4")  fmtHint = "mp4";
+    else if (fmtLower == "mkv")  fmtHint = "matroska";
+    else if (fmtLower == "avi")  fmtHint = "avi";
+    else if (fmtLower == "mov")  fmtHint = "mov";
+    else if (fmtLower == "webm") fmtHint = "webm";
+    // else: nullptr → FFmpeg угадывает по расширению
+
+    avformat_alloc_output_context2(&m_formatContext, nullptr, fmtHint,
                                    filepath.toUtf8().constData());
     if (!m_formatContext) {
         qWarning() << "❌ Не могу создать output context";
@@ -51,8 +64,7 @@ bool MediaEncoder::createOutputFile(const QString& filepath, int width, int heig
     // 2. Видео поток
     if (!initializeVideo()) {
         qWarning() << "❌ Не могу инициализировать видео";
-        emit error("Не могу инициализировать видео");
-        finish();
+        avformat_free_context(m_formatContext); m_formatContext = nullptr;
         return false;
     }
 
@@ -70,7 +82,7 @@ bool MediaEncoder::createOutputFile(const QString& filepath, int width, int heig
                       filepath.toUtf8().constData(), AVIO_FLAG_WRITE) < 0) {
             qWarning() << "❌ Не могу открыть файл:" << filepath;
             emit error("Не могу открыть файл");
-            finish();
+            avformat_free_context(m_formatContext); m_formatContext = nullptr;
             return false;
         }
     }
@@ -86,10 +98,12 @@ bool MediaEncoder::createOutputFile(const QString& filepath, int width, int heig
         qWarning() << "❌ Не могу записать header";
         emit error("Не могу записать header");
         av_dict_free(&opts);
-        finish();
+        if (!(m_formatContext->oformat->flags & AVFMT_NOFILE)) avio_closep(&m_formatContext->pb);
+        avformat_free_context(m_formatContext); m_formatContext = nullptr;
         return false;
     }
     av_dict_free(&opts);
+    m_headerWritten = true;
 
     // 6. Видео frame буфер
     m_videoFrame = av_frame_alloc();
@@ -131,10 +145,50 @@ bool MediaEncoder::createOutputFile(const QString& filepath, int width, int heig
 
 // ===== ИНИЦИАЛИЗАЦИЯ ВИДЕО =====
 bool MediaEncoder::initializeVideo() {
-    // H.264 кодек
-    m_videoCodec = avcodec_find_encoder(AV_CODEC_ID_H264);
+    bool isWebM = !m_format.isEmpty()
+    ? (m_format.compare("WebM", Qt::CaseInsensitive) == 0)
+    : m_filepath.endsWith(".webm", Qt::CaseInsensitive);
+
+    AVCodecID videoCodecId = AV_CODEC_ID_H264;
+
+    if (isWebM) {
+        // Пробуем VP9 → VP8. На Windows Qt-FFmpeg часто нет этих энкодеров вообще.
+        bool found = false;
+        for (AVCodecID cid : {AV_CODEC_ID_VP9, AV_CODEC_ID_VP8}) {
+            const AVCodec* c = avcodec_find_encoder(cid);
+            if (!c) { qDebug() << "WebM: no encoder" << cid; continue; }
+            AVCodecContext* t = avcodec_alloc_context3(c); if (!t) continue;
+            t->width = m_width; t->height = m_height;
+            t->time_base = {1,(int)m_fps}; t->pix_fmt = AV_PIX_FMT_YUV420P;
+            t->bit_rate = m_bitrate;
+            AVDictionary* td = nullptr;
+            if (cid == AV_CODEC_ID_VP9){av_dict_set(&td,"crf","33",0);av_dict_set(&td,"b","0",0);}
+            int r = avcodec_open2(t, c, &td);
+            av_dict_free(&td); avcodec_free_context(&t);
+            if (r >= 0) { videoCodecId = cid; found = true;
+                qDebug() << "WebM: using" << c->name; break; }
+            qDebug() << "WebM:" << c->name << "open2 failed" << r;
+        }
+        if (!found) {
+            // VP9/VP8 недоступны в этой сборке FFmpeg.
+            // Автоматически переключаемся на MKV+H264 — универсальный fallback.
+            // Пересоздаём AVFormatContext с форматом matroska вместо webm.
+            qWarning() << "WebM VP9/VP8 недоступны. Используем MKV+H264 fallback.";
+            emit error("WebM кодеки недоступны. Файл будет сохранён в формате MKV (H.264).");
+            // Пересоздаём контекст с matroska форматом
+            avformat_free_context(m_formatContext);
+            m_formatContext = nullptr;
+            avformat_alloc_output_context2(&m_formatContext, nullptr, "matroska",
+                                           m_filepath.toUtf8().constData());
+            if (!m_formatContext) { emit error("Не могу создать MKV контекст"); return false; }
+            m_usedFormat = "MKV"; // переключились на MKV
+            videoCodecId = AV_CODEC_ID_H264;
+        }
+    }
+
+    m_videoCodec = avcodec_find_encoder(videoCodecId);
     if (!m_videoCodec) {
-        qWarning() << "❌ H.264 кодек не найден";
+        qWarning() << "❌ Видео кодек не найден:" << videoCodecId;
         return false;
     }
 
@@ -145,7 +199,7 @@ bool MediaEncoder::initializeVideo() {
     m_videoCodecContext = avcodec_alloc_context3(m_videoCodec);
     if (!m_videoCodecContext) return false;
 
-    m_videoCodecContext->codec_id  = AV_CODEC_ID_H264;
+    m_videoCodecContext->codec_id  = videoCodecId;
     m_videoCodecContext->bit_rate  = m_bitrate;
     m_videoCodecContext->width     = m_width;
     m_videoCodecContext->height    = m_height;
@@ -159,10 +213,14 @@ bool MediaEncoder::initializeVideo() {
         m_videoCodecContext->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
     }
 
-    // Настройки x264: preset medium для баланса скорость/качество
     AVDictionary* opts = nullptr;
-    av_dict_set(&opts, "preset", "medium", 0);
-    av_dict_set(&opts, "tune", "film", 0);
+    if (!isWebM) {
+        av_dict_set(&opts, "preset", "medium", 0);
+        av_dict_set(&opts, "tune",   "film",   0);
+    } else if (videoCodecId == AV_CODEC_ID_VP9) {
+        av_dict_set(&opts, "crf", "33", 0);
+        av_dict_set(&opts, "b",   "0",  0);
+    }
 
     int ret = avcodec_open2(m_videoCodecContext, m_videoCodec, &opts);
     av_dict_free(&opts);
@@ -182,10 +240,18 @@ bool MediaEncoder::initializeVideo() {
 
 // ===== ИНИЦИАЛИЗАЦИЯ АУДИО =====
 bool MediaEncoder::initializeAudio() {
-    // AAC кодек
-    m_audioCodec = avcodec_find_encoder(AV_CODEC_ID_AAC);
+    // WebM требует Opus или Vorbis; MP4/MKV → AAC
+    // m_usedFormat может быть изменён в initializeVideo (WebM→MKV fallback)
+    bool isWebM = (m_usedFormat.compare("WebM", Qt::CaseInsensitive) == 0);
+    AVCodecID audioCodecId = isWebM ? AV_CODEC_ID_OPUS : AV_CODEC_ID_AAC;
+
+    m_audioCodec = avcodec_find_encoder(audioCodecId);
+    if (!m_audioCodec && isWebM) {
+        m_audioCodec = avcodec_find_encoder(AV_CODEC_ID_VORBIS);
+        if (m_audioCodec) audioCodecId = AV_CODEC_ID_VORBIS;
+    }
     if (!m_audioCodec) {
-        qWarning() << "❌ AAC кодек не найден";
+        qWarning() << "❌ Аудио кодек не найден";
         return false;
     }
 
@@ -196,7 +262,7 @@ bool MediaEncoder::initializeAudio() {
     m_audioCodecContext = avcodec_alloc_context3(m_audioCodec);
     if (!m_audioCodecContext) return false;
 
-    m_audioCodecContext->codec_id    = AV_CODEC_ID_AAC;
+    m_audioCodecContext->codec_id    = audioCodecId;
     m_audioCodecContext->sample_fmt  = AV_SAMPLE_FMT_FLTP;  // AAC требует float planar
     m_audioCodecContext->sample_rate = AUDIO_SAMPLE_RATE;
     m_audioCodecContext->bit_rate    = 192000;  // 192 kbps — хорошее качество
@@ -399,6 +465,16 @@ bool MediaEncoder::finish() {
     if (!m_formatContext) return true;
 
     qDebug() << "🔚 MediaEncoder::finish()";
+
+    if (!m_headerWritten) {
+        freeResources();
+        if (m_swsContext)        { sws_freeContext(m_swsContext); m_swsContext = nullptr; }
+        if (m_swrContext)        { swr_free(&m_swrContext); m_swrContext = nullptr; }
+        if (m_videoCodecContext) { avcodec_free_context(&m_videoCodecContext); }
+        if (m_audioCodecContext) { avcodec_free_context(&m_audioCodecContext); }
+        avformat_free_context(m_formatContext); m_formatContext = nullptr;
+        return false;
+    }
 
     // Flush оставшиеся аудио сэмплы (дополняем тишиной до frame_size)
     if (m_audioEnabled && m_audioCodecContext && !m_audioBuffer.isEmpty()) {

@@ -16,6 +16,7 @@
 #include <QDir>
 #include <QSet>
 #include <QDateTime>
+#include <cmath>
 #include <QTimer>
 #include <QStandardPaths>
 
@@ -276,6 +277,13 @@ bool Timeline::moveClip(int uidOrIndex, int newTrackIndex, double newStartTime) 
 
     emit clipsChanged();
     emit clipModified(index);
+
+    QMetaObject::invokeMethod(this, [this]() {
+        if (m_audioEngine && m_audioEngine->isPlaying()) {
+            double t = m_audioEngine->getCurrentAudioTime();
+            stopPlayback(); startPlayback(t, m_playbackSpeed);
+        } else { requestFrameForDisplay(m_currentTime); }
+    }, Qt::QueuedConnection);
 
     qDebug() << "Clip moved";
     return true;
@@ -1073,10 +1081,106 @@ QVector<float> Timeline::getMixedAudio(double time, double duration,
         QVector<float> audio = dec->decodeAudioRange(srcTime, duration);
         if (audio.isEmpty()) return;
 
-        double vol = clip->effects.value("volume", 1.0);
+        const QMap<QString,double>& eff = clip->effects;
+        const QString fp = clip->filepath;
+        const int SR = 44100, CH = 2;
+
+        // 1. Громкость
+        float vol = (float)eff.value("volume", 1.0);
+        if (qAbs(vol - 1.0f) > 0.01f)
+            for (float& s : audio) s = qBound(-1.0f, s * vol, 1.0f);
+
+        // 2. Моно
+        if (eff.value("mono", 0.0) > 0.5)
+            for (int i = 0; i + 1 < audio.size(); i += 2) {
+                float m = (audio[i]+audio[i+1])*0.5f;
+                audio[i] = audio[i+1] = m;
+            }
+
+        // 3. Расширение стерео
+        if (eff.value("stereo_widen", 0.0) > 0.01) {
+            float w = (float)eff.value("stereo_widen", 0.0);
+            float sg = 1.0f + w*2.5f;
+            for (int i = 0; i+1 < audio.size(); i += 2) {
+                float mid  = (audio[i]+audio[i+1])*0.5f;
+                float side = (audio[i]-audio[i+1])*0.5f;
+                audio[i]   = qBound(-1.0f, mid + side*sg, 1.0f);
+                audio[i+1] = qBound(-1.0f, mid - side*sg, 1.0f);
+            }
+        }
+
+        // 4. Реверберация
+        if (eff.value("reverb", 0.0) > 0.01) {
+            double room = eff.value("reverb", 0.0);
+            int D = qMax(CH*2, SR/1000*(int)(25+room*75)*CH);
+            float g=(float)(room*0.65), wet=(float)(room*0.45), dry=1.0f-wet*0.6f;
+            auto& buf = m_audioDelayBufs[fp+"_reverb"];
+            auto& wp  = m_audioDelayPos[fp+"_reverb"];
+            if ((int)buf.size()!=D){buf.assign(D,0.0f);wp=0;}
+            for (int i=0;i<audio.size();++i){
+                float del=buf[wp], rev=audio[i]+del*g;
+                buf[wp]=rev; audio[i]=qBound(-1.0f,audio[i]*dry+rev*wet,1.0f);
+                wp=(wp+1)%D;
+            }
+        }
+
+        // 5. Эхо
+        if (eff.value("echo", 0.0) > 0.01) {
+            double str = eff.value("echo", 0.0);
+            int D = qMax(CH*2, SR/1000*(int)(150+str*350)*CH);
+            float fb=(float)(str*0.55);
+            auto& buf = m_audioDelayBufs[fp+"_echo"];
+            auto& wp  = m_audioDelayPos[fp+"_echo"];
+            if ((int)buf.size()!=D){buf.assign(D,0.0f);wp=0;}
+            for (int i=0;i<audio.size();++i){
+                float del=buf[wp], out=audio[i]+del*fb;
+                buf[wp]=qBound(-1.0f,out,1.0f);
+                audio[i]=qBound(-1.0f,out,1.0f);
+                wp=(wp+1)%D;
+            }
+        }
+
+        // 6. Питч — ресэмплинг
+        if (qAbs(eff.value("pitch",0.0)) > 0.1) {
+            double ratio = std::pow(2.0, eff.value("pitch",0.0)/12.0);
+            QVector<float> shifted(audio.size(),0.0f);
+            for (int i=0;i<audio.size();++i){
+                double si=i*ratio; int s0=(int)si;
+                int s1=qMin(s0+1,(int)audio.size()-1);
+                if(s0>=(int)audio.size())break;
+                float t=(float)(si-s0);
+                shifted[i]=audio[s0]*(1.0f-t)+audio[s1]*t;
+            }
+            audio=shifted;
+        }
+
+        // 7. Нормализация
+        if (eff.value("normalize",0.0) > 0.01) {
+            float target=(float)eff.value("normalize",0.0), peak=0.0f;
+            for (float s:audio) peak=qMax(peak,qAbs(s));
+            if (peak>1e-5f){float g2=qMin(target/peak,6.0f);for(float&s:audio)s=qBound(-1.0f,s*g2,1.0f);}
+        }
+
+        // 8. Fade in/out
+        if (eff.value("fade_in",0.0)>0.01){
+            double fe=clip->duration*eff.value("fade_in",0.0), ps=time-clip->startTime;
+            if(ps<fe)for(int i=0;i<audio.size();++i){
+                    double t=ps+(double)i/(SR*CH);
+                    audio[i]=qBound(-1.0f,audio[i]*(float)qBound(0.0,t/fe,1.0),1.0f);
+                }
+        }
+        if (eff.value("fade_out",0.0)>0.01){
+            double fs=clip->duration*(1.0-eff.value("fade_out",0.0)), ps=time-clip->startTime;
+            if(ps+duration>fs)for(int i=0;i<audio.size();++i){
+                    double t=ps+(double)i/(SR*CH), fl=clip->duration-fs;
+                    float g3=(fl>0)?(float)qBound(0.0,1.0-(t-fs)/fl,1.0):0.0f;
+                    audio[i]=qBound(-1.0f,audio[i]*g3,1.0f);
+                }
+        }
+
         int len = qMin(mixed.size(), audio.size());
         for (int i = 0; i < len; ++i)
-            mixed[i] += audio[i] * (float)vol;
+            mixed[i] += audio[i];
     };
 
     mixTrack(1, t1muted);
@@ -1193,9 +1297,32 @@ QImage Timeline::getCompositeFrame(double time,
     TimelineClip* clip2 = getClipAt(time, 2);
     if (clip2 && !clip2->isVideoHidden) renderClip(frame2, clip2);
 
+    // ── Переходы применяются к каждому кадру ДО композитинга ──────────
+    // Раньше переходы применялись к result после композитинга →
+    // при двух клипах переход track1 срабатывал дважды подряд.
+    auto applyClipTransition = [&](QImage& fr, TimelineClip* clip) {
+        if (!clip || fr.isNull()) return;
+        double posInClip  = time - clip->startTime;
+        double posFromEnd = clip->endTime() - time;
+        double transDur   = clip->effects.value("transition_duration", 0.5);
+        int typeIn  = (int)clip->effects.value("transition_in",  0.0);
+        int typeOut = (int)clip->effects.value("transition_out", 0.0);
+        if (typeIn > 0 && posInClip >= 0 && posInClip < transDur) {
+            float prog = (float)(posInClip / transDur);
+            QImage black(fr.size(), QImage::Format_RGB888); black.fill(Qt::black);
+            fr = RenderEngine::applyTransition(black, fr, typeIn, prog);
+        }
+        if (typeOut > 0 && posFromEnd >= 0 && posFromEnd < transDur) {
+            float prog = 1.0f - (float)(posFromEnd / transDur);
+            QImage black(fr.size(), QImage::Format_RGB888); black.fill(Qt::black);
+            fr = RenderEngine::applyTransition(fr, black, typeOut, prog);
+        }
+    };
+    applyClipTransition(frame1, clip1);
+    applyClipTransition(frame2, clip2);
+
     // ── Композитинг ───────────────────────────────────────────────────
     if (!frame1.isNull() && !frame2.isNull()) {
-        // Хромакей на дорожке 1 → ARGB32 → альфа-наложение на дорожку 2
         if (frame1.format() == QImage::Format_ARGB32)
             return alphaComposite(frame1, frame2);
         return frame1.convertToFormat(QImage::Format_RGB888);
@@ -1365,19 +1492,18 @@ void Timeline::startPlayback(double fromTime, double speed) {
 }
 
 void Timeline::stopPlayback() {
+    if (m_stopping) return;
+    m_stopping = true;
+
     if (m_videoTimer) m_videoTimer->stop();
 
-    // Фиксируем точное время ДО остановки sink.
-    // НЕ эмитируем currentTimeChanged здесь — это триггерит QML onCurrentTimeChanged
-    // → может вызвать startPlayback снова → бесконечная петля restart.
-    if (m_audioEngine && m_audioEngine->isPlaying()) {
+    if (m_audioEngine && m_audioEngine->isPlaying())
         m_currentTime = m_audioEngine->getCurrentAudioTime();
-    }
 
     if (m_audioEngine) m_audioEngine->stopPlayback();
 
-    // Эмитируем и показываем кадр ПОСЛЕ остановки, через очередь
     QMetaObject::invokeMethod(this, [this]() {
+        m_stopping = false;
         emit currentTimeChanged();
         requestFrameForDisplay(m_currentTime);
     }, Qt::QueuedConnection);

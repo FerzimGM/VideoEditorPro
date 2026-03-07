@@ -4,6 +4,7 @@
 #include <QMediaDevices>
 #include <QAudioDevice>
 #include <cstring>
+#include <QDateTime>
 
 AudioPlaybackEngine::AudioPlaybackEngine(Timeline* timeline, QObject* parent)
     : QObject(parent), m_timeline(timeline)
@@ -69,12 +70,13 @@ void AudioPlaybackEngine::startPlayback(double fromTime, double speed, double to
     m_startStreamTime  = fromTime;
     m_writeHead        = fromTime;
     m_speed            = speed;
-    m_startProcessedUs = m_sink ? m_sink->processedUSecs() : 0;
     m_playing          = true;
     m_silentChunks     = 0;
     m_totalDuration    = totalDuration;
+    m_playStartMs   = QDateTime::currentMSecsSinceEpoch();
+    m_playStartTime = fromTime;
 
-    onFeedTimer(); // первый чанк сразу
+    onFeedTimer();
     m_feedTimer->start();
 
     qDebug() << "AudioPlaybackEngine: startPlayback from" << fromTime
@@ -101,9 +103,9 @@ void AudioPlaybackEngine::setTrackMuted(int track, bool muted) {
 }
 
 double AudioPlaybackEngine::getCurrentAudioTime() const {
-    if (!m_sink || !m_playing) return m_startStreamTime;
-    qint64 playedUs = m_sink->processedUSecs() - m_startProcessedUs;
-    return m_startStreamTime + (playedUs / 1e6) * m_speed;
+    if (!m_playing) return m_startStreamTime;
+    qint64 ms = QDateTime::currentMSecsSinceEpoch() - m_playStartMs;
+    return m_playStartTime + (ms / 1000.0) * m_speed;
 }
 
 void AudioPlaybackEngine::onFeedTimer() {
@@ -176,4 +178,6 @@ void AudioPlaybackEngine::onFeedTimer() {
         });
     }
 }
+
+
 

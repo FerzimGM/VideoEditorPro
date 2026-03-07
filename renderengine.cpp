@@ -55,6 +55,7 @@ void RenderWorker::process() {
     encoder.setFrameRate(m_fps);
     encoder.setBitrate(m_bitrate);
     encoder.setAudioEnabled(true);
+    encoder.setFormat(m_format); // явный формат — не зависит от расширения файла
 
     if (!encoder.createOutputFile(m_outputPath, m_outputWidth, m_outputHeight)) {
         emit errorOccurred("Не могу создать выходной файл");
@@ -275,13 +276,34 @@ QImage RenderWorker::compositeVideoAt(double time) {
         return QImage();
     }
 
-    // ── Переходы ──────────────────────────────────────────────────────────
-    if (c1) {
-        result = applyTransition(result, c1, true);
-        result = applyTransition(result, c1, false);
-    } else if (c2) {
-        result = applyTransition(result, c2, true);
-        result = applyTransition(result, c2, false);
+    // ── Переходы применяются к каждому кадру ДО финального результата ─────
+    // Раньше: переход c1 применялся к уже скомпозитному result →
+    // если c2 тоже есть, переход c1 отрабатывал дважды (frame1 + result).
+    // Теперь: переходы применяем к frame1/frame2 отдельно, потом пересобираем.
+    bool hadTrans = false;
+    if (c1 && !frame1.isNull()) {
+        QImage f1t = frame1;
+        f1t = applyTransition(f1t, c1, true);
+        f1t = applyTransition(f1t, c1, false);
+        if (f1t.cacheKey() != frame1.cacheKey()) { frame1 = f1t; hadTrans = true; }
+    }
+    if (c2 && !frame2.isNull()) {
+        QImage f2t = frame2;
+        f2t = applyTransition(f2t, c2, true);
+        f2t = applyTransition(f2t, c2, false);
+        if (f2t.cacheKey() != frame2.cacheKey()) { frame2 = f2t; hadTrans = true; }
+    }
+    if (hadTrans) {
+        // Пересобираем result с обновлёнными кадрами
+        if (!frame1.isNull() && !frame2.isNull()) {
+            result = (frame1.format()==QImage::Format_ARGB32)
+                     ? alphaBlend(frame1, frame2)
+                     : frame1.convertToFormat(QImage::Format_RGB888);
+        } else if (!frame1.isNull()) {
+            result = frame1.convertToFormat(QImage::Format_RGB888);
+        } else if (!frame2.isNull()) {
+            result = frame2.convertToFormat(QImage::Format_RGB888);
+        }
     }
 
     return result;
@@ -1037,6 +1059,7 @@ bool RenderEngine::startRender() {
     m_worker->setOutputResolution(m_outputWidth, m_outputHeight);
     m_worker->setFps(m_fps);
     m_worker->setBitrate(m_bitrate);
+    m_worker->setFormat(m_format); // передаём явный формат ("MP4","WebM" и т.д.)
 
     connect(m_thread, &QThread::started,              m_worker, &RenderWorker::process);
     connect(m_worker, &RenderWorker::progressChanged, this,     &RenderEngine::progressChanged);
