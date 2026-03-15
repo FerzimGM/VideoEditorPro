@@ -3,7 +3,7 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import "../theme.js" as Theme
 
-// ===== ДИАЛОГ ЭФФЕКТОВ КЛИПА =====
+//  ДИАЛОГ ЭФФЕКТОВ КЛИПА
 // Секции: Видео / Аудио / Переходы. Каждый эффект — строка.
 Window {
     id: effectsDialog
@@ -25,7 +25,7 @@ Window {
     property var transitionEffects: []
     property int totalCount: videoEffects.length + audioEffects.length + transitionEffects.length
 
-    // ── Мета-данные всех эффектов ──
+    //  Мета-данные всех эффектов
     readonly property var effectMeta: ({
                                            "brightness": {
                                                "icon": "☀️",
@@ -633,7 +633,7 @@ Window {
                     anchors.fill: parent
                     clip: true
                     visible: effectsDialog.totalCount > 0
-                    contentWidth: availableWidth // фикс Qt6: явная ширина контента
+                    contentWidth: availableWidth // явная ширина контента
                     ScrollBar.vertical: ScrollBar {
                         policy: ScrollBar.AsNeeded
                         contentItem: Rectangle {

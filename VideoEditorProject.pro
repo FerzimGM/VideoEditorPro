@@ -25,6 +25,8 @@ LIBS += C:/FFmpegForQt/lib/swscale.lib
 LIBS += C:/FFmpegForQt/lib/swresample.lib
 LIBS += -lUser32
 
+RC_ICONS = VideoEditorPro.ico
+
 FFMPEG_BIN = C:/FFmpegForQt/bin
 win32 {
     DESTDIR = $$OUT_PWD/debug

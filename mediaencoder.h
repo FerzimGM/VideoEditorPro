@@ -78,25 +78,25 @@ private:
     AVFormatContext* m_formatContext;
 
     // Видео
-    AVCodecContext*  m_videoCodecContext;
-    AVStream*       m_videoStream;
-    const AVCodec*  m_videoCodec;
-    SwsContext*     m_swsContext;   // RGB → YUV
+    AVCodecContext* m_videoCodecContext;
+    AVStream* m_videoStream;
+    const AVCodec* m_videoCodec;
+    SwsContext* m_swsContext;   // RGB → YUV
 
     // Аудио
-    AVCodecContext*  m_audioCodecContext;
-    AVStream*       m_audioStream;
-    const AVCodec*  m_audioCodec;
-    SwrContext*     m_swrContext;   // float interleaved → codec format
+    AVCodecContext* m_audioCodecContext;
+    AVStream* m_audioStream;
+    const AVCodec* m_audioCodec;
+    SwrContext* m_swrContext;   // float interleaved → codec format
 
     // Параметры
     QString m_filepath;
-    int    m_width;
-    int    m_height;
+    int m_width;
+    int m_height;
     double m_fps;
-    int    m_bitrate;
-    bool   m_audioEnabled;
-    bool   m_headerWritten = false;
+    int m_bitrate;
+    bool m_audioEnabled;
+    bool m_headerWritten = false;
     QString m_usedFormat; // может отличаться от m_format после fallback
     QString m_format;   // "MP4", "AVI", "MOV", "MKV", "WebM"
 

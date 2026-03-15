@@ -15,7 +15,7 @@ Rectangle {
 
     property int selectedClipId: -1
 
-    // ── Видео эффекты ──
+    // Видео эффекты
     property real effectBrightness: 0.0
     property real effectContrast: 1.0
     property real effectSaturation: 1.0
@@ -32,12 +32,12 @@ Rectangle {
     property real effectTintHue: 0.0
     property real effectTintStr: 0.0
     property real effectGrain: 0.0
-    property real effectAutoEnhance: 0.5  // сила авто-улучшения 0..1
+    property real effectAutoEnhance: 0.5 // сила авто-улучшения 0..1
     property bool effectChromaKey: false
     property real effectChromaThreshold: 0.35
     property real effectChromaSmoothness: 0.1
 
-    // ── Аудио эффекты ──
+    // Аудио эффекты
     property real effectVolume: 1.0
     property real effectReverb: 0.0
     property real effectEcho: 0.0
@@ -48,17 +48,16 @@ Rectangle {
     property real effectFadeIn: 0.0
     property real effectFadeOut: 0.0
 
-    // ── Переходы ──
+    // Переходы
     property string transitionIn: "none"
     property string transitionOut: "none"
     property real transitionDur: 0.5
 
-    // ── Навигация ──
+    // Навигация
     property int mainTab: 0 // 0=Видео 1=Аудио 2=Переходы
     property int videoSubTab: 0 // 0=Цвет 1=Стилизация 2=Фокус
     property int audioSubTab: 0 // 0=Динамика 1=Пространство 2=Тон
 
-    // ─────────────────────────────────────────
     function loadEffectsFromClip(clipId) {
         if (clipId < 0 || !cppTimeline) {
             effectBrightness = 0.0
@@ -234,7 +233,7 @@ Rectangle {
         anchors.fill: parent
         spacing: 0
 
-        // ══════════ РЕЖИМ ЭФФЕКТОВ ══════════
+        // РЕЖИМ ЭФФЕКТОВ
         Item {
             Layout.fillWidth: true
             Layout.fillHeight: true
@@ -245,7 +244,7 @@ Rectangle {
                 anchors.margins: Theme.spacing
                 spacing: 6
 
-                // ── Главные вкладки ──
+                // Главные вкладки
                 Rectangle {
                     Layout.fillWidth: true
                     Layout.preferredHeight: 38
@@ -301,7 +300,7 @@ Rectangle {
                     }
                 }
 
-                // ── Подвкладки ──
+                // Подвкладки
                 Rectangle {
                     Layout.fillWidth: true
                     Layout.preferredHeight: 28
@@ -373,7 +372,7 @@ Rectangle {
                     }
                 }
 
-                // ── Панель параметров ──
+                // Панель параметров
                 Rectangle {
                     Layout.fillWidth: true
                     Layout.preferredHeight: paramsCol.implicitHeight + 16
@@ -441,7 +440,7 @@ Rectangle {
                             color: Theme.dividerColor
                         }
 
-                        // ── Контролы эффектов ──
+                        // Контролы эффектов
 
                         // ЯРКОСТЬ
                         FxSlider {
@@ -706,12 +705,15 @@ Rectangle {
 
                             FxSlider {
                                 label: "Сила улучшения"
-                                valText: Math.round(root.effectAutoEnhance * 100) + "%"
+                                valText: Math.round(
+                                             root.effectAutoEnhance * 100) + "%"
                                 from: 0.0
                                 to: 1.0
                                 step: 0.05
                                 val: root.effectAutoEnhance
-                                onMv: function(v) { root.effectAutoEnhance = v }
+                                onMv: function (v) {
+                                    root.effectAutoEnhance = v
+                                }
                             }
                             Rectangle {
                                 width: parent.width
@@ -998,7 +1000,7 @@ Rectangle {
                     }
                 }
 
-                // ── Список эффектов ──
+                //Список эффектов
                 Rectangle {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
@@ -1171,7 +1173,7 @@ Rectangle {
                     }
                 }
 
-                // ── ПЕРЕХОДЫ ──
+                // ПЕРЕХОДЫ
                 Item {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
@@ -1355,7 +1357,7 @@ Rectangle {
                             }
                         }
 
-                        // ── Кнопки применить переходы ──
+                        // Кнопки применить переходы
                         RowLayout {
                             Layout.fillWidth: true
                             visible: root.selectedClipId >= 0
@@ -1462,7 +1464,7 @@ Rectangle {
             }
         }
 
-        // ══════════ РЕЖИМ ЭКСПОРТА ══════════
+        // РЕЖИМ ЭКСПОРТА
         Item {
             Layout.fillWidth: true
             Layout.fillHeight: true
@@ -1475,11 +1477,9 @@ Rectangle {
         }
     }
 
-    // ═══════════════════════════════════════
     //  КОМПОНЕНТЫ — все используют id-ссылки вместо parent.parent цепочек
-    // ═══════════════════════════════════════
 
-    // ── Слайдер с подписью ──
+    //  Слайдер с подписью
     component FxSlider: Item {
         id: fxSlRoot
         property string label: ""
@@ -1598,7 +1598,7 @@ Rectangle {
         }
     }
 
-    // ── Чекбокс с подписью ──
+    // Чекбокс с подписью
     component FxCheck: Item {
         id: fxChkRoot
         property string label: ""
@@ -1650,7 +1650,7 @@ Rectangle {
         }
     }
 
-    // ── Категория эффектов ──
+    //  Категория эффектов
     component FxCategory: Column {
         id: fxCatRoot
         property string catTitle: ""
@@ -1792,7 +1792,7 @@ Rectangle {
         }
     }
 
-    // ── Карточка перехода ──
+    // Карточка перехода
     component TransitionCard: Item {
         id: tcRoot
         property string cardLabel: ""
@@ -1851,7 +1851,7 @@ Rectangle {
         }
     }
 
-    // ── Экспорт ──
+    // Экспорт
     component ExportPanel: ColumnLayout {
         spacing: Theme.spacingLarge
         signal exportClicked(string resolution, string format)

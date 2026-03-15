@@ -64,10 +64,9 @@ template <> constexpr inline auto Timeline::qt_create_metaobjectdata<qt_meta_tag
         "previewEffects",
         "getCurrentFrameAt",
         "trackIndex",
-        "getFramePathAt",
-        "requestFrame",
         "getClipInfoAt",
-        "getActiveClipPath",
+        "getClipInfoById",
+        "uidOrIndex",
         "startPlayback",
         "fromTime",
         "speed",
@@ -180,164 +179,144 @@ template <> constexpr inline auto Timeline::qt_create_metaobjectdata<qt_meta_tag
         QtMocHelpers::MethodData<QImage(double)>(24, 2, QMC::AccessPublic | QMC::MethodCloned, 0x80000000 | 18, {{
             { QMetaType::Double, 15 },
         }}),
-        // Method 'getFramePathAt'
-        QtMocHelpers::MethodData<QString(double, int)>(26, 2, QMC::AccessPublic, QMetaType::QString, {{
-            { QMetaType::Double, 15 }, { QMetaType::Int, 25 },
-        }}),
-        // Method 'getFramePathAt'
-        QtMocHelpers::MethodData<QString(double)>(26, 2, QMC::AccessPublic | QMC::MethodCloned, QMetaType::QString, {{
-            { QMetaType::Double, 15 },
-        }}),
-        // Method 'requestFrame'
-        QtMocHelpers::MethodData<void(double, int)>(27, 2, QMC::AccessPublic, QMetaType::Void, {{
-            { QMetaType::Double, 15 }, { QMetaType::Int, 25 },
-        }}),
-        // Method 'requestFrame'
-        QtMocHelpers::MethodData<void(double)>(27, 2, QMC::AccessPublic | QMC::MethodCloned, QMetaType::Void, {{
-            { QMetaType::Double, 15 },
-        }}),
         // Method 'getClipInfoAt'
-        QtMocHelpers::MethodData<QVariantMap(double, int)>(28, 2, QMC::AccessPublic, 0x80000000 | 22, {{
+        QtMocHelpers::MethodData<QVariantMap(double, int)>(26, 2, QMC::AccessPublic, 0x80000000 | 22, {{
             { QMetaType::Double, 15 }, { QMetaType::Int, 25 },
         }}),
         // Method 'getClipInfoAt'
-        QtMocHelpers::MethodData<QVariantMap(double)>(28, 2, QMC::AccessPublic | QMC::MethodCloned, 0x80000000 | 22, {{
+        QtMocHelpers::MethodData<QVariantMap(double)>(26, 2, QMC::AccessPublic | QMC::MethodCloned, 0x80000000 | 22, {{
             { QMetaType::Double, 15 },
         }}),
-        // Method 'getActiveClipPath'
-        QtMocHelpers::MethodData<QString(double, int)>(29, 2, QMC::AccessPublic, QMetaType::QString, {{
-            { QMetaType::Double, 15 }, { QMetaType::Int, 25 },
-        }}),
-        // Method 'getActiveClipPath'
-        QtMocHelpers::MethodData<QString(double)>(29, 2, QMC::AccessPublic | QMC::MethodCloned, QMetaType::QString, {{
-            { QMetaType::Double, 15 },
+        // Method 'getClipInfoById'
+        QtMocHelpers::MethodData<QVariantMap(int)>(27, 2, QMC::AccessPublic, 0x80000000 | 22, {{
+            { QMetaType::Int, 28 },
         }}),
         // Method 'startPlayback'
-        QtMocHelpers::MethodData<void(double, double)>(30, 2, QMC::AccessPublic, QMetaType::Void, {{
-            { QMetaType::Double, 31 }, { QMetaType::Double, 32 },
+        QtMocHelpers::MethodData<void(double, double)>(29, 2, QMC::AccessPublic, QMetaType::Void, {{
+            { QMetaType::Double, 30 }, { QMetaType::Double, 31 },
         }}),
         // Method 'startPlayback'
-        QtMocHelpers::MethodData<void(double)>(30, 2, QMC::AccessPublic | QMC::MethodCloned, QMetaType::Void, {{
-            { QMetaType::Double, 31 },
+        QtMocHelpers::MethodData<void(double)>(29, 2, QMC::AccessPublic | QMC::MethodCloned, QMetaType::Void, {{
+            { QMetaType::Double, 30 },
         }}),
         // Method 'stopPlayback'
-        QtMocHelpers::MethodData<void()>(33, 2, QMC::AccessPublic, QMetaType::Void),
+        QtMocHelpers::MethodData<void()>(32, 2, QMC::AccessPublic, QMetaType::Void),
         // Method 'setPlaybackVolume'
-        QtMocHelpers::MethodData<void(double)>(34, 2, QMC::AccessPublic, QMetaType::Void, {{
-            { QMetaType::Double, 35 },
+        QtMocHelpers::MethodData<void(double)>(33, 2, QMC::AccessPublic, QMetaType::Void, {{
+            { QMetaType::Double, 34 },
         }}),
         // Method 'setTrackAudioMuted'
-        QtMocHelpers::MethodData<void(int, bool)>(36, 2, QMC::AccessPublic, QMetaType::Void, {{
-            { QMetaType::Int, 37 }, { QMetaType::Bool, 38 },
+        QtMocHelpers::MethodData<void(int, bool)>(35, 2, QMC::AccessPublic, QMetaType::Void, {{
+            { QMetaType::Int, 36 }, { QMetaType::Bool, 37 },
         }}),
         // Method 'setTrackVideoHidden'
-        QtMocHelpers::MethodData<void(int, bool)>(39, 2, QMC::AccessPublic, QMetaType::Void, {{
-            { QMetaType::Int, 37 }, { QMetaType::Bool, 40 },
+        QtMocHelpers::MethodData<void(int, bool)>(38, 2, QMC::AccessPublic, QMetaType::Void, {{
+            { QMetaType::Int, 36 }, { QMetaType::Bool, 39 },
         }}),
         // Method 'getPlaybackTime'
-        QtMocHelpers::MethodData<double() const>(41, 2, QMC::AccessPublic, QMetaType::Double),
+        QtMocHelpers::MethodData<double() const>(40, 2, QMC::AccessPublic, QMetaType::Double),
         // Method 'addClip'
-        QtMocHelpers::MethodData<bool(const QString &, int, double)>(42, 2, QMC::AccessPublic, QMetaType::Bool, {{
-            { QMetaType::QString, 43 }, { QMetaType::Int, 25 }, { QMetaType::Double, 44 },
+        QtMocHelpers::MethodData<bool(const QString &, int, double)>(41, 2, QMC::AccessPublic, QMetaType::Bool, {{
+            { QMetaType::QString, 42 }, { QMetaType::Int, 25 }, { QMetaType::Double, 43 },
         }}),
         // Method 'removeClip'
-        QtMocHelpers::MethodData<bool(int)>(45, 2, QMC::AccessPublic, QMetaType::Bool, {{
+        QtMocHelpers::MethodData<bool(int)>(44, 2, QMC::AccessPublic, QMetaType::Bool, {{
             { QMetaType::Int, 6 },
         }}),
         // Method 'moveClip'
-        QtMocHelpers::MethodData<bool(int, int, double)>(46, 2, QMC::AccessPublic, QMetaType::Bool, {{
-            { QMetaType::Int, 6 }, { QMetaType::Int, 47 }, { QMetaType::Double, 48 },
+        QtMocHelpers::MethodData<bool(int, int, double)>(45, 2, QMC::AccessPublic, QMetaType::Bool, {{
+            { QMetaType::Int, 6 }, { QMetaType::Int, 46 }, { QMetaType::Double, 47 },
         }}),
         // Method 'splitClipAt'
-        QtMocHelpers::MethodData<bool(double, int)>(49, 2, QMC::AccessPublic, QMetaType::Bool, {{
+        QtMocHelpers::MethodData<bool(double, int)>(48, 2, QMC::AccessPublic, QMetaType::Bool, {{
             { QMetaType::Double, 15 }, { QMetaType::Int, 25 },
         }}),
         // Method 'splitClipAt'
-        QtMocHelpers::MethodData<bool(double)>(49, 2, QMC::AccessPublic | QMC::MethodCloned, QMetaType::Bool, {{
+        QtMocHelpers::MethodData<bool(double)>(48, 2, QMC::AccessPublic | QMC::MethodCloned, QMetaType::Bool, {{
             { QMetaType::Double, 15 },
         }}),
         // Method 'splitClip'
-        QtMocHelpers::MethodData<bool(int, double)>(50, 2, QMC::AccessPublic, QMetaType::Bool, {{
-            { QMetaType::Int, 6 }, { QMetaType::Double, 51 },
+        QtMocHelpers::MethodData<bool(int, double)>(49, 2, QMC::AccessPublic, QMetaType::Bool, {{
+            { QMetaType::Int, 6 }, { QMetaType::Double, 50 },
         }}),
         // Method 'trimClip'
-        QtMocHelpers::MethodData<bool(int, double, double)>(52, 2, QMC::AccessPublic, QMetaType::Bool, {{
-            { QMetaType::Int, 6 }, { QMetaType::Double, 53 }, { QMetaType::Double, 54 },
+        QtMocHelpers::MethodData<bool(int, double, double)>(51, 2, QMC::AccessPublic, QMetaType::Bool, {{
+            { QMetaType::Int, 6 }, { QMetaType::Double, 52 }, { QMetaType::Double, 53 },
         }}),
         // Method 'setClipLeftTrim'
-        QtMocHelpers::MethodData<bool(int, double, double)>(55, 2, QMC::AccessPublic, QMetaType::Bool, {{
-            { QMetaType::Int, 6 }, { QMetaType::Double, 48 }, { QMetaType::Double, 53 },
+        QtMocHelpers::MethodData<bool(int, double, double)>(54, 2, QMC::AccessPublic, QMetaType::Bool, {{
+            { QMetaType::Int, 6 }, { QMetaType::Double, 47 }, { QMetaType::Double, 52 },
         }}),
         // Method 'applyEffect'
-        QtMocHelpers::MethodData<bool(int, const QString &, double)>(56, 2, QMC::AccessPublic, QMetaType::Bool, {{
-            { QMetaType::Int, 6 }, { QMetaType::QString, 57 }, { QMetaType::Double, 58 },
+        QtMocHelpers::MethodData<bool(int, const QString &, double)>(55, 2, QMC::AccessPublic, QMetaType::Bool, {{
+            { QMetaType::Int, 6 }, { QMetaType::QString, 56 }, { QMetaType::Double, 57 },
         }}),
         // Method 'removeEffect'
-        QtMocHelpers::MethodData<bool(int, const QString &)>(59, 2, QMC::AccessPublic, QMetaType::Bool, {{
-            { QMetaType::Int, 6 }, { QMetaType::QString, 57 },
+        QtMocHelpers::MethodData<bool(int, const QString &)>(58, 2, QMC::AccessPublic, QMetaType::Bool, {{
+            { QMetaType::Int, 6 }, { QMetaType::QString, 56 },
         }}),
         // Method 'getClipEffects'
-        QtMocHelpers::MethodData<QVariantMap(int) const>(60, 2, QMC::AccessPublic, 0x80000000 | 22, {{
+        QtMocHelpers::MethodData<QVariantMap(int) const>(59, 2, QMC::AccessPublic, 0x80000000 | 22, {{
             { QMetaType::Int, 6 },
         }}),
         // Method 'setClipMuted'
-        QtMocHelpers::MethodData<bool(int, bool)>(61, 2, QMC::AccessPublic, QMetaType::Bool, {{
-            { QMetaType::Int, 6 }, { QMetaType::Bool, 38 },
+        QtMocHelpers::MethodData<bool(int, bool)>(60, 2, QMC::AccessPublic, QMetaType::Bool, {{
+            { QMetaType::Int, 6 }, { QMetaType::Bool, 37 },
         }}),
         // Method 'getTrackEndTime'
-        QtMocHelpers::MethodData<double(int) const>(62, 2, QMC::AccessPublic, QMetaType::Double, {{
+        QtMocHelpers::MethodData<double(int) const>(61, 2, QMC::AccessPublic, QMetaType::Double, {{
             { QMetaType::Int, 25 },
         }}),
         // Method 'getClipsForTrack'
-        QtMocHelpers::MethodData<QVariantList(int)>(63, 2, QMC::AccessPublic, 0x80000000 | 64, {{
+        QtMocHelpers::MethodData<QVariantList(int)>(62, 2, QMC::AccessPublic, 0x80000000 | 63, {{
             { QMetaType::Int, 25 },
         }}),
         // Method 'setClipVideoHidden'
-        QtMocHelpers::MethodData<void(int, bool)>(65, 2, QMC::AccessPublic, QMetaType::Void, {{
-            { QMetaType::Int, 6 }, { QMetaType::Bool, 40 },
+        QtMocHelpers::MethodData<void(int, bool)>(64, 2, QMC::AccessPublic, QMetaType::Void, {{
+            { QMetaType::Int, 6 }, { QMetaType::Bool, 39 },
         }}),
         // Method 'setClipAudioHidden'
-        QtMocHelpers::MethodData<void(int, bool)>(66, 2, QMC::AccessPublic, QMetaType::Void, {{
-            { QMetaType::Int, 6 }, { QMetaType::Bool, 40 },
+        QtMocHelpers::MethodData<void(int, bool)>(65, 2, QMC::AccessPublic, QMetaType::Void, {{
+            { QMetaType::Int, 6 }, { QMetaType::Bool, 39 },
         }}),
         // Method 'syncClipStatesForRender'
-        QtMocHelpers::MethodData<void(QVariantMap, QVariantMap)>(67, 2, QMC::AccessPublic, QMetaType::Void, {{
-            { 0x80000000 | 22, 68 }, { 0x80000000 | 22, 69 },
+        QtMocHelpers::MethodData<void(QVariantMap, QVariantMap)>(66, 2, QMC::AccessPublic, QMetaType::Void, {{
+            { 0x80000000 | 22, 67 }, { 0x80000000 | 22, 68 },
         }}),
         // Method 'saveProject'
-        QtMocHelpers::MethodData<bool(const QString &)>(70, 2, QMC::AccessPublic, QMetaType::Bool, {{
-            { QMetaType::QString, 43 },
+        QtMocHelpers::MethodData<bool(const QString &)>(69, 2, QMC::AccessPublic, QMetaType::Bool, {{
+            { QMetaType::QString, 42 },
         }}),
         // Method 'loadProject'
-        QtMocHelpers::MethodData<bool(const QString &)>(71, 2, QMC::AccessPublic, QMetaType::Bool, {{
-            { QMetaType::QString, 43 },
+        QtMocHelpers::MethodData<bool(const QString &)>(70, 2, QMC::AccessPublic, QMetaType::Bool, {{
+            { QMetaType::QString, 42 },
         }}),
         // Method 'renderToFile'
-        QtMocHelpers::MethodData<bool(const QString &, int, int, const QString &)>(72, 2, QMC::AccessPublic, QMetaType::Bool, {{
-            { QMetaType::QString, 73 }, { QMetaType::Int, 74 }, { QMetaType::Int, 75 }, { QMetaType::QString, 76 },
+        QtMocHelpers::MethodData<bool(const QString &, int, int, const QString &)>(71, 2, QMC::AccessPublic, QMetaType::Bool, {{
+            { QMetaType::QString, 72 }, { QMetaType::Int, 73 }, { QMetaType::Int, 74 }, { QMetaType::QString, 75 },
         }}),
         // Method 'renderToFile'
-        QtMocHelpers::MethodData<bool(const QString &, int, int)>(72, 2, QMC::AccessPublic | QMC::MethodCloned, QMetaType::Bool, {{
-            { QMetaType::QString, 73 }, { QMetaType::Int, 74 }, { QMetaType::Int, 75 },
+        QtMocHelpers::MethodData<bool(const QString &, int, int)>(71, 2, QMC::AccessPublic | QMC::MethodCloned, QMetaType::Bool, {{
+            { QMetaType::QString, 72 }, { QMetaType::Int, 73 }, { QMetaType::Int, 74 },
         }}),
         // Method 'renderToFile'
-        QtMocHelpers::MethodData<bool(const QString &, int)>(72, 2, QMC::AccessPublic | QMC::MethodCloned, QMetaType::Bool, {{
-            { QMetaType::QString, 73 }, { QMetaType::Int, 74 },
+        QtMocHelpers::MethodData<bool(const QString &, int)>(71, 2, QMC::AccessPublic | QMC::MethodCloned, QMetaType::Bool, {{
+            { QMetaType::QString, 72 }, { QMetaType::Int, 73 },
         }}),
         // Method 'renderToFile'
-        QtMocHelpers::MethodData<bool(const QString &)>(72, 2, QMC::AccessPublic | QMC::MethodCloned, QMetaType::Bool, {{
-            { QMetaType::QString, 73 },
+        QtMocHelpers::MethodData<bool(const QString &)>(71, 2, QMC::AccessPublic | QMC::MethodCloned, QMetaType::Bool, {{
+            { QMetaType::QString, 72 },
         }}),
         // Method 'cancelRender'
-        QtMocHelpers::MethodData<void()>(77, 2, QMC::AccessPublic, QMetaType::Void),
+        QtMocHelpers::MethodData<void()>(76, 2, QMC::AccessPublic, QMetaType::Void),
     };
     QtMocHelpers::UintData qt_properties {
         // property 'currentTime'
-        QtMocHelpers::PropertyData<double>(78, QMetaType::Double, QMC::DefaultPropertyFlags | QMC::Writable | QMC::StdCppSet, 0),
+        QtMocHelpers::PropertyData<double>(77, QMetaType::Double, QMC::DefaultPropertyFlags | QMC::Writable | QMC::StdCppSet, 0),
         // property 'totalDuration'
-        QtMocHelpers::PropertyData<double>(79, QMetaType::Double, QMC::DefaultPropertyFlags, 1),
+        QtMocHelpers::PropertyData<double>(78, QMetaType::Double, QMC::DefaultPropertyFlags, 1),
         // property 'clipCount'
-        QtMocHelpers::PropertyData<int>(80, QMetaType::Int, QMC::DefaultPropertyFlags, 2),
+        QtMocHelpers::PropertyData<int>(79, QMetaType::Int, QMC::DefaultPropertyFlags, 2),
     };
     QtMocHelpers::UintData qt_enums {
     };
@@ -378,72 +357,64 @@ void Timeline::qt_static_metacall(QObject *_o, QMetaObject::Call _c, int _id, vo
             if (_a[0]) *reinterpret_cast<QImage*>(_a[0]) = std::move(_r); }  break;
         case 16: { QImage _r = _t->getCurrentFrameAt((*reinterpret_cast<std::add_pointer_t<double>>(_a[1])));
             if (_a[0]) *reinterpret_cast<QImage*>(_a[0]) = std::move(_r); }  break;
-        case 17: { QString _r = _t->getFramePathAt((*reinterpret_cast<std::add_pointer_t<double>>(_a[1])),(*reinterpret_cast<std::add_pointer_t<int>>(_a[2])));
-            if (_a[0]) *reinterpret_cast<QString*>(_a[0]) = std::move(_r); }  break;
-        case 18: { QString _r = _t->getFramePathAt((*reinterpret_cast<std::add_pointer_t<double>>(_a[1])));
-            if (_a[0]) *reinterpret_cast<QString*>(_a[0]) = std::move(_r); }  break;
-        case 19: _t->requestFrame((*reinterpret_cast<std::add_pointer_t<double>>(_a[1])),(*reinterpret_cast<std::add_pointer_t<int>>(_a[2]))); break;
-        case 20: _t->requestFrame((*reinterpret_cast<std::add_pointer_t<double>>(_a[1]))); break;
-        case 21: { QVariantMap _r = _t->getClipInfoAt((*reinterpret_cast<std::add_pointer_t<double>>(_a[1])),(*reinterpret_cast<std::add_pointer_t<int>>(_a[2])));
+        case 17: { QVariantMap _r = _t->getClipInfoAt((*reinterpret_cast<std::add_pointer_t<double>>(_a[1])),(*reinterpret_cast<std::add_pointer_t<int>>(_a[2])));
             if (_a[0]) *reinterpret_cast<QVariantMap*>(_a[0]) = std::move(_r); }  break;
-        case 22: { QVariantMap _r = _t->getClipInfoAt((*reinterpret_cast<std::add_pointer_t<double>>(_a[1])));
+        case 18: { QVariantMap _r = _t->getClipInfoAt((*reinterpret_cast<std::add_pointer_t<double>>(_a[1])));
             if (_a[0]) *reinterpret_cast<QVariantMap*>(_a[0]) = std::move(_r); }  break;
-        case 23: { QString _r = _t->getActiveClipPath((*reinterpret_cast<std::add_pointer_t<double>>(_a[1])),(*reinterpret_cast<std::add_pointer_t<int>>(_a[2])));
-            if (_a[0]) *reinterpret_cast<QString*>(_a[0]) = std::move(_r); }  break;
-        case 24: { QString _r = _t->getActiveClipPath((*reinterpret_cast<std::add_pointer_t<double>>(_a[1])));
-            if (_a[0]) *reinterpret_cast<QString*>(_a[0]) = std::move(_r); }  break;
-        case 25: _t->startPlayback((*reinterpret_cast<std::add_pointer_t<double>>(_a[1])),(*reinterpret_cast<std::add_pointer_t<double>>(_a[2]))); break;
-        case 26: _t->startPlayback((*reinterpret_cast<std::add_pointer_t<double>>(_a[1]))); break;
-        case 27: _t->stopPlayback(); break;
-        case 28: _t->setPlaybackVolume((*reinterpret_cast<std::add_pointer_t<double>>(_a[1]))); break;
-        case 29: _t->setTrackAudioMuted((*reinterpret_cast<std::add_pointer_t<int>>(_a[1])),(*reinterpret_cast<std::add_pointer_t<bool>>(_a[2]))); break;
-        case 30: _t->setTrackVideoHidden((*reinterpret_cast<std::add_pointer_t<int>>(_a[1])),(*reinterpret_cast<std::add_pointer_t<bool>>(_a[2]))); break;
-        case 31: { double _r = _t->getPlaybackTime();
+        case 19: { QVariantMap _r = _t->getClipInfoById((*reinterpret_cast<std::add_pointer_t<int>>(_a[1])));
+            if (_a[0]) *reinterpret_cast<QVariantMap*>(_a[0]) = std::move(_r); }  break;
+        case 20: _t->startPlayback((*reinterpret_cast<std::add_pointer_t<double>>(_a[1])),(*reinterpret_cast<std::add_pointer_t<double>>(_a[2]))); break;
+        case 21: _t->startPlayback((*reinterpret_cast<std::add_pointer_t<double>>(_a[1]))); break;
+        case 22: _t->stopPlayback(); break;
+        case 23: _t->setPlaybackVolume((*reinterpret_cast<std::add_pointer_t<double>>(_a[1]))); break;
+        case 24: _t->setTrackAudioMuted((*reinterpret_cast<std::add_pointer_t<int>>(_a[1])),(*reinterpret_cast<std::add_pointer_t<bool>>(_a[2]))); break;
+        case 25: _t->setTrackVideoHidden((*reinterpret_cast<std::add_pointer_t<int>>(_a[1])),(*reinterpret_cast<std::add_pointer_t<bool>>(_a[2]))); break;
+        case 26: { double _r = _t->getPlaybackTime();
             if (_a[0]) *reinterpret_cast<double*>(_a[0]) = std::move(_r); }  break;
-        case 32: { bool _r = _t->addClip((*reinterpret_cast<std::add_pointer_t<QString>>(_a[1])),(*reinterpret_cast<std::add_pointer_t<int>>(_a[2])),(*reinterpret_cast<std::add_pointer_t<double>>(_a[3])));
+        case 27: { bool _r = _t->addClip((*reinterpret_cast<std::add_pointer_t<QString>>(_a[1])),(*reinterpret_cast<std::add_pointer_t<int>>(_a[2])),(*reinterpret_cast<std::add_pointer_t<double>>(_a[3])));
             if (_a[0]) *reinterpret_cast<bool*>(_a[0]) = std::move(_r); }  break;
-        case 33: { bool _r = _t->removeClip((*reinterpret_cast<std::add_pointer_t<int>>(_a[1])));
+        case 28: { bool _r = _t->removeClip((*reinterpret_cast<std::add_pointer_t<int>>(_a[1])));
             if (_a[0]) *reinterpret_cast<bool*>(_a[0]) = std::move(_r); }  break;
-        case 34: { bool _r = _t->moveClip((*reinterpret_cast<std::add_pointer_t<int>>(_a[1])),(*reinterpret_cast<std::add_pointer_t<int>>(_a[2])),(*reinterpret_cast<std::add_pointer_t<double>>(_a[3])));
+        case 29: { bool _r = _t->moveClip((*reinterpret_cast<std::add_pointer_t<int>>(_a[1])),(*reinterpret_cast<std::add_pointer_t<int>>(_a[2])),(*reinterpret_cast<std::add_pointer_t<double>>(_a[3])));
             if (_a[0]) *reinterpret_cast<bool*>(_a[0]) = std::move(_r); }  break;
-        case 35: { bool _r = _t->splitClipAt((*reinterpret_cast<std::add_pointer_t<double>>(_a[1])),(*reinterpret_cast<std::add_pointer_t<int>>(_a[2])));
+        case 30: { bool _r = _t->splitClipAt((*reinterpret_cast<std::add_pointer_t<double>>(_a[1])),(*reinterpret_cast<std::add_pointer_t<int>>(_a[2])));
             if (_a[0]) *reinterpret_cast<bool*>(_a[0]) = std::move(_r); }  break;
-        case 36: { bool _r = _t->splitClipAt((*reinterpret_cast<std::add_pointer_t<double>>(_a[1])));
+        case 31: { bool _r = _t->splitClipAt((*reinterpret_cast<std::add_pointer_t<double>>(_a[1])));
             if (_a[0]) *reinterpret_cast<bool*>(_a[0]) = std::move(_r); }  break;
-        case 37: { bool _r = _t->splitClip((*reinterpret_cast<std::add_pointer_t<int>>(_a[1])),(*reinterpret_cast<std::add_pointer_t<double>>(_a[2])));
+        case 32: { bool _r = _t->splitClip((*reinterpret_cast<std::add_pointer_t<int>>(_a[1])),(*reinterpret_cast<std::add_pointer_t<double>>(_a[2])));
             if (_a[0]) *reinterpret_cast<bool*>(_a[0]) = std::move(_r); }  break;
-        case 38: { bool _r = _t->trimClip((*reinterpret_cast<std::add_pointer_t<int>>(_a[1])),(*reinterpret_cast<std::add_pointer_t<double>>(_a[2])),(*reinterpret_cast<std::add_pointer_t<double>>(_a[3])));
+        case 33: { bool _r = _t->trimClip((*reinterpret_cast<std::add_pointer_t<int>>(_a[1])),(*reinterpret_cast<std::add_pointer_t<double>>(_a[2])),(*reinterpret_cast<std::add_pointer_t<double>>(_a[3])));
             if (_a[0]) *reinterpret_cast<bool*>(_a[0]) = std::move(_r); }  break;
-        case 39: { bool _r = _t->setClipLeftTrim((*reinterpret_cast<std::add_pointer_t<int>>(_a[1])),(*reinterpret_cast<std::add_pointer_t<double>>(_a[2])),(*reinterpret_cast<std::add_pointer_t<double>>(_a[3])));
+        case 34: { bool _r = _t->setClipLeftTrim((*reinterpret_cast<std::add_pointer_t<int>>(_a[1])),(*reinterpret_cast<std::add_pointer_t<double>>(_a[2])),(*reinterpret_cast<std::add_pointer_t<double>>(_a[3])));
             if (_a[0]) *reinterpret_cast<bool*>(_a[0]) = std::move(_r); }  break;
-        case 40: { bool _r = _t->applyEffect((*reinterpret_cast<std::add_pointer_t<int>>(_a[1])),(*reinterpret_cast<std::add_pointer_t<QString>>(_a[2])),(*reinterpret_cast<std::add_pointer_t<double>>(_a[3])));
+        case 35: { bool _r = _t->applyEffect((*reinterpret_cast<std::add_pointer_t<int>>(_a[1])),(*reinterpret_cast<std::add_pointer_t<QString>>(_a[2])),(*reinterpret_cast<std::add_pointer_t<double>>(_a[3])));
             if (_a[0]) *reinterpret_cast<bool*>(_a[0]) = std::move(_r); }  break;
-        case 41: { bool _r = _t->removeEffect((*reinterpret_cast<std::add_pointer_t<int>>(_a[1])),(*reinterpret_cast<std::add_pointer_t<QString>>(_a[2])));
+        case 36: { bool _r = _t->removeEffect((*reinterpret_cast<std::add_pointer_t<int>>(_a[1])),(*reinterpret_cast<std::add_pointer_t<QString>>(_a[2])));
             if (_a[0]) *reinterpret_cast<bool*>(_a[0]) = std::move(_r); }  break;
-        case 42: { QVariantMap _r = _t->getClipEffects((*reinterpret_cast<std::add_pointer_t<int>>(_a[1])));
+        case 37: { QVariantMap _r = _t->getClipEffects((*reinterpret_cast<std::add_pointer_t<int>>(_a[1])));
             if (_a[0]) *reinterpret_cast<QVariantMap*>(_a[0]) = std::move(_r); }  break;
-        case 43: { bool _r = _t->setClipMuted((*reinterpret_cast<std::add_pointer_t<int>>(_a[1])),(*reinterpret_cast<std::add_pointer_t<bool>>(_a[2])));
+        case 38: { bool _r = _t->setClipMuted((*reinterpret_cast<std::add_pointer_t<int>>(_a[1])),(*reinterpret_cast<std::add_pointer_t<bool>>(_a[2])));
             if (_a[0]) *reinterpret_cast<bool*>(_a[0]) = std::move(_r); }  break;
-        case 44: { double _r = _t->getTrackEndTime((*reinterpret_cast<std::add_pointer_t<int>>(_a[1])));
+        case 39: { double _r = _t->getTrackEndTime((*reinterpret_cast<std::add_pointer_t<int>>(_a[1])));
             if (_a[0]) *reinterpret_cast<double*>(_a[0]) = std::move(_r); }  break;
-        case 45: { QVariantList _r = _t->getClipsForTrack((*reinterpret_cast<std::add_pointer_t<int>>(_a[1])));
+        case 40: { QVariantList _r = _t->getClipsForTrack((*reinterpret_cast<std::add_pointer_t<int>>(_a[1])));
             if (_a[0]) *reinterpret_cast<QVariantList*>(_a[0]) = std::move(_r); }  break;
-        case 46: _t->setClipVideoHidden((*reinterpret_cast<std::add_pointer_t<int>>(_a[1])),(*reinterpret_cast<std::add_pointer_t<bool>>(_a[2]))); break;
-        case 47: _t->setClipAudioHidden((*reinterpret_cast<std::add_pointer_t<int>>(_a[1])),(*reinterpret_cast<std::add_pointer_t<bool>>(_a[2]))); break;
-        case 48: _t->syncClipStatesForRender((*reinterpret_cast<std::add_pointer_t<QVariantMap>>(_a[1])),(*reinterpret_cast<std::add_pointer_t<QVariantMap>>(_a[2]))); break;
-        case 49: { bool _r = _t->saveProject((*reinterpret_cast<std::add_pointer_t<QString>>(_a[1])));
+        case 41: _t->setClipVideoHidden((*reinterpret_cast<std::add_pointer_t<int>>(_a[1])),(*reinterpret_cast<std::add_pointer_t<bool>>(_a[2]))); break;
+        case 42: _t->setClipAudioHidden((*reinterpret_cast<std::add_pointer_t<int>>(_a[1])),(*reinterpret_cast<std::add_pointer_t<bool>>(_a[2]))); break;
+        case 43: _t->syncClipStatesForRender((*reinterpret_cast<std::add_pointer_t<QVariantMap>>(_a[1])),(*reinterpret_cast<std::add_pointer_t<QVariantMap>>(_a[2]))); break;
+        case 44: { bool _r = _t->saveProject((*reinterpret_cast<std::add_pointer_t<QString>>(_a[1])));
             if (_a[0]) *reinterpret_cast<bool*>(_a[0]) = std::move(_r); }  break;
-        case 50: { bool _r = _t->loadProject((*reinterpret_cast<std::add_pointer_t<QString>>(_a[1])));
+        case 45: { bool _r = _t->loadProject((*reinterpret_cast<std::add_pointer_t<QString>>(_a[1])));
             if (_a[0]) *reinterpret_cast<bool*>(_a[0]) = std::move(_r); }  break;
-        case 51: { bool _r = _t->renderToFile((*reinterpret_cast<std::add_pointer_t<QString>>(_a[1])),(*reinterpret_cast<std::add_pointer_t<int>>(_a[2])),(*reinterpret_cast<std::add_pointer_t<int>>(_a[3])),(*reinterpret_cast<std::add_pointer_t<QString>>(_a[4])));
+        case 46: { bool _r = _t->renderToFile((*reinterpret_cast<std::add_pointer_t<QString>>(_a[1])),(*reinterpret_cast<std::add_pointer_t<int>>(_a[2])),(*reinterpret_cast<std::add_pointer_t<int>>(_a[3])),(*reinterpret_cast<std::add_pointer_t<QString>>(_a[4])));
             if (_a[0]) *reinterpret_cast<bool*>(_a[0]) = std::move(_r); }  break;
-        case 52: { bool _r = _t->renderToFile((*reinterpret_cast<std::add_pointer_t<QString>>(_a[1])),(*reinterpret_cast<std::add_pointer_t<int>>(_a[2])),(*reinterpret_cast<std::add_pointer_t<int>>(_a[3])));
+        case 47: { bool _r = _t->renderToFile((*reinterpret_cast<std::add_pointer_t<QString>>(_a[1])),(*reinterpret_cast<std::add_pointer_t<int>>(_a[2])),(*reinterpret_cast<std::add_pointer_t<int>>(_a[3])));
             if (_a[0]) *reinterpret_cast<bool*>(_a[0]) = std::move(_r); }  break;
-        case 53: { bool _r = _t->renderToFile((*reinterpret_cast<std::add_pointer_t<QString>>(_a[1])),(*reinterpret_cast<std::add_pointer_t<int>>(_a[2])));
+        case 48: { bool _r = _t->renderToFile((*reinterpret_cast<std::add_pointer_t<QString>>(_a[1])),(*reinterpret_cast<std::add_pointer_t<int>>(_a[2])));
             if (_a[0]) *reinterpret_cast<bool*>(_a[0]) = std::move(_r); }  break;
-        case 54: { bool _r = _t->renderToFile((*reinterpret_cast<std::add_pointer_t<QString>>(_a[1])));
+        case 49: { bool _r = _t->renderToFile((*reinterpret_cast<std::add_pointer_t<QString>>(_a[1])));
             if (_a[0]) *reinterpret_cast<bool*>(_a[0]) = std::move(_r); }  break;
-        case 55: _t->cancelRender(); break;
+        case 50: _t->cancelRender(); break;
         default: ;
         }
     }
@@ -510,14 +481,14 @@ int Timeline::qt_metacall(QMetaObject::Call _c, int _id, void **_a)
     if (_id < 0)
         return _id;
     if (_c == QMetaObject::InvokeMetaMethod) {
-        if (_id < 56)
+        if (_id < 51)
             qt_static_metacall(this, _c, _id, _a);
-        _id -= 56;
+        _id -= 51;
     }
     if (_c == QMetaObject::RegisterMethodArgumentMetaType) {
-        if (_id < 56)
+        if (_id < 51)
             *reinterpret_cast<QMetaType *>(_a[0]) = QMetaType();
-        _id -= 56;
+        _id -= 51;
     }
     if (_c == QMetaObject::ReadProperty || _c == QMetaObject::WriteProperty
             || _c == QMetaObject::ResetProperty || _c == QMetaObject::BindableProperty

@@ -56,8 +56,6 @@ public:
     // Возвращает interleaved float PCM, стерео, 44100Hz
     QVector<float> decodeAudioRange(double startTime, double duration);
 
-    // Legacy-обёртка (обратная совместимость)
-    QByteArray getAudioSamples(double startTime, double endTime);
 
     // ===== SEEK =====
     bool seekTo(double timestamp);
@@ -96,7 +94,7 @@ private:
     AVFrame* m_rgbFrame;
     AVPacket* m_packet;
 
-    // Позиция последнего декодированного аудио (для sequential read без seek)
+    // Позиция последнего декодированного аудио (для sequential)
     double m_lastAudioPos;
 
     // Буфер переполнения: сэмплы декодированные сверх запроса.
@@ -119,6 +117,8 @@ private:
 };
 
 #endif // MEDIADECODER_H
+
+
 
 
 

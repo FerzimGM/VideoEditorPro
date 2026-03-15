@@ -1,5 +1,4 @@
 // VideoPlayer.qml — Live-превью через FFmpeg + EffectImageProvider
-// Расположение: components/VideoPlayer.qml
 import QtQuick
 import QtQuick.Controls
 
@@ -7,15 +6,15 @@ Rectangle {
     id: videoPlayer
     color: "#0a0a0a"
 
-    // ── Внешний интерфейс ─────────────────────────────────────────────────
+    // Внешний интерфейс
     property bool isPlaying: false
     property double currentTime: 0.0
-    property double duration: 0.0 // полная длина таймлайна
+    property double duration: 0.0
     property real playbackSpeed: 1.0
     property double volume: 1.0
 
     // Скрытие видео/аудио
-    property bool hideVideo: false // чёрный экран если оба трека пусты
+    property bool hideVideo: false
     property bool hideTrack1Video: false
     property bool hideTrack2Video: false
     property bool hideAudio1: false
@@ -26,7 +25,7 @@ Rectangle {
     property int videoHeight: 0
     property real videoFps: 30.0
 
-    // ── Эффекты для live-превью ───────────────────────────────────────────
+    // Эффекты для live-превью
     property int selectedClipId: -1
 
     property real effectBrightness: 0.0
@@ -50,7 +49,7 @@ Rectangle {
     property real effectChromaThreshold: 0.35
     property real effectChromaSmoothness: 0.1
 
-    // ── Сигналы ───────────────────────────────────────────────────────────
+    // Сигналы
     signal playbackStopped
     signal timePositionChanged(real time)
 
@@ -68,10 +67,10 @@ Rectangle {
         timePositionChanged(t)
     }
 
-    // ── Счётчик кадров ────────────────────────────────────────────────────
+    // Счётчик кадров
     property int _frameId: 0
 
-    // ── Видео-дисплей ─────────────────────────────────────────────────────
+    // Видео-дисплей
     Image {
         id: videoDisplay
         anchors.fill: parent
@@ -103,7 +102,7 @@ Rectangle {
         }
     }
 
-    // ── Соединения с C++ ──────────────────────────────────────────────────
+    // Соединения с C++
     Connections {
         target: cppTimeline
 
@@ -127,7 +126,7 @@ Rectangle {
         }
     }
 
-    // ── Play / Pause ──────────────────────────────────────────────────────
+    //  Play / Pause
     onIsPlayingChanged: {
         if (isPlaying) {
             cppTimeline.setPlaybackVolume(volume)
@@ -179,7 +178,7 @@ Rectangle {
             effectTimer.restart()
     }
 
-    // ── Скруббинг ─────────────────────────────────────────────────────────
+    // Скруббинг
     onCurrentTimeChanged: {
         if (!isPlaying)
             scrubTimer.restart()
@@ -193,7 +192,7 @@ Rectangle {
                          videoPlayer.requestPreview()
     }
 
-    // ── requestPreview ────────────────────────────────────────────────────
+    // requestPreview
     function requestPreview() {
         if (!cppTimeline)
             return
@@ -232,7 +231,7 @@ Rectangle {
         if (effectTintStr > 0.01)
             m["tint_hue"] = effectTintHue
         if (effectTintStr > 0.01)
-            m["tint_str"] = effectTintStr
+            m["tint_strength"] = effectTintStr
         if (effectGrain > 0.01)
             m["grain"] = effectGrain
         if (effectAutoEnhance > 0.0)
@@ -245,7 +244,7 @@ Rectangle {
         return m
     }
 
-    // ── Ползунки эффектов (debounce 80мс) ────────────────────────────────
+    // Ползунки эффектов (debounce 80мс)
     onEffectBrightnessChanged: if (!isPlaying)
                                    effectTimer.restart()
     onEffectContrastChanged: if (!isPlaying)

@@ -19,10 +19,10 @@ class AudioPlaybackEngine : public QObject
 {
     Q_OBJECT
 public:
-    static const int SAMPLE_RATE      = 44100;
-    static const int CHANNELS         = 2;
+    static const int SAMPLE_RATE = 44100;
+    static const int CHANNELS = 2;
     static const int FEED_INTERVAL_MS = 20;   // 20мс = ~50fps тиков
-    static const int BUFFER_MS        = 300;
+    static const int BUFFER_MS = 500;  // увеличен для снижения underrun
 
     explicit AudioPlaybackEngine(Timeline* timeline, QObject* parent = nullptr);
     ~AudioPlaybackEngine();
@@ -44,21 +44,21 @@ private slots:
     void onFeedTimer();
 
 private:
-    Timeline*    m_timeline;
-    QAudioSink*  m_sink       = nullptr;
-    QIODevice*   m_sinkDevice = nullptr;   // push-режим
-    QTimer*      m_feedTimer;
+    Timeline* m_timeline;
+    QAudioSink* m_sink = nullptr;
+    QIODevice* m_sinkDevice = nullptr;   // push-режим
+    QTimer* m_feedTimer;
 
-    double  m_startStreamTime  = 0.0;
-    double  m_playStartTime    = 0.0;
-    qint64  m_playStartMs      = 0;
-    double  m_speed            = 1.0;
-    double  m_writeHead        = 0.0;
-    bool    m_playing          = false;
-    bool    m_track1Muted      = false;
-    bool    m_track2Muted      = false;
-    int     m_silentChunks     = 0;
-    double  m_totalDuration    = 1e9;
+    double m_startStreamTime = 0.0;
+    double m_playStartTime = 0.0;
+    qint64 m_playStartMs = 0;
+    double m_speed = 1.0;
+    double m_writeHead = 0.0;
+    bool m_playing = false;
+    bool m_track1Muted = false;
+    bool m_track2Muted = false;
+    int m_silentChunks = 0;
+    double m_totalDuration = 1e9;
 
     void createSink();
     void destroySink();

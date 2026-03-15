@@ -18,7 +18,8 @@ public:
         m_frame.fill(Qt::black);
     }
 
-    void setFrame(const QImage& frame) {
+    void setFrame(const QImage& frame)
+    {
         QMutexLocker lock(&m_mutex);
         m_frame = frame;
     }

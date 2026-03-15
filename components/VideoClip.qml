@@ -6,14 +6,14 @@ import "../theme.js" as Theme
 Item {
     id: root
 
-    // ===== СВОЙСТВА =====
+    // СВОЙСТВА
     property string clipName: "Clip"
     property int clipId: -1
     property bool isMuted: false
     property bool selected: false
     property real clipMaxWidth: 0
-    property real pixelsPerSecond: 10 // передаётся из Track.qml
-    property int trackNumber: 1 // передаётся из Track.qml
+    property real pixelsPerSecond: 10
+    property int trackNumber: 1
 
     property bool videoHidden: false
     property bool audioHidden: false
@@ -22,7 +22,7 @@ Item {
     readonly property real audioH: 30
     height: videoH + audioH + 2
 
-    // ===== СИГНАЛЫ =====
+    // СИГНАЛЫ
     signal moved(real newX)
     signal clicked
     signal deleteRequested(int clipId)
@@ -33,13 +33,11 @@ Item {
     // и флаг isVideo чтобы Timeline.qml знал какое меню показать
     signal contextMenuRequested(int clipId, bool isVideo, real globalX, real globalY)
 
-    // ===== DRAG STATE =====
+    // DRAG STATE
     property real _startX: 0
     property bool _dragging: false
 
-    // ===== DRAG API =====
-    // НЕ используем биндинг Drag.active: ...
-    // Управляем ВРУЧНУЮ: drop() ОБЯЗАТЕЛЬНО до Drag.active = false
+    //  DRAG API
     Drag.keys: ["clip/move"]
     Drag.mimeData: {
         "clip/id": String(root.clipId)
@@ -48,14 +46,12 @@ Item {
     Drag.hotSpot.x: 0
     Drag.hotSpot.y: 0
 
-    // ===== COLUMN: ВИДЕО + АУДИО =====
+    // COLUMN: ВИДЕО + АУДИО
     Column {
         anchors.fill: parent
         spacing: 2
 
-        // ─────────────────────────────────────────────
         // ВИДЕО ПОЛОСА (синяя)
-        // ─────────────────────────────────────────────
         Rectangle {
             id: videoStrip
             width: parent.width
@@ -113,7 +109,7 @@ Item {
                 elide: Text.ElideRight
             }
 
-            // ── Левый resize handle ──
+            // Левый resize handle
             Item {
                 id: leftHandle
                 anchors {
@@ -165,7 +161,7 @@ Item {
                         var deltaSec = deltaX / pps // секунды
 
                         if (cppTimeline) {
-                            // Берём текущий trimStart из C++ (до изменений)
+                            // Берём текущий trimStart из C++
                             var info = cppTimeline.getClipInfoAt(
                                         (_ox + _sw * 0.5) / pps,
                                         root.trackNumber || 1)
@@ -174,10 +170,13 @@ Item {
                             var newTrimStart = Math.max(
                                         0.0, currentTrimStart + deltaSec)
 
-                            console.log("✂ LeftTrim id=", root.clipId, "Δsec=",
-                                        deltaSec.toFixed(3), "trimStart:",
-                                        currentTrimStart.toFixed(3), "→",
-                                        newTrimStart.toFixed(3))
+                            if (DEBUG_MODE) {
+                                console.log("✂ LeftTrim id=", root.clipId,
+                                            "Δsec=", deltaSec.toFixed(3),
+                                            "trimStart:",
+                                            currentTrimStart.toFixed(3), "→",
+                                            newTrimStart.toFixed(3))
+                            }
 
                             cppTimeline.setClipLeftTrim(root.clipId,
                                                         newStartTime,
@@ -190,7 +189,7 @@ Item {
                 }
             }
 
-            // ── Правый resize handle ──
+            // Правый resize handle
             Item {
                 id: rightHandle
                 anchors {
@@ -231,16 +230,9 @@ Item {
                 }
             }
 
-            // (рамка выделения перенесена на уровень root Item — см. ниже)
 
-            // ── ЛЕВЫЙ КЛИК → выделение клипа ──
-            // ПОЧЕМУ ОТДЕЛЬНЫЙ TapHandler, а не внутри DragHandler:
-            // DragHandler.onActiveChanged срабатывает ТОЛЬКО после реального
-            // перетаскивания (~5px threshold). Простой клик → DragHandler
-            // не активируется → clicked никогда не эмитируется → клип не выделяется.
-            // TapHandler(Left) = клик/выделение, DragHandler(Left) = перетаскивание.
-            // Qt 6 корректно разделяет их: тап без движения → TapHandler,
-            // нажатие + движение → DragHandler перехватывает жест.
+
+            //  ЛЕВЫЙ КЛИК - выделение клипа
             TapHandler {
                 id: videoTapLeft
                 acceptedButtons: Qt.LeftButton
@@ -251,7 +243,7 @@ Item {
 
             // Правый клик обрабатывается rootRightClick на уровне root Item
 
-            // ── ПЕРЕТАСКИВАНИЕ — только левая кнопка ──
+            // ПЕРЕТАСКИВАНИЕ — только левая кнопка
             DragHandler {
                 id: videoDragHandler
                 target: null
@@ -271,7 +263,7 @@ Item {
                         root.Drag.hotSpot.x = lp.x
                         root.Drag.hotSpot.y = lp.y
 
-                        // Запускаем drag-сессию ВРУЧНУЮ (не через биндинг!)
+                        // Запускаем drag-сессию ВРУЧНУЮ
                         root.Drag.active = true
                     } else {
                         root._dragging = false
@@ -283,10 +275,10 @@ Item {
                         root.Drag.active = false
 
                         if (result === Qt.IgnoreAction) {
-                            // Не попали в DropArea другой дорожки → двигаем внутри своей
+                            // Не попали в DropArea другой дорожки - двигаем внутри своей
                             root.moved(root.x)
                         }
-                        // Qt.MoveAction → Track.qml clipMoveDropArea вызвал cppTimeline.moveClip
+                        // Qt.MoveAction - Track.qml clipMoveDropArea вызвал cppTimeline.moveClip
                     }
                 }
 
@@ -320,9 +312,7 @@ Item {
             }
         }
 
-        // ─────────────────────────────────────────────
         // АУДИО ПОЛОСА (зелёная)
-        // ─────────────────────────────────────────────
         Rectangle {
             id: audioStrip
             width: parent.width
@@ -390,7 +380,7 @@ Item {
                 }
             }
 
-            // ── ЛЕВЫЙ КЛИК → выделение ──
+            // ЛЕВЫЙ КЛИК - выделение
             TapHandler {
                 id: audioTapLeft
                 acceptedButtons: Qt.LeftButton
@@ -401,7 +391,7 @@ Item {
 
             // Правый клик обрабатывается rootRightClick на уровне root Item
 
-            // ── ПЕРЕТАСКИВАНИЕ аудио полосы ──
+            // ПЕРЕТАСКИВАНИЕ аудио полосы
             DragHandler {
                 id: audioDragHandler
                 target: null
@@ -463,9 +453,7 @@ Item {
         }
     }
 
-    // =========================================================
     // ПРАВЫЙ КЛИК — эмитит сигнал наверх в Timeline → main.qml
-    // =========================================================
     // Меню объявлены ПРЯМО В main.qml (ApplicationWindow) — только там
     // Overlay.overlay работает корректно в Qt 6.
     MouseArea {
@@ -475,24 +463,25 @@ Item {
         z: 100
         // ВАЖНО: onPressed, не onClicked!
         // onClicked = mouseRelease. Если вызвать popup() на release — Qt отправляет
-        // следующий MouseButtonRelease в меню как "клик вне меню" → мгновенное закрытие.
-        // onPressed = кнопка ЕЩЁ ЗАЖАТА когда popup() открывается → release происходит
-        // уже внутри открытого меню → меню остаётся живым.
+        // следующий MouseButtonRelease в меню как "клик вне меню" - мгновенное закрытие.
+        // onPressed = кнопка ЕЩЁ ЗАЖАТА когда popup() открывается - release происходит
+        // уже внутри открытого меню - меню остаётся живым.
         onPressed: function (mouse) {
             if (mouse.button !== Qt.RightButton)
                 return
             mouse.accepted = true
             var g = root.mapToGlobal(mouse.x, mouse.y)
             var isVideo = (mouse.y < root.videoH + 1)
-            console.log("🖱️ ПКМ", isVideo ? "VIDEO" : "AUDIO", "clipId=",
-                        root.clipId)
+            if (DEBUG_MODE) {
+                console.log("🖱️ ПКМ", isVideo ? "VIDEO" : "AUDIO", "clipId=",
+                            root.clipId)
+            }
             root.contextMenuRequested(root.clipId, isVideo, g.x, g.y)
         }
     }
 
-    // =========================================================
+
     // РАМКА ВЫДЕЛЕНИЯ — root уровень (поверх video И audio полос)
-    // =========================================================
     // КРИТИЧНО: эта рамка должна быть ЗДЕСЬ — прямым потомком root Item,
     // а НЕ внутри videoStrip. Причина: anchors.fill: parent у потомка Rectangle
     // заполняет область ВНУТРИ border родителя. Если border рамки и border

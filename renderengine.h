@@ -26,25 +26,21 @@ class MediaEncoder;
  *     3. Применяем эффекты к видео.
  *     4. Записываем в энкодер.
  *
- * ОПТИМИЗАЦИИ:
- *   - Декодеры кэшируются по filepath (один декодер на файл)
- *   - Не открываем/закрываем файл каждый кадр
- *   - Рендер выполняется в отдельном потоке (не блокирует UI)
  */
 
-// ===== РАБОЧИЙ ОБЪЕКТ (выполняется в QThread) =====
+// ===== РАБОЧИЙ ОБЪЕКТ =====
 class RenderWorker : public QObject {
     Q_OBJECT
 public:
     explicit RenderWorker(QObject* parent = nullptr);
     ~RenderWorker();
 
-    void setClips(const QList<TimelineClip>& clips)  { m_clips = clips; }
-    void setOutputPath(const QString& path)           { m_outputPath = path; }
-    void setOutputResolution(int w, int h)            { m_outputWidth = w; m_outputHeight = h; }
-    void setFps(double fps)                           { m_fps = fps; }
-    void setBitrate(int bitrate)                      { m_bitrate = bitrate; }
-    void setFormat(const QString& fmt)                { m_format = fmt; }
+    void setClips(const QList<TimelineClip>& clips){ m_clips = clips; }
+    void setOutputPath(const QString& path){ m_outputPath = path; }
+    void setOutputResolution(int w, int h){ m_outputWidth = w; m_outputHeight = h; }
+    void setFps(double fps){ m_fps = fps; }
+    void setBitrate(int bitrate){ m_bitrate = bitrate; }
+    void setFormat(const QString& fmt){ m_format = fmt; }
 
 public slots:
     void process();
@@ -65,20 +61,20 @@ private:
     QString m_format;     // "MP4","MKV","WebM" — передаётся из RenderEngine
     bool m_cancelled;
 
-    QMap<QString, MediaDecoder*> m_videoDecoders;
-    QMap<QString, MediaDecoder*> m_audioDecoders;
-    QMap<QString, double>        m_videoPositions;
-    QHash<QString, QVector<float>> m_audioDelayBufs;
-    QHash<QString, int>            m_audioDelayPos;
+    QMap<QString, MediaDecoder*>m_videoDecoders;
+    QMap<QString, MediaDecoder*>m_audioDecoders;
+    QMap<QString, double>m_videoPositions;
+    QHash<QString, QVector<float>>m_audioDelayBufs;
+    QHash<QString, int>m_audioDelayPos;
 
-    MediaDecoder*  getVideoDecoder(const QString& filepath);
-    MediaDecoder*  getAudioDecoder(const QString& filepath);
-    void           closeAllDecoders();
+    MediaDecoder* getVideoDecoder(const QString& filepath);
+    MediaDecoder* getAudioDecoder(const QString& filepath);
+    void closeAllDecoders();
 
-    TimelineClip*  findActiveClip(double time, int trackIndex);
-    QImage         compositeVideoAt(double time);
+    TimelineClip* findActiveClip(double time, int trackIndex);
+    QImage compositeVideoAt(double time);
     QVector<float> mixAudioAt(double time, double frameDuration);
-    QImage         decodeVideoFrame(TimelineClip* clip, double timelineTime);
+    QImage decodeVideoFrame(TimelineClip* clip, double timelineTime);
     QVector<float> decodeAudioChunk(TimelineClip* clip, double timelineTime, double duration);
 
     QImage applyClipEffects(const QImage& frame, const TimelineClip& clip);
@@ -135,12 +131,12 @@ public:
                                   int type, float progress);
 
     static int transitionNameToCode(const QString& name) {
-        if (name == "fade_in"  || name == "fade_out") return 1;
-        if (name == "wipe_right") return 2;
-        if (name == "wipe_left")  return 3;
-        if (name == "zoom_in")    return 4;
-        if (name == "zoom_out")   return 5;
-        if (name == "flash")      return 6;
+        if (name == "fade_in"  || name == "fade_out")return 1;
+        if (name == "wipe_right")return 2;
+        if (name == "wipe_left")return 3;
+        if (name == "zoom_in")return 4;
+        if (name == "zoom_out")return 5;
+        if (name == "flash")return 6;
         return 0;
     }
 
@@ -159,7 +155,7 @@ private:
     double m_fps;
     int m_bitrate;
 
-    QThread*      m_thread;
+    QThread* m_thread;
     RenderWorker* m_worker;
 };
 

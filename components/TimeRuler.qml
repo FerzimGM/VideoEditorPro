@@ -43,11 +43,9 @@ Rectangle {
                 secondsPerMark = 1   // Каждую секунду
             }
             
-            // Рисуем метки
             for (var time = 0; time <= duration; time += secondsPerMark) {
                 var x = time * pixelsPerSecond
                 
-                // Главные метки
                 ctx.strokeStyle = Theme.textSecondary
                 ctx.lineWidth = 2
                 ctx.beginPath()
@@ -55,7 +53,7 @@ Rectangle {
                 ctx.lineTo(x, height)
                 ctx.stroke()
                 
-                // Текст времени - ЯРКИЙ
+                // Текст времени
                 ctx.fillStyle = Theme.textPrimary
                 ctx.font = "bold 11px 'Segoe UI', Arial, sans-serif"
                 var timeText = formatTime(time)

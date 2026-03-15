@@ -8,7 +8,6 @@
         <file>components/VideoPlayer.qml</file>
         <file>components/PlaybackControls.qml</file>
         <file>components/Timeline.qml</file>
-        <file>components/AudioClip.qml</file>
         <file>components/TimeRuler.qml</file>
         <file>components/Track.qml</file>
         <file>components/VideoClip.qml</file>

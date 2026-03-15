@@ -4,8 +4,8 @@
 #include <QIcon>
 #include <QQuickStyle>
 #include <QQuickWindow>
-#include "timeline.h"  // ← Подключаем наш Timeline!
-#include "EffectImageProvider.h"   // ← ДОБАВИТЬ этот include
+#include "timeline.h"
+#include "EffectImageProvider.h"
 
 int main(int argc, char *argv[])
 {
@@ -42,6 +42,14 @@ int main(int argc, char *argv[])
 
     // Регистрация cppTimeline
     engine.rootContext()->setContextProperty("cppTimeline", &timeline);
+
+    engine.rootContext()->setContextProperty("DEBUG_MODE",
+#ifdef QT_DEBUG
+    true
+#else
+    false
+#endif
+    );
 
     qDebug() << "✅ Timeline + EffectImageProvider зарегистрированы";
 

@@ -8,7 +8,7 @@ import "theme.js" as Theme
 QtObject {
     id: appRoot
 
-    // ===== ОКНО 1: SPLASH SCREEN =====
+    // ОКНО 1: SPLASH SCREEN
     property var splashWindow: ApplicationWindow {
         id: splashWin
         visible: true
@@ -43,7 +43,7 @@ QtObject {
         }
     }
 
-    // ===== ГЛАВНОЕ ОКНО =====
+    // ГЛАВНОЕ ОКНО
     property var mainWindow: ApplicationWindow {
         id: root
         visible: false
@@ -55,11 +55,11 @@ QtObject {
         color: Theme.backgroundColor
         flags: Qt.Window | Qt.FramelessWindowHint
 
-        // *** cutKeyPressed объявлен здесь, в Window root ***
-        // Shortcuts тоже в Window root → доступ без проблем
+        // cutKeyPressed объявлен здесь, в Window root
+        // Shortcuts тоже в Window root - доступ без проблем
         property bool cutKeyPressed: false
 
-        // ===== ПАРАМЕТРЫ ЭКСПОРТА (из ExportPanel в LeftSidebar) =====
+        // ПАРАМЕТРЫ ЭКСПОРТА (из ExportPanel в LeftSidebar)
         // Сохраняются когда пользователь нажимает "Сохранить видео"
         property string _exportResolution: "1920×1080"
         property string _exportFormat: "MP4"
@@ -150,8 +150,7 @@ QtObject {
             visible: false
         }
 
-        // ===== КОНТЕКСТНЫЕ МЕНЮ (прямо в ApplicationWindow) =====
-        // Menu здесь — единственное место где Overlay.overlay гарантированно работает.
+        // КОНТЕКСТНЫЕ МЕНЮ
         // В дочерних компонентах (.qml файлах) Overlay.overlay возвращает null в Qt 6.
         // Хранит видимость видео/аудио полос каждого клипа
         QtObject {
@@ -159,7 +158,7 @@ QtObject {
             property var _hidden: ({})
             property var _muted: ({})
             property int muteVersion: 0
-            property int hiddenVersion: 0 // счётчик для принудительного пересчёта videoHidden/audioHidden
+            property int hiddenVersion: 0
 
             function isMuted(clipId) {
                 return _muted[clipId] === true
@@ -177,7 +176,7 @@ QtObject {
                 var h = Object.assign({}, _hidden)
                 h[clipId + "_v"] = val
                 _hidden = h
-                hiddenVersion++ // триггер для биндингов в Track.qml
+                hiddenVersion++
                 if (cppTimeline)
                     cppTimeline.setClipVideoHidden(clipId, val)
             }
@@ -185,7 +184,7 @@ QtObject {
                 var h = Object.assign({}, _hidden)
                 h[clipId + "_a"] = val
                 _hidden = h
-                hiddenVersion++ // триггер для биндингов в Track.qml
+                hiddenVersion++
                 if (cppTimeline)
                     cppTimeline.setClipAudioHidden(clipId, val)
             }
@@ -197,7 +196,7 @@ QtObject {
             }
         }
 
-        // ===== КЭШ КЛИПОВ — обновляется только при clipsChanged =====
+        //  КЭШ КЛИПОВ — обновляется только при clipsChanged
         // Устраняет спам getClipsForTrack: раньше hideVideo/hideAudio вызывали
         // getClipsForTrack при каждом изменении currentTime (25+ раз в секунду).
         QtObject {
@@ -214,17 +213,18 @@ QtObject {
             }
             // currentTime обновляется через onTimePositionChanged (из playbackTimeUpdated)
             // Здесь НЕ обновляем — иначе двойной цикл обновлений
-            // function onCurrentTimeChanged() { ... }
             function onRenderProgress(percent) {
                 exportDialog.renderProgress = percent
             }
             function onRenderFinished(success) {
                 exportDialog.isRendering = false
                 if (success) {
-                    console.log("✅ Экспорт завершён!")
+                    if (DEBUG_MODE)
+                        console.log("✅ Экспорт завершён!")
                     exportDialog.close()
                 } else {
-                    console.log("❌ Ошибка экспорта")
+                    if (DEBUG_MODE)
+                        console.log("❌ Ошибка экспорта")
                 }
             }
         }
@@ -322,7 +322,8 @@ QtObject {
                 onTriggered: {
                     var nowHidden = clipStates.isVideoHidden(menuContext.clipId)
                     clipStates.setVideoHidden(menuContext.clipId, !nowHidden)
-                    console.log("🙈 Видео скрыто:", !nowHidden)
+                    if (DEBUG_MODE)
+                        console.log("🙈 Видео скрыто:", !nowHidden)
                 }
             }
             MenuSeparator {
@@ -452,7 +453,7 @@ QtObject {
             property bool snapEnabled: true
         }
 
-        // ===== МЕНЕДЖЕР ВЫДЕЛЕНИЯ =====
+        // МЕНЕДЖЕР ВЫДЕЛЕНИЯ
         // selectionManager доступен из VideoClip.qml и Track.qml по id
         QtObject {
             id: selectionManager
@@ -465,7 +466,8 @@ QtObject {
         Connections {
             target: cppTimeline
             function onTotalDurationChanged() {
-                console.log("⏱️ Duration:", cppTimeline.totalDuration)
+                if (DEBUG_MODE)
+                    console.log("⏱️ Duration:", cppTimeline.totalDuration)
             }
             // Сбрасываем выделение ТОЛЬКО при удалении клипа,
             // чтобы при перемещении выделение не слетало
@@ -477,7 +479,7 @@ QtObject {
             }
         }
 
-        // ===== ДИАЛОГИ =====
+        //  ДИАЛОГИ
         FileDialog {
             id: openVideoDialog
             title: "Открыть видео"
@@ -488,7 +490,7 @@ QtObject {
                 if (filepath.match(/^\/[A-Za-z]:\//))
                     filepath = filepath.substring(1)
 
-                // ***  добавляем в конец последнего клипа, не на текущее время ***
+                // добавляем в конец последнего клипа, не на текущее время
                 // Если видеофайлы уже есть — ставим новый после них
                 // Если нет — ставим на 0
                 var startTime = 0
@@ -506,8 +508,10 @@ QtObject {
                         startTime = trackEnd // всегда в конец для простоты
                 }
 
-                console.log("Добавляю видео:", filepath, "startTime:",
-                            startTime)
+                if (DEBUG_MODE) {
+                    console.log("Добавляю видео:", filepath, "startTime:",
+                                startTime)
+                }
                 clipManager.addClip(filepath, 1, startTime)
             }
         }
@@ -575,22 +579,25 @@ QtObject {
 
                 var fmt = root._exportFormat || "MP4"
 
-                // Синхронизируем clipStates → C++ и запускаем рендер
-                // (инлайн вместо функции — FileDialog.onAccepted в Qt 6
-                //  не видит функции ApplicationWindow напрямую)
+                // Синхронизируем clipStates -> C++ и запускаем рендер.
+                // ВАЖНО: используем UID клипов из clipsCache, НЕ sequential-индексы.
+                // clipStates._hidden хранит по UID ("5_v": true).
+                // isVideoHidden(0) никогда не найдёт скрытый клип с UID=5.
                 var hiddenMap = {}
                 var mutedMap = {}
-                for (var i = 0; i < cppTimeline.clipCount; i++) {
-                    hiddenMap[i + "_v"] = clipStates.isVideoHidden(i)
-                    hiddenMap[i + "_a"] = clipStates.isAudioHidden(i)
-                    mutedMap[i] = clipStates.isMuted(i)
+                var allClips = clipsCache.track1.concat(clipsCache.track2)
+                for (var ci = 0; ci < allClips.length; ci++) {
+                    var clipId = allClips[ci].id
+                    hiddenMap[clipId + "_v"] = clipStates.isVideoHidden(clipId)
+                    hiddenMap[clipId + "_a"] = clipStates.isAudioHidden(clipId)
+                    mutedMap[clipId] = clipStates.isMuted(clipId)
                 }
                 cppTimeline.syncClipStatesForRender(hiddenMap, mutedMap)
                 cppTimeline.renderToFile(filepath, w, h, fmt)
             }
         }
 
-        // ── Окно рендера — frameless, поверх всех, не скрывается ──
+        // Окно рендера — frameless, поверх всех, не скрывается
         Window {
             id: exportDialog
             title: "Экспорт видео"
@@ -625,7 +632,7 @@ QtObject {
                 }
             }
 
-            // ── Фон ──
+            // Фон
             Rectangle {
                 anchors.fill: parent
                 color: Theme.backgroundColor
@@ -751,11 +758,60 @@ QtObject {
                             }
                         }
 
+                        Text {
+                            text: "Формат"
+                            color: Theme.textSecondary
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.fontSize
+                        }
+                        ComboBox {
+                            id: exportFormatCombo
+                            Layout.fillWidth: true
+                            model: ["MP4", "AVI", "MOV", "MKV", "WebM"]
+                            contentItem: Text {
+                                text: parent.displayText
+                                color: Theme.textPrimary
+                                font.family: Theme.fontFamily
+                                font.pixelSize: Theme.fontSize
+                                verticalAlignment: Text.AlignVCenter
+                                leftPadding: 8
+                            }
+                            background: Rectangle {
+                                color: Theme.backgroundDark
+                                border.color: Theme.borderLight
+                                border.width: 1
+                                radius: Theme.borderRadius
+                            }
+                        }
+
                         Button {
                             Layout.fillWidth: true
                             Layout.preferredHeight: 36
                             text: "▶  Экспортировать"
-                            onClicked: exportFileDialog.open()
+                            onClicked: {
+                                var format = exportFormatCombo.currentText
+                                root._exportResolution = resolutionCombo.currentText
+                                root._exportFormat = format
+                                var extMap = {
+                                    "MP4": "mp4",
+                                    "AVI": "avi",
+                                    "MOV": "mov",
+                                    "MKV": "mkv",
+                                    "WebM": "webm"
+                                }
+                                var ext = extMap[format] || "mp4"
+                                exportFileDialog.defaultSuffix = ext
+                                var filterLabel = {
+                                    "mp4": "MP4 (*.mp4)",
+                                    "avi": "AVI (*.avi)",
+                                    "mov": "MOV (*.mov)",
+                                    "mkv": "MKV (*.mkv)",
+                                    "webm": "WebM (*.webm)"
+                                }
+                                exportFileDialog.nameFilters = [filterLabel[ext]
+                                                                || "MP4 (*.mp4)"]
+                                exportFileDialog.open()
+                            }
                             contentItem: Text {
                                 text: parent.text
                                 color: Theme.textPrimary
@@ -777,7 +833,7 @@ QtObject {
                         }
                     }
 
-                    // ── Круговой прогресс ──
+                    // Круговой прогресс
                     Item {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
@@ -888,18 +944,6 @@ QtObject {
                     }
                 }
             }
-
-            Connections {
-                target: cppTimeline
-                function onRenderProgress(percent) {
-                    exportDialog.renderProgress = percent
-                }
-                function onRenderFinished(success) {
-                    exportDialog.isRendering = false
-                    if (success)
-                        exportDialog.close()
-                }
-            }
         }
 
         // Верхняя панель
@@ -921,7 +965,7 @@ QtObject {
             onClose: Qt.quit()
         }
 
-        // ===== ГЛАВНЫЙ LAYOUT =====
+        // ГЛАВНЫЙ LAYOUT
         ColumnLayout {
             anchors.top: menuBar.bottom
             anchors.left: parent.left
@@ -946,17 +990,26 @@ QtObject {
                     onExportRequested: (resolution, format) => {
                                            root._exportResolution = resolution
                                            root._exportFormat = format
-                                           // Выставляем расширение по умолчанию
                                            var extMap = {
                                                "MP4": "mp4",
                                                "AVI": "avi",
                                                "MOV": "mov",
                                                "MKV": "mkv",
-                                               "WEBM": "webm",
                                                "WebM": "webm"
                                            }
-                                           exportFileDialog.defaultSuffix = extMap[format]
-                                           || "mp4"
+                                           var ext = extMap[format] || "mp4"
+                                           exportFileDialog.defaultSuffix = ext
+                                           // Переставляем фильтры — выбранный формат первым
+                                           var allF = ["MP4 (*.mp4)", "AVI (*.avi)", "MOV (*.mov)", "MKV (*.mkv)", "WebM (*.webm)"]
+                                           var allE = ["mp4", "avi", "mov", "mkv", "webm"]
+                                           var fi = allE.indexOf(ext)
+                                           if (fi >= 0) {
+                                               var reordered = [allF[fi]]
+                                               for (var i = 0; i < allF.length; i++)
+                                               if (i !== fi)
+                                               reordered.push(allF[i])
+                                               exportFileDialog.nameFilters = reordered
+                                           }
                                            exportFileDialog.open()
                                        }
                 }
@@ -992,10 +1045,10 @@ QtObject {
                             currentTime: playbackManager.currentTime
                             duration: playbackManager.duration
                             isPlaying: playbackManager.isPlaying
-                            // *** Передаём скорость → QMediaPlayer.playbackRate ***
+                            //  Передаём скорость - QMediaPlayer.playbackRate
                             playbackSpeed: playbackManager.playbackSpeed
                             volume: playbackManager.volume
-                            // hideVideo=true только если track1 скрыт И track2 пустой → чёрный экран
+                            // hideVideo=true только если track1 скрыт И track2 пустой - чёрный экран
                             hideVideo: {
                                 var _hv = clipStates._hidden
                                 if (!cppTimeline || !clipStates)
@@ -1018,9 +1071,9 @@ QtObject {
                                 for (var j = 0; j < c2.length; j++) {
                                     if (t >= c2[j].startTime
                                             && t < c2[j].startTime + c2[j].duration)
-                                        return false // track2 есть → показываем его
+                                        return false // track2 есть - показываем его
                                 }
-                                return true // оба пусты/скрыты → чёрный экран
+                                return true // оба пусты/скрыты - чёрный экран
                             }
                             // hideTrack1Video: скрыть только videoOutput1 (track1), track2 остаётся
                             hideTrack1Video: {
@@ -1080,7 +1133,7 @@ QtObject {
                                                                - time) > 0.05) {
                                                            playbackManager.currentTime = time
                                                            // НЕ пишем cppTimeline.currentTime во время воспроизведения:
-                                                           // это вызывает setCurrentTime → seekTo → сброс кэша → Cache miss
+                                                           // это вызывает setCurrentTime - seekTo - сброс кэша - Cache miss
                                                            if (!playbackManager.isPlaying)
                                                            cppTimeline.currentTime = time
                                                        }
@@ -1147,7 +1200,6 @@ QtObject {
                         }
                         onSnapToggled: {
                             playbackManager.snapEnabled = !playbackManager.snapEnabled
-                            // ✅ ДОБАВИТЬ: передача в timeline
                             timeline.snapEnabled = playbackManager.snapEnabled
                         }
 
@@ -1156,8 +1208,10 @@ QtObject {
                                 root.cutKeyPressed = true
                                 var t = playbackManager.currentTime
                                 var selId = selectionManager.selectedClipId
-                                console.log("✂ Разрезать в позиции:", t,
-                                            "clip:", selId)
+                                if (DEBUG_MODE) {
+                                    console.log("✂ Разрезать в позиции:", t,
+                                                "clip:", selId)
+                                }
                                 if (cppTimeline) {
                                     if (selId >= 0) {
                                         // Режем выделенный клип по индексу
@@ -1172,10 +1226,13 @@ QtObject {
                             }
                         }
 
-                        onClearEffectsClicked: console.log("Удалить эффекты")
+                        onClearEffectsClicked: {
+                            if (DEBUG_MODE)
+                                console.log("Удалить эффекты")
+                        }
                     }
 
-                    // Timeline — НИЖЕ PlaybackControls
+                    // Timeline
                     Timeline {
                         id: timeline
                         Layout.fillWidth: true
@@ -1186,9 +1243,9 @@ QtObject {
                         zoomLevel: playbackManager.zoomLevel
                         snapEnabled: playbackManager.snapEnabled
 
-                        // *** КЛЮЧЕВОЕ: пробрасываем selectedClipId вниз по цепочке ***
-                        // main → Timeline.selectedClipId → Track.selectedClipId
-                        //   → VideoClip.selected = (root.selectedClipId === modelData.id)
+                        //  КЛЮЧЕВОЕ: пробрасываем selectedClipId вниз по цепочке
+                        // main - Timeline.selectedClipId - Track.selectedClipId
+                        //   - VideoClip.selected = (root.selectedClipId === modelData.id)
                         selectedClipId: selectionManager.selectedClipId
                         clipStates: clipStates
 
@@ -1207,13 +1264,15 @@ QtObject {
                                            playbackManager.zoomLevel = zoom
                                        }
 
-                        // *** Получаем выбор клипа снизу вверх: VideoClip → Track → Timeline → main ***
+                        // *** Получаем выбор клипа снизу вверх: VideoClip - Track - Timeline - main ***
                         onClipSelected: id => {
                                             selectionManager.selectedClipId
                                             = (selectionManager.selectedClipId === id) ? -1 : id
-                                            console.log(
-                                                id >= 0 ? "✅ Выделен клип "
-                                                          + id : "❌ Выделение снято")
+                                            if (DEBUG_MODE) {
+                                                console.log(
+                                                    id >= 0 ? "✅ Выделен клип "
+                                                              + id : "❌ Выделение снято")
+                                            }
                                         }
                         onEffectsRequested: id => {
                                                 clipEffectsDialog.openForClip(
@@ -1234,15 +1293,20 @@ QtObject {
                                                     }
                                                     var lp = root.contentItem.mapFromGlobal(
                                                         x, y)
-                                                    console.log(
-                                                        ">>> POPUP x=", lp.x,
-                                                        "y=", lp.y, "w=",
-                                                        videoContextMenu.width)
+                                                    if (DEBUG_MODE) {
+                                                        console.log(
+                                                            ">>> POPUP x=",
+                                                            lp.x, "y=",
+                                                            lp.y, "w=",
+                                                            videoContextMenu.width)
+                                                    }
                                                     videoContextMenu.popup(
                                                         lp.x, lp.y)
-                                                    console.log(
-                                                        ">>> visible=",
-                                                        videoContextMenu.visible)
+                                                    if (DEBUG_MODE) {
+                                                        console.log(
+                                                            ">>> visible=",
+                                                            videoContextMenu.visible)
+                                                    }
                                                 }
 
                         onShowAudioContextMenu: (clipId, track, clipName, isMuted, x, y) => {
@@ -1260,8 +1324,8 @@ QtObject {
             }
         }
 
-        // ===== ГОРЯЧИЕ КЛАВИШИ =====
-        // Все Shortcut находятся в Window root → cutKeyPressed доступен без проблем
+        // ГОРЯЧИЕ КЛАВИШИ
+        // Все Shortcut находятся в Window root - cutKeyPressed доступен без проблем
         Shortcut {
             sequence: "Space"
             onActivated: playbackManager.isPlaying = !playbackManager.isPlaying
@@ -1332,22 +1396,24 @@ QtObject {
             }
         }
 
-        // *** Delete — удалить выделенный клип ***
+        // Delete — удалить выделенный клип
         Shortcut {
             sequence: "Delete"
             onActivated: {
                 var id = selectionManager.selectedClipId
                 if (id >= 0 && cppTimeline) {
-                    console.log("🗑️ Delete выделенного клипа", id)
+                    if (DEBUG_MODE)
+                        console.log("🗑️ Delete выделенного клипа", id)
                     selectionManager.selectedClipId = -1
                     cppTimeline.removeClip(id)
                 } else {
-                    console.log("ℹ️ Ничего не выделено для удаления")
+                    if (DEBUG_MODE)
+                        console.log("ℹ️ Ничего не выделено для удаления")
                 }
             }
         }
 
-        // *** C — разрезать выделенный клип по playhead ***
+        // C — разрезать выделенный клип по playhead
         Shortcut {
             sequence: "C"
             onActivated: {
@@ -1355,7 +1421,8 @@ QtObject {
                     root.cutKeyPressed = true
                     var t = playbackManager.currentTime
                     var selId = selectionManager.selectedClipId
-                    console.log("✂ Разрезать (C) at", t, "clip:", selId)
+                    if (DEBUG_MODE)
+                        console.log("✂ Разрезать (C) at", t, "clip:", selId)
                     if (cppTimeline) {
                         if (selId >= 0) {
                             cppTimeline.splitClip(selId, t)
@@ -1370,7 +1437,7 @@ QtObject {
             }
         }
 
-        // *** Escape — снять выделение ***
+        // Escape — снять выделение
         Shortcut {
             sequence: "Escape"
             onActivated: selectionManager.clearSelection()
@@ -1378,15 +1445,24 @@ QtObject {
 
         Shortcut {
             sequence: "Ctrl+Z"
-            onActivated: console.log("Undo")
+            onActivated: {
+                if (DEBUG_MODE)
+                    console.log("Undo")
+            }
         }
         Shortcut {
             sequence: "Ctrl+Y"
-            onActivated: console.log("Redo")
+            onActivated: {
+                if (DEBUG_MODE)
+                    console.log("Redo")
+            }
         }
         Shortcut {
             sequence: "M"
-            onActivated: console.log("Marker at", playbackManager.currentTime)
+            onActivated: {
+                if (DEBUG_MODE)
+                    console.log("Marker at", playbackManager.currentTime)
+            }
         }
         Shortcut {
             sequence: "+"

@@ -35,7 +35,7 @@ public:
 
     double currentTime()  const { return m_currentTime; }
     double totalDuration() const;
-    int    clipCount()    const { return m_clips.size(); }
+    int clipCount() const { return m_clips.size(); }
     const QList<TimelineClip>& clips() const { return m_clips; }
     TimelineClip* getClip(int index);
     TimelineClip* getClipAt(double time, int trackIndex);
@@ -52,18 +52,16 @@ public:
 
     // ── Совместимость ─────────────────────────────────────────────────────
     Q_INVOKABLE QImage  getCurrentFrameAt(double time, int trackIndex = 1);
-    Q_INVOKABLE QString getFramePathAt(double time, int trackIndex = 1);
-    Q_INVOKABLE void    requestFrame(double time, int trackIndex = 1);
 
     Q_INVOKABLE QVariantMap getClipInfoAt(double time, int trackIndex = 1);
-    Q_INVOKABLE QString     getActiveClipPath(double time, int trackIndex = 1);
+    Q_INVOKABLE QVariantMap getClipInfoById(int uidOrIndex);
 
     // ── Воспроизведение ───────────────────────────────────────────────────
-    Q_INVOKABLE void   startPlayback(double fromTime, double speed = 1.0);
-    Q_INVOKABLE void   stopPlayback();
-    Q_INVOKABLE void   setPlaybackVolume(double volume);
-    Q_INVOKABLE void   setTrackAudioMuted(int track, bool muted);
-    Q_INVOKABLE void   setTrackVideoHidden(int track, bool hidden);
+    Q_INVOKABLE void startPlayback(double fromTime, double speed = 1.0);
+    Q_INVOKABLE void stopPlayback();
+    Q_INVOKABLE void setPlaybackVolume(double volume);
+    Q_INVOKABLE void setTrackAudioMuted(int track, bool muted);
+    Q_INVOKABLE void setTrackVideoHidden(int track, bool hidden);
     Q_INVOKABLE double getPlaybackTime() const;
 
     // ── Аудио-микс для AudioPlaybackEngine ───────────────────────────────
@@ -116,39 +114,38 @@ signals:
     void frameReady(const QImage &frame, double time);
 
 private:
-    QMap<QString, FrameCache*>    m_frameCaches;
+    QMap<QString, FrameCache*> m_frameCaches;
     QMap<QString, DecoderThread*> m_decoderThreads;
-    QMap<QString, MediaDecoder*>  m_audioDecoders;
+    QMap<QString, MediaDecoder*> m_audioDecoders;
 
     struct ClipMeta {
-        int    width  = 0;
-        int    height = 0;
-        double fps    = 0.0;
+        int width  = 0;
+        int height = 0;
+        double fps = 0.0;
     };
     QMap<QString, ClipMeta> m_clipMeta;
 
     QList<TimelineClip> m_clips;
-    double m_currentTime       = 0.0;
-    bool   m_frameProcessing   = false;  // защита от накопления кадров
-    int    m_nextUid           = 0;
-    int    m_previewFrameIndex = 0;
+    double m_currentTime = 0.0;
+    bool m_frameProcessing = false;  // защита от накопления кадров
+    int m_nextUid = 0;
+    int m_previewFrameIndex = 0;
 
-    RenderEngine*        m_renderEngine  = nullptr;
+    RenderEngine* m_renderEngine  = nullptr;
     EffectImageProvider* m_imageProvider = nullptr;
-    AudioPlaybackEngine* m_audioEngine   = nullptr;
-    QTimer*              m_videoTimer    = nullptr;
-    double               m_playbackSpeed = 1.0;
-    bool                 m_stopping      = false;
-    bool                 m_forceNextFrame  = false;
+    AudioPlaybackEngine* m_audioEngine = nullptr;
+    QTimer* m_videoTimer = nullptr;
+    double m_playbackSpeed = 1.0;
+    bool m_stopping = false;
+    bool m_forceNextFrame = false;
     // Персистентные кольцевые буферы для аудиоэффектов (reverb/echo) в live-режиме
     QHash<QString, std::vector<float>> m_audioDelayBufs;
-    QHash<QString, int>                m_audioDelayPos;
-    qint64               m_lastSyncDecodeMs = 0; // разрешить sync-decode при следующем cache miss
+    QHash<QString, int> m_audioDelayPos;
+    qint64 m_lastSyncDecodeMs = 0; // разрешить sync-decode при следующем cache miss
 
     void sortClips();
     double getClipSourceDuration(const QString& filepath);
     double toSourceTime(const QString& filepath, double timelineTime) const;
-    void startDecoderThread(const QString& filepath, double fps);
     MediaDecoder* getOrCreateAudioDecoder(const QString& filepath);
 
     QImage getCompositeFrame(double time,
@@ -158,4 +155,6 @@ private:
 };
 
 #endif // TIMELINE_H
+
+
 

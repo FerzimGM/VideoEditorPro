@@ -15,15 +15,16 @@ Rectangle {
     property real pixelsPerSecond: 10
     property bool snapEnabled: true // Snap включён
 
-    // *** Клипы обеих дорожек для cross-track магнит-snap ***
+    // Клипы обеих дорожек для cross-track магнит-snap
     // Каждой дорожке передаём клипы ДРУГОЙ дорожки, чтобы магнит
     // притягивался к концам клипов на обеих дорожках одновременно.
     property var track1Clips: []
     property var track2Clips: []
 
-    // ✅ Отслеживать изменения snapEnabled
+    // ✅ Отслеживать изменения snapEnabled (LOGS)
     onSnapEnabledChanged: {
-        console.log("🧲 Snap:", snapEnabled ? "ВКЛ" : "ВЫКЛ")
+        if (DEBUG_MODE)
+            console.log("🧲 Snap:", snapEnabled ? "ВКЛ" : "ВЫКЛ")
     }
 
     Connections {
@@ -41,8 +42,7 @@ Rectangle {
         root.track2Clips = cppTimeline ? cppTimeline.getClipsForTrack(2) : []
     }
 
-    // *** Выделение клипов через property-цепочку (main → Timeline → Track → VideoClip) ***
-    // Прямой доступ по ID между компонентами в QML не работает!
+    // Выделение клипов через property-цепочку (main → Timeline → Track → VideoClip)
     property int selectedClipId: -1
     property var clipStates: null
     property int _ctxClipId: -1
@@ -61,19 +61,16 @@ Rectangle {
         pixelsPerSecond = zoomLevel / 10
     }
 
-    // Обновляем duration при добавлении клипов
+    // Обновляем duration при добавлении клипов (LOGS)
     Connections {
         target: cppTimeline
         function onTotalDurationChanged() {
-            console.log("📏 Общая длительность:", cppTimeline.totalDuration)
+            if (DEBUG_MODE)
+                console.log("📏 Общая длительность:", cppTimeline.totalDuration)
         }
         function onClipsChanged() {
-            console.log("📋 Clips changed")
-            // ВАЖНО: НЕ делаем root.selectedClipId = -1 напрямую!
-            // Прямое JS-присваивание в QML разрушает binding навсегда.
-            // Binding: selectedClipId: selectionManager.selectedClipId (в main.qml)
-            // После прямого присваивания selectionManager больше не обновляет Timeline.
-            // Решение: только сигнал → main.qml сбросит selectionManager → binding сработает.
+            if (DEBUG_MODE)
+                console.log("📋 Clips changed")
             root.clipSelected(-1)
         }
     }
@@ -207,7 +204,7 @@ Rectangle {
                     currentTime: root.currentTime
                 }
 
-                // ***  используем root.pixelsPerSecond и root.snapEnabled (не timeline.*) ***
+                // используем root.pixelsPerSecond и root.snapEnabled
                 Repeater {
                     model: 2
 
@@ -215,13 +212,13 @@ Rectangle {
                         trackNumber: index + 1
                         Layout.fillWidth: true
                         Layout.preferredHeight: Theme.trackHeight * 2
-                        //  root.pixelsPerSecond (не timeline.pixelsPerSeconde — опечатка!)
+                        //  root.pixelsPerSecond
                         pixelsPerSecond: root.pixelsPerSecond
-                        //  root.snapEnabled (не timeline.snapEnabled)
+                        //  root.snapEnabled
                         snapEnabled: root.snapEnabled
-                        // *** Клипы другой дорожки для cross-track магнит-snap ***
+                        // Клипы другой дорожки для cross-track магнит-snap
                         otherTrackClips: index === 0 ? root.track2Clips : root.track1Clips
-                        // *** Передаём выделение вниз по цепочке ***
+                        // Передаём выделение вниз по цепочке
                         selectedClipId: root.selectedClipId
                         clipStates: root.clipStates
 
@@ -230,29 +227,36 @@ Rectangle {
                                             root.clipSelected(id)
                                         }
 
-                        // Когда видео дропнули на дорожку
+                        // Когда видео дропнули на дорожку (LOGW)
                         onClipDropped: (filepath, time) => {
-                                           console.log(
-                                               "=== Timeline.onClipDropped ===")
-                                           console.log("filepath:", filepath)
-                                           console.log("time:", time)
-                                           console.log("track:", index + 1)
-                                           //  используем глобальный cppTimeline (не timeline.cppTimeline)
-                                           if (cppTimeline) {
+                                           if (DEBUG_MODE) {
                                                console.log(
-                                                   "Calling cppTimeline.addClip...")
+                                                   "=== Timeline.onClipDropped ===")
+                                           }
+                                           if (DEBUG_MODE)
+                                           console.log("filepath:", filepath)
+                                           if (DEBUG_MODE)
+                                           console.log("time:", time)
+                                           if (DEBUG_MODE)
+                                           console.log("track:", index + 1)
+                                           if (cppTimeline) {
+                                               if (DEBUG_MODE) {
+                                                   console.log(
+                                                       "Calling cppTimeline.addClip...")
+                                               }
                                                cppTimeline.addClip(filepath,
                                                                    index + 1,
                                                                    time)
                                            } else {
-                                               console.log(
-                                                   "ERROR: cppTimeline is NULL!")
+                                               if (DEBUG_MODE) {
+                                                   console.log(
+                                                       "ERROR: cppTimeline is NULL!")
+                                               }
                                            }
                                        }
 
                         // Когда клип подвинули
                         onClipMoved: (clipId, newTime) => {
-                                         //  используем глобальный cppTimeline (не root.cppTimeline)
                                          if (cppTimeline) {
                                              cppTimeline.moveClip(clipId,
                                                                   index + 1,
@@ -277,7 +281,7 @@ Rectangle {
                                                         }
                                                     }
 
-                                                    // Эмитим сигналы (не popup!)
+                                                    // Эмитим сигналы
                                                     if (isVideo)
                                                     root.showVideoContextMenu(
                                                         id, index + 1,
@@ -298,10 +302,9 @@ Rectangle {
                 }
             }
 
-            // *** Линия воспроизведения (Playhead) ***
+            // Линия воспроизведения (Playhead)
             Rectangle {
                 id: playhead
-                //  x привязан к currentTime * pixelsPerSecond
                 x: root.currentTime * root.pixelsPerSecond
                 y: 0
                 width: 2
@@ -362,10 +365,6 @@ Rectangle {
                     }
                 }
             }
-
-            // *** ИСПРАВЛЕНО: MouseArea только над TimeRuler (высота 40px) ***
-            // Раньше anchors.fill покрывал весь flickable (z:999) и перехватывал
-            // все клики на клипы — они никогда не доходили до VideoClip.
             MouseArea {
                 id: playheadMouseArea
                 anchors.top: parent.top
@@ -376,19 +375,11 @@ Rectangle {
                 acceptedButtons: Qt.LeftButton
 
                 onClicked: mouse => {
-                               // *** FIX: mouse.x уже внутри flickable — НЕ добавляем contentX! ***
-                               // mouse.x — это позиция относительно начала контента flickable
                                var time = mouse.x / root.pixelsPerSecond
                                root.timeChanged(
                                    Math.max(0, Math.min(root.duration, time)))
                            }
             }
-
-            // *** УДАЛЕНО: MouseArea ниже линейки ***
-            // ПРИЧИНА УДАЛЕНИЯ: в QML при одинаковом z побеждает тот, кто объявлен ПОЗЖЕ.
-            // Эта MouseArea была объявлена ПОСЛЕ ColumnLayout с клипами → перехватывала
-            // ВСЕ клики на клипы, VideoClip никогда не получал события мыши.
-            // Снятие выделения — через Escape (Shortcut в main.qml).
         }
     }
 

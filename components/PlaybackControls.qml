@@ -38,14 +38,10 @@ Rectangle {
         }
     }
 
+    // Кнопки воспроизведения
     RowLayout {
         anchors.fill: parent
         anchors.margins: Theme.spacing
-        spacing: Theme.spacing
-    }
-
-    // Кнопки воспроизведения
-    RowLayout {
         spacing: Theme.spacingSmall
 
         ControlButton {
@@ -252,7 +248,7 @@ Rectangle {
                 }
             }
 
-            // ── Громкость ────────────────────────────────────────────
+            // Громкость
             Row {
                 spacing: 4
                 Text {
