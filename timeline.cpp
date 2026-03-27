@@ -306,19 +306,8 @@ bool Timeline::moveClip(int uidOrIndex, int newTrackIndex, double newStartTime)
 
     sortClips();
 
-    // Кэш содержит кадры с source-временными ключами.
-    // После перемещения toSourceTime() даёт другой результат для того же
-    // timeline-времени → кэш промахивается → чёрный экран.
-    // Сброс кэша + seek декодера решают это.
-    const QString& moveFp = m_clips[index].filepath;
-    if (m_frameCaches.contains(moveFp))
-        m_frameCaches[moveFp]->clear();
-    if (m_decoderThreads.contains(moveFp))
-        m_decoderThreads[moveFp]->seekTo(toSourceTime(moveFp, m_currentTime));
-
     emit clipsChanged();
     emit clipModified(index);
-    emit totalDurationChanged();
 
     QMetaObject::invokeMethod(this, [this]() {
         if (m_audioEngine && m_audioEngine->isPlaying())
@@ -447,28 +436,12 @@ bool Timeline::trimClip(int uidOrIndex, double newTrimStart, double newTrimEnd)
     clip.trimStart = newTrimStart;
     clip.trimEnd = newTrimEnd;
 
-    // Получаем sourceDuration из кэша метаданных — не открываем декодер каждый раз.
-    // MediaDecoder.openFile() при частом трим-движении (каждые 50мс) создаёт
-    // огромную задержку. m_clipMeta заполняется один раз при addClip().
-    double sourceDuration = -1.0;
-    if (m_clipMeta.contains(clip.filepath) && m_clipMeta[clip.filepath].fps > 0) {
-        // sourceDuration = то что было до любых trim = trimStart + duration + trimEnd
-        // Но исходная длина файла у нас хранится в метаданных только как fps/w/h.
-        // Восстанавливаем: sourceDuration = clip.trimStart_before + clip.duration_before + clip.trimEnd_before
-        // Надёжнее: читаем из файла через кэш если есть, иначе открываем декодер.
-        // Считаем через старые значения: sourceDuration = newTrimStart + старый duration + newTrimEnd
-        // НО clip.duration ещё не обновлён → берём оригинал = clip.trimStart + clip.duration + clip.trimEnd
-        sourceDuration = clip.trimStart + clip.duration + clip.trimEnd;
-    }
-    if (sourceDuration <= 0) {
-        MediaDecoder decoder;
-        if (decoder.openFile(clip.filepath)) {
-            sourceDuration = decoder.getDuration();
-            decoder.closeFile();
-        }
-    }
-    if (sourceDuration > 0) {
+    MediaDecoder decoder;
+    if (decoder.openFile(clip.filepath))
+    {
+        double sourceDuration = decoder.getDuration();
         clip.duration = sourceDuration - newTrimStart - newTrimEnd;
+        decoder.closeFile();
     }
 
     if (clip.duration <= 0) {
@@ -1139,6 +1112,22 @@ bool Timeline::renderToFile(const QString& outputPath, int width, int height, co
     m_renderEngine->setOutputResolution(width, height);
     m_renderEngine->setOutputFormat(format);
 
+    // ── Битрейт видео — зависит от разрешения вывода ─────────────────────────
+    // Таблица: 640x360=2Mbps, 720p=6Mbps, 1080p=10Mbps, 4K=35Mbps.
+    // Используем верхнюю границу рекомендуемого диапазона для максимального качества.
+    // CRF в libx264 переопределит битрейт автоматически, но для h264_mf/mpeg4
+    // битрейт — единственный параметр качества.
+    {
+        int pixels = width * height;
+        int videoBitrate;
+        if      (pixels <= 640  * 360)  videoBitrate =  2000000;  // 640×360:  2 Mbps
+        else if (pixels <= 1280 * 720)  videoBitrate =  6000000;  // 720p:     6 Mbps
+        else if (pixels <= 1920 * 1080) videoBitrate = 10000000;  // 1080p:   10 Mbps
+        else if (pixels <= 2560 * 1440) videoBitrate = 20000000;  // 1440p:   20 Mbps
+        else                            videoBitrate = 35000000;  // 4K:      35 Mbps
+        m_renderEngine->setBitrate(videoBitrate);
+    }
+
     // Определить FPS из первого клипа
     double fps = 30.0;
     if (!m_clips.isEmpty() && m_clipMeta.contains(m_clips[0].filepath))
@@ -1371,17 +1360,8 @@ QVector<float> Timeline::getMixedAudio(double time, double duration,
 
 QImage Timeline::alphaComposite(const QImage& fg, const QImage& bg)
 {
-    // Промежуточная конвертация через RGB888 перед ARGB32.
-    // Защита от нестандартных форматов декодера (VAAPI, BGRA, NV12).
-    auto toARGB = [](const QImage& img) -> QImage {
-        if (img.format() == QImage::Format_ARGB32) return img;
-        if (img.format() == QImage::Format_RGB888)
-            return img.convertToFormat(QImage::Format_ARGB32);
-        return img.convertToFormat(QImage::Format_RGB888)
-            .convertToFormat(QImage::Format_ARGB32);
-    };
-    QImage fgA = toARGB(fg);
-    QImage bgA = toARGB(bg);
+    QImage fgA = fg.convertToFormat(QImage::Format_ARGB32);
+    QImage bgA = bg.convertToFormat(QImage::Format_ARGB32);
     QImage result(qMin(fgA.width(),  bgA.width()),
                   qMin(fgA.height(), bgA.height()),
                   QImage::Format_RGB888);

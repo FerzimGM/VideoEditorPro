@@ -15,7 +15,7 @@ MediaEncoder::MediaEncoder(QObject *parent)
     , m_width(1920)
     , m_height(1080)
     , m_fps(30.0)
-    , m_bitrate(15000000)
+    , m_bitrate(10000000)
     , m_audioEnabled(true)
     , m_videoFrameCount(0)
     , m_audioSampleCount(0)
@@ -241,7 +241,6 @@ bool MediaEncoder::initializeVideo() {
         if (cand.withOpts && isLibx264try) {
             av_dict_set(&td, "preset", "medium", 0);
             av_dict_set(&td, "tune", "film", 0);
-            av_dict_set(&td, "crf", "18", 0);
         }
         int r = avcodec_open2(testCtx, tryCodec, &td);
         av_dict_free(&td); avcodec_free_context(&testCtx);
@@ -274,12 +273,15 @@ bool MediaEncoder::initializeVideo() {
     if (!m_videoCodecContext) return false;
 
     m_videoCodecContext->codec_id  = videoCodecId;
-    m_videoCodecContext->bit_rate  = m_bitrate;
     m_videoCodecContext->width     = m_width;
     m_videoCodecContext->height    = m_height;
     m_videoCodecContext->time_base = AVRational{1, static_cast<int>(m_fps)};
-    m_videoCodecContext->gop_size  = 12;
+    // GOP = 2 секунды: хороший баланс между случайным доступом и сжатием.
+    // Слишком маленький GOP (напр. 1) даёт большой файл, слишком большой — долгий seek.
+    m_videoCodecContext->gop_size  = static_cast<int>(m_fps * 2);
     m_videoCodecContext->pix_fmt   = AV_PIX_FMT_YUV420P;
+    // max_b_frames=2: B-кадры дают ~20% экономии без потери качества
+    m_videoCodecContext->max_b_frames = 2;
 
     m_videoStream->time_base = m_videoCodecContext->time_base;
 
@@ -290,15 +292,24 @@ bool MediaEncoder::initializeVideo() {
                            qstrcmp(m_videoCodec->name, "libx264rgb") == 0);
     AVDictionary* opts = nullptr;
     if (isLibx264final) {
-        // CRF 18 = высокое качество (0=лучшее, 51=худшее).
-        // CRF игнорирует bit_rate и даёт постоянное визуальное качество.
-        av_dict_set(&opts, "preset", "medium", 0);
+        // CRF=18: высокое качество, визуально близко к lossless.
+        // Кодек сам выбирает битрейт под каждую сцену — динамичные сцены
+        // получают больше бит, статичные меньше. Это лучше фиксированного битрейта.
+        av_dict_set(&opts, "preset", "slow",   0); // медленнее → лучше сжатие
         av_dict_set(&opts, "tune",   "film",   0);
-        av_dict_set(&opts, "crf",    "18",     0);
-        m_videoCodecContext->bit_rate = 0; // CRF режим — битрейт управляется автоматически
-    } else if (videoCodecId == AV_CODEC_ID_VP9) {
-        av_dict_set(&opts, "crf", "33", 0);
-        av_dict_set(&opts, "b",   "0",  0);
+        av_dict_set(&opts, "crf",    "18",     0); // 0=lossless, 18=высокое, 28=среднее
+        m_videoCodecContext->bit_rate = 0; // CRF управляет качеством, не битрейт
+    } else {
+        // h264_mf, mpeg4, VP9 — задаём явный битрейт.
+        // VBV (Video Buffer Verifier): ограничиваем пиковый битрейт × 2
+        // чтобы не было внезапных огромных кадров при высокой детализации.
+        m_videoCodecContext->bit_rate       = m_bitrate;
+        m_videoCodecContext->rc_max_rate    = m_bitrate * 2;
+        m_videoCodecContext->rc_buffer_size = m_bitrate * 2;
+        if (videoCodecId == AV_CODEC_ID_VP9) {
+            av_dict_set(&opts, "crf", "20", 0); // VP9 тоже поддерживает CRF
+            av_dict_set(&opts, "b",   "0",  0);
+        }
     }
 
     int ret = avcodec_open2(m_videoCodecContext, m_videoCodec, &opts);
@@ -349,7 +360,10 @@ bool MediaEncoder::initializeAudio()
     m_audioCodecContext->codec_id = audioCodecId;
     m_audioCodecContext->sample_fmt = AV_SAMPLE_FMT_FLTP;  // AAC требует float planar
     m_audioCodecContext->sample_rate = AUDIO_SAMPLE_RATE;
-    m_audioCodecContext->bit_rate = 192000;  // 192 kbps — хорошее качество
+    // 256 kbps: верхняя граница «прозрачного» звучания для AAC.
+    // При 192 kbps возможны артефакты на высоких частотах (шипение, треск).
+    // При 256 kbps AAC практически неотличим от lossless на любом материале.
+    m_audioCodecContext->bit_rate = 256000;
 
     // Стерео layout
     AVChannelLayout stereo;
@@ -416,19 +430,30 @@ bool MediaEncoder::writeVideoFrame(const QImage& image)
     // Создать SwsContext для RGB-YUV (lazy init)
     if (!m_swsContext)
     {
+        // SWS_LANCZOS: лучшее качество при конвертации RGB→YUV.
+        // SWS_BILINEAR достаточен для масштабирования, но при цветовом
+        // преобразовании LANCZOS даёт заметно меньше артефактов.
         m_swsContext = sws_getContext(
             m_width, m_height, AV_PIX_FMT_RGB24,
             m_width, m_height, AV_PIX_FMT_YUV420P,
-            SWS_BILINEAR, nullptr, nullptr, nullptr
+            SWS_LANCZOS, nullptr, nullptr, nullptr
             );
         if (!m_swsContext) return false;
     }
 
-    // QImage - RGB24
-    QImage rgb = image.scaled(m_width, m_height,
-                              Qt::IgnoreAspectRatio,
-                              Qt::SmoothTransformation)
-                     .convertToFormat(QImage::Format_RGB888);
+    // Если кадр уже нужного размера — не масштабируем повторно.
+    // RenderWorker::compositeVideoAt() уже масштабировал через scaleFrame().
+    // Двойное масштабирование деградирует качество: каждый проход bilinear
+    // добавляет размытие. При несовпадении размеров — масштабируем один раз.
+    QImage rgb;
+    if (image.width() == m_width && image.height() == m_height) {
+        rgb = image.convertToFormat(QImage::Format_RGB888);
+    } else {
+        rgb = image.scaled(m_width, m_height,
+                           Qt::IgnoreAspectRatio,
+                           Qt::SmoothTransformation)
+                  .convertToFormat(QImage::Format_RGB888);
+    }
 
     // Заполнить данные из QImage
     const uint8_t* srcData[1]    = { rgb.constBits() };
@@ -519,9 +544,11 @@ if (converted <= 0)
     return false;
 }
 
-// PTS
+// PTS: используем реально конвертированные сэмплы, не frameSize.
+// При последнем фрейме (добитом нулями) converted может быть < frameSize.
+m_audioFrame->nb_samples = converted;
 m_audioFrame->pts = m_audioSampleCount;
-m_audioSampleCount += frameSize;
+m_audioSampleCount += converted;
 
 // Кодировать
 bool ok = encodeAudioFrame(m_audioFrame);

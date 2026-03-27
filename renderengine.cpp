@@ -164,6 +164,10 @@ QImage RenderWorker::compositeVideoAt(double time)
     {
         if (frame.isNull()) return frame;
         if (frame.width() == m_outputWidth && frame.height() == m_outputHeight) return frame;
+        // SmoothTransformation использует bilinear. Для финального рендера
+        // используем его — Qt не предоставляет Lanczos в QImage::scaled.
+        // Lanczos применяется позже в sws_scale (в MediaEncoder).
+        // Главное: не масштабировать дважды (второй раз в MediaEncoder.writeVideoFrame).
         frame = frame.scaled(m_outputWidth, m_outputHeight, Qt::KeepAspectRatio, Qt::SmoothTransformation);
         if (frame.width() == m_outputWidth && frame.height() == m_outputHeight) return frame;
         QImage canvas(m_outputWidth, m_outputHeight, QImage::Format_RGB888);
@@ -917,17 +921,7 @@ QImage grain(const QImage& frame, double strength, int frameIndex = 0)
 
 QImage chromaKey(const QImage& frame, double threshold, double smoothness)
 {
-    // Промежуточная конвертация через RGB888 перед ARGB32.
-    // Некоторые декодеры (VAAPI, MediaFoundation на Windows) возвращают
-    // пиксели в нестандартных форматах (NV12, P010, BGRA).
-    // Прямой convertToFormat(ARGB32) из таких форматов даёт некорректные
-    // цвета — весь кадр становится серым или перепутываются каналы.
-    // RGB888 — стандартный промежуточный формат, Qt умеет корректно
-    // конвертировать в него из любого формата, а из него в ARGB32.
-    QImage rgb = (frame.format() == QImage::Format_RGB888)
-                 ? frame
-                 : frame.convertToFormat(QImage::Format_RGB888);
-    QImage result = rgb.convertToFormat(QImage::Format_ARGB32);
+    QImage result = frame.convertToFormat(QImage::Format_ARGB32);
     int w = result.width(), h = result.height();
     float thr  = static_cast<float>(threshold);
     float soft = static_cast<float>(qMax(smoothness, 0.01)); // зона мягкого края
