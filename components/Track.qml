@@ -296,6 +296,18 @@ Rectangle {
                     clipItem.clipMaxWidth = modelData.duration * root.pixelsPerSecond
                 }
             }
+            // Обновляем визуальный размер клипа при изменении структуры клипов.
+            // Это нужно после trimClip: C++ меняет duration, clipsChanged испускается,
+            // Track.qml перестраивает список — но clipItem.width/clipMaxWidth
+            // уже созданы с СТАРЫМ modelData.duration и не обновятся сами.
+            Connections {
+                target: cppTimeline
+                function onClipsChanged() {
+                    clipItem.x         = modelData.startTime * root.pixelsPerSecond
+                    clipItem.width     = modelData.duration  * root.pixelsPerSecond
+                    clipItem.clipMaxWidth = modelData.duration * root.pixelsPerSecond
+                }
+            }
 
             // СИГНАЛЫ ОТ VideoClip
             onMoved: newX => {
@@ -394,6 +406,38 @@ Rectangle {
                          }
                          root.clipMoved(modelData.id, newTime)
                      }
+
+            // Правый трим: пользователь потянул правый край клипа
+            // newPixelWidth — новая визуальная ширина клипа в пикселях.
+            // Пересчитываем в duration и вычисляем новый trimEnd = sourceDuration - newDuration - trimStart
+            onRightTrimmed: (clipId, newPixelWidth) => {
+                if (!cppTimeline) return
+
+                var newDuration = newPixelWidth / root.pixelsPerSecond
+                if (newDuration < 0.1) return
+
+                // Получаем текущие данные клипа из C++
+                var info = cppTimeline.getClipInfoById(clipId)
+                if (!info || info.duration === undefined) return
+
+                var trimStart = info.trimStart !== undefined ? info.trimStart : 0.0
+                // sourceDuration = trimStart + текущий duration + trimEnd
+                var oldDuration  = info.duration
+                var oldTrimEnd   = info.trimEnd   !== undefined ? info.trimEnd : 0.0
+                var sourceDuration = trimStart + oldDuration + oldTrimEnd
+
+                // Новый trimEnd = сколько отрезаем с конца
+                var newTrimEnd = sourceDuration - trimStart - newDuration
+                if (newTrimEnd < 0) newTrimEnd = 0
+
+                if (DEBUG_MODE)
+                    console.log("✂ RightTrim clip", clipId,
+                                "newDur=", newDuration.toFixed(3),
+                                "trimEnd=", newTrimEnd.toFixed(3),
+                                "src=", sourceDuration.toFixed(3))
+
+                cppTimeline.trimClip(clipId, trimStart, newTrimEnd)
+            }
 
             onClicked: {
                 root.clipSelected(modelData.id)

@@ -24,6 +24,7 @@ Item {
 
     // СИГНАЛЫ
     signal moved(real newX)
+    signal rightTrimmed(int clipId, real newPixelWidth) // новая ширина в пикселях
     signal clicked
     signal deleteRequested(int clipId)
     signal splitRequested(int clipId)
@@ -226,7 +227,9 @@ Item {
                             root.width = Math.max(30, nw)
                         }
                     }
-                    onReleased: root.moved(root.x)
+                    onReleased: {
+                        root.rightTrimmed(root.clipId, root.width)
+                    }
                 }
             }
 

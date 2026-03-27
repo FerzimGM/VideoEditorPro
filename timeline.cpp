@@ -306,8 +306,19 @@ bool Timeline::moveClip(int uidOrIndex, int newTrackIndex, double newStartTime)
 
     sortClips();
 
+    // Кэш содержит кадры с source-временными ключами.
+    // После перемещения toSourceTime() даёт другой результат для того же
+    // timeline-времени → кэш промахивается → чёрный экран.
+    // Сброс кэша + seek декодера решают это.
+    const QString& moveFp = m_clips[index].filepath;
+    if (m_frameCaches.contains(moveFp))
+        m_frameCaches[moveFp]->clear();
+    if (m_decoderThreads.contains(moveFp))
+        m_decoderThreads[moveFp]->seekTo(toSourceTime(moveFp, m_currentTime));
+
     emit clipsChanged();
     emit clipModified(index);
+    emit totalDurationChanged();
 
     QMetaObject::invokeMethod(this, [this]() {
         if (m_audioEngine && m_audioEngine->isPlaying())
@@ -436,12 +447,28 @@ bool Timeline::trimClip(int uidOrIndex, double newTrimStart, double newTrimEnd)
     clip.trimStart = newTrimStart;
     clip.trimEnd = newTrimEnd;
 
-    MediaDecoder decoder;
-    if (decoder.openFile(clip.filepath))
-    {
-        double sourceDuration = decoder.getDuration();
+    // Получаем sourceDuration из кэша метаданных — не открываем декодер каждый раз.
+    // MediaDecoder.openFile() при частом трим-движении (каждые 50мс) создаёт
+    // огромную задержку. m_clipMeta заполняется один раз при addClip().
+    double sourceDuration = -1.0;
+    if (m_clipMeta.contains(clip.filepath) && m_clipMeta[clip.filepath].fps > 0) {
+        // sourceDuration = то что было до любых trim = trimStart + duration + trimEnd
+        // Но исходная длина файла у нас хранится в метаданных только как fps/w/h.
+        // Восстанавливаем: sourceDuration = clip.trimStart_before + clip.duration_before + clip.trimEnd_before
+        // Надёжнее: читаем из файла через кэш если есть, иначе открываем декодер.
+        // Считаем через старые значения: sourceDuration = newTrimStart + старый duration + newTrimEnd
+        // НО clip.duration ещё не обновлён → берём оригинал = clip.trimStart + clip.duration + clip.trimEnd
+        sourceDuration = clip.trimStart + clip.duration + clip.trimEnd;
+    }
+    if (sourceDuration <= 0) {
+        MediaDecoder decoder;
+        if (decoder.openFile(clip.filepath)) {
+            sourceDuration = decoder.getDuration();
+            decoder.closeFile();
+        }
+    }
+    if (sourceDuration > 0) {
         clip.duration = sourceDuration - newTrimStart - newTrimEnd;
-        decoder.closeFile();
     }
 
     if (clip.duration <= 0) {
@@ -1051,25 +1078,20 @@ void Timeline::syncClipStatesForRender(QVariantMap hiddenMap, QVariantMap mutedM
         QString idxStr   = QString::number(i);
 
         // Video hidden
-        // ВАЖНО: если ключа нет в hiddenMap — НЕ сбрасываем состояние!
-        // setTrackVideoHidden() мог выставить isVideoHidden=true для всей дорожки.
-        // Перезапись default-false здесь уничтожила бы этот флаг → трек 2 не рендерится.
         QString vKeyUid = uidStr + "_v";
         QString vKeyIdx = idxStr + "_v";
         if (!uidStr.isEmpty() && hiddenMap.contains(vKeyUid))
             m_clips[i].isVideoHidden = hiddenMap.value(vKeyUid).toBool();
-        else if (hiddenMap.contains(vKeyIdx))
-            m_clips[i].isVideoHidden = hiddenMap.value(vKeyIdx).toBool();
-        // else: ключа нет — сохраняем текущее состояние (от setTrackVideoHidden)
+        else
+            m_clips[i].isVideoHidden = hiddenMap.value(vKeyIdx, false).toBool();
 
         // Audio hidden
         QString aKeyUid = uidStr + "_a";
         QString aKeyIdx = idxStr + "_a";
         if (!uidStr.isEmpty() && hiddenMap.contains(aKeyUid))
             m_clips[i].isAudioHidden = hiddenMap.value(aKeyUid).toBool();
-        else if (hiddenMap.contains(aKeyIdx))
-            m_clips[i].isAudioHidden = hiddenMap.value(aKeyIdx).toBool();
-        // else: ключа нет — сохраняем текущее состояние
+        else
+            m_clips[i].isAudioHidden = hiddenMap.value(aKeyIdx, false).toBool();
 
         // Muted
         if (!uidStr.isEmpty() && mutedMap.contains(uidStr))
@@ -1116,16 +1138,6 @@ bool Timeline::renderToFile(const QString& outputPath, int width, int height, co
     m_renderEngine->setOutputPath(cleanPath);
     m_renderEngine->setOutputResolution(width, height);
     m_renderEngine->setOutputFormat(format);
-
-    // Битрейт: 15 Mbps для 1080p, масштабируем под разрешение
-    // Формула: ~8 Mbps на 1 Mpixel (1920x1080 = 2.07 Mpixel → 15 Mbps)
-    {
-        double megapixels = (double)(width * height) / 1000000.0;
-        int bitrate = (int)(megapixels * 7500000.0); // 7.5 Mbps/Mpixel
-        bitrate = qMax(bitrate, 8000000);            // минимум 8 Mbps
-        bitrate = qMin(bitrate, 50000000);           // максимум 50 Mbps (4K)
-        m_renderEngine->setBitrate(bitrate);
-    }
 
     // Определить FPS из первого клипа
     double fps = 30.0;
@@ -1359,8 +1371,17 @@ QVector<float> Timeline::getMixedAudio(double time, double duration,
 
 QImage Timeline::alphaComposite(const QImage& fg, const QImage& bg)
 {
-    QImage fgA = fg.convertToFormat(QImage::Format_ARGB32);
-    QImage bgA = bg.convertToFormat(QImage::Format_ARGB32);
+    // Промежуточная конвертация через RGB888 перед ARGB32.
+    // Защита от нестандартных форматов декодера (VAAPI, BGRA, NV12).
+    auto toARGB = [](const QImage& img) -> QImage {
+        if (img.format() == QImage::Format_ARGB32) return img;
+        if (img.format() == QImage::Format_RGB888)
+            return img.convertToFormat(QImage::Format_ARGB32);
+        return img.convertToFormat(QImage::Format_RGB888)
+            .convertToFormat(QImage::Format_ARGB32);
+    };
+    QImage fgA = toARGB(fg);
+    QImage bgA = toARGB(bg);
     QImage result(qMin(fgA.width(),  bgA.width()),
                   qMin(fgA.height(), bgA.height()),
                   QImage::Format_RGB888);

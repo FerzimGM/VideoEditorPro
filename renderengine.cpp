@@ -917,7 +917,17 @@ QImage grain(const QImage& frame, double strength, int frameIndex = 0)
 
 QImage chromaKey(const QImage& frame, double threshold, double smoothness)
 {
-    QImage result = frame.convertToFormat(QImage::Format_ARGB32);
+    // Промежуточная конвертация через RGB888 перед ARGB32.
+    // Некоторые декодеры (VAAPI, MediaFoundation на Windows) возвращают
+    // пиксели в нестандартных форматах (NV12, P010, BGRA).
+    // Прямой convertToFormat(ARGB32) из таких форматов даёт некорректные
+    // цвета — весь кадр становится серым или перепутываются каналы.
+    // RGB888 — стандартный промежуточный формат, Qt умеет корректно
+    // конвертировать в него из любого формата, а из него в ARGB32.
+    QImage rgb = (frame.format() == QImage::Format_RGB888)
+                 ? frame
+                 : frame.convertToFormat(QImage::Format_RGB888);
+    QImage result = rgb.convertToFormat(QImage::Format_ARGB32);
     int w = result.width(), h = result.height();
     float thr  = static_cast<float>(threshold);
     float soft = static_cast<float>(qMax(smoothness, 0.01)); // зона мягкого края
@@ -1436,4 +1446,5 @@ QImage RenderEngine::applyEffectsToFrame(const QImage& frame,
     }
     return result;
 }
+
 
