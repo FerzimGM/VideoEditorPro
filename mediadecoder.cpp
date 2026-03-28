@@ -123,6 +123,7 @@ void MediaDecoder::closeFile()
     m_videoStreamIndex = -1;
     m_audioStreamIndex = -1;
     m_lastAudioPos = -1.0;
+    m_lastVideoPts = -1.0;
     m_audioOverflow.clear();
     m_skipDone = false;
     m_cachedSwsFmt = AV_PIX_FMT_NONE;
@@ -329,6 +330,8 @@ QImage MediaDecoder::seekAndDecode(double timestamp)
 QImage MediaDecoder::getNextFrame() {
     if (!m_videoCodecContext) return QImage();
 
+    double timeBase = m_videoStream ? av_q2d(m_videoStream->time_base) : 0.0;
+
     while (av_read_frame(m_formatContext, m_packet) >= 0)
     {
         if (m_packet->stream_index != m_videoStreamIndex)
@@ -345,6 +348,12 @@ QImage MediaDecoder::getNextFrame() {
         ret = avcodec_receive_frame(m_videoCodecContext, m_frame);
         if (ret == 0)
         {
+            // Отслеживаем PTS для синхронизации в рендере
+            if (timeBase > 0.0 && m_frame->best_effort_timestamp != AV_NOPTS_VALUE)
+                m_lastVideoPts = m_frame->best_effort_timestamp * timeBase;
+            else if (timeBase > 0.0 && m_frame->pts != AV_NOPTS_VALUE)
+                m_lastVideoPts = m_frame->pts * timeBase;
+
             return avFrameToQImage(m_frame);
         }
     }
@@ -403,7 +412,11 @@ QVector<float> MediaDecoder::decodeAudioRange(double startTime, double duration)
     if (!m_audioCodecContext || !m_swrContext || !m_formatContext)
         return QVector<float>();
 
-    int totalSamples = static_cast<int>(duration * OUTPUT_SAMPLE_RATE);
+    // ── ROUND вместо TRUNCATE ─────────────────────────────────────────────
+    // Старый код: (int)(duration * 44100) → при duration=1470/44100=0.0333...
+    // → 0.0333... * 44100 = 1469.999... → (int) = 1469 → теряем 1 сэмпл!
+    // За 1800 кадров: 1800 сэмплов = 0.04с дрейф + микро-gaps = дребезжание.
+    int totalSamples = static_cast<int>(duration * OUTPUT_SAMPLE_RATE + 0.5);
     int totalFloats  = totalSamples * OUTPUT_CHANNELS;
 
     // ── Seek только при прыжке ────────────────────────────────────────────

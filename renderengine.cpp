@@ -189,20 +189,28 @@ QImage RenderWorker::compositeVideoAt(double time)
     {
         if (frame.isNull()) return frame;
         if (frame.width() == m_outputWidth && frame.height() == m_outputHeight) return frame;
-        // SmoothTransformation использует bilinear. Для финального рендера
-        // используем его — Qt не предоставляет Lanczos в QImage::scaled.
-        // Lanczos применяется позже в sws_scale (в MediaEncoder).
-        // Главное: не масштабировать дважды (второй раз в MediaEncoder.writeVideoFrame).
+
+        bool hasAlpha = (frame.format() == QImage::Format_ARGB32
+                      || frame.format() == QImage::Format_ARGB32_Premultiplied);
+
         frame = frame.scaled(m_outputWidth, m_outputHeight, Qt::KeepAspectRatio, Qt::SmoothTransformation);
         if (frame.width() == m_outputWidth && frame.height() == m_outputHeight) return frame;
-        QImage canvas(m_outputWidth, m_outputHeight, QImage::Format_RGB888);
-        canvas.fill(Qt::black);
+
+        // Letterboxing: если ARGB32 (хромакей) — canvas тоже ARGB32 с прозрачным фоном.
+        // Без этого: RGB888 canvas уничтожал альфа-канал → хромакей не работал.
+        QImage::Format canvasFmt = hasAlpha ? QImage::Format_ARGB32 : QImage::Format_RGB888;
+        QImage canvas(m_outputWidth, m_outputHeight, canvasFmt);
+        canvas.fill(hasAlpha ? qRgba(0, 0, 0, 0) : qRgb(0, 0, 0));
+
         int dx = (m_outputWidth  - frame.width())  / 2;
         int dy = (m_outputHeight - frame.height()) / 2;
+
+        // Используем QPainter для корректного копирования с альфой
         for (int y = 0; y < frame.height(); ++y) {
             const uchar* src = frame.constScanLine(y);
             uchar* dst = canvas.scanLine(y + dy);
-            memcpy(dst + dx * (frame.depth()/8), src, frame.width() * (frame.depth()/8));
+            int bpp = frame.depth() / 8;
+            memcpy(dst + dx * bpp, src, frame.width() * bpp);
         }
         return canvas;
     };
@@ -406,11 +414,45 @@ QImage RenderWorker::decodeVideoFrame(TimelineClip* clip, double timelineTime)
     double frameDur = (fps > 0) ? (1.0 / fps) : 0.04;
     double lastPos = m_videoPositions.value(key, -1.0);
 
-    bool needSeek = (lastPos < 0.0) ||
-                    (sourceTime < lastPos - frameDur * 0.5) ||
-                    (sourceTime > lastPos + frameDur * 5.0);
+    QImage frame;
 
-    QImage frame = needSeek ? decoder->getFrameAt(sourceTime) : decoder->getNextFrame();
+    // ── PTS-синхронизированное чтение ────────────────────────────────────
+    // Проблема: getNextFrame возвращает кадры с PTS исходника.
+    // Если fps рендера (30) ≠ fps исходника (29.97), getNextFrame
+    // возвращает кадры через 33.37мс, но рендер ждёт через 33.33мс.
+    // За 1000 кадров дрейф = 0.33с → рассинхрон.
+    //
+    // Решение: после getNextFrame проверяем реальный PTS.
+    // Если декодер отстаёт (PTS < sourceTime) — читаем ещё кадры.
+    // Если декодер впереди — принимаем кадр (следующий запрос подтянется).
+
+    bool isSequential = (lastPos >= 0.0 &&
+                         sourceTime >= lastPos - frameDur * 0.5 &&
+                         sourceTime <= lastPos + frameDur * 4.0);
+
+    if (isSequential)
+    {
+        // Sequential: читаем getNextFrame, корректируя по PTS
+        for (int attempt = 0; attempt < 5; ++attempt)
+        {
+            frame = decoder->getNextFrame();
+            if (frame.isNull()) break;
+
+            double pts = decoder->getLastVideoPts();
+            // Если PTS достаточно близко к sourceTime — принимаем
+            if (pts < 0 || pts >= sourceTime - frameDur * 0.5)
+                break;
+            // PTS отстаёт — пропускаем кадр, читаем следующий
+            frame = QImage();
+        }
+    }
+
+    // Если sequential не дал результат — точный seek
+    if (frame.isNull())
+    {
+        frame = decoder->getFrameAt(sourceTime);
+    }
+
     if (!frame.isNull()) m_videoPositions[key] = sourceTime;
     return frame;
 }
@@ -418,7 +460,7 @@ QImage RenderWorker::decodeVideoFrame(TimelineClip* clip, double timelineTime)
 QVector<float> RenderWorker::mixAudioAt(double time, double frameDuration)
 {
     int totalFloats = static_cast<int>(frameDuration * MediaDecoder::OUTPUT_SAMPLE_RATE
-                                   * MediaDecoder::OUTPUT_CHANNELS);
+                                   * MediaDecoder::OUTPUT_CHANNELS + 0.5);
     QVector<float> mixed(totalFloats, 0.0f);
     bool hasAudio = false;
 
@@ -473,6 +515,26 @@ QVector<float> RenderWorker::decodeAudioChunk(TimelineClip* clip,
 
     QVector<float> audio = decoder->decodeAudioRange(sourceTime, readDur);
     if (audio.isEmpty()) return audio;
+
+    // ── Fade-out при приближении к концу клипа ──────────────────────────
+    // Без этого: клип заканчивается → резкий обрыв аудио → щелчок.
+    // Fade-out последних ~3мс убирает щелчок на границе клипов.
+    if (timeToEnd < duration && !audio.isEmpty())
+    {
+        const int FADE_SAMPLES = 132; // ~3мс при 44100Hz
+        int fadeFloats = qMin(FADE_SAMPLES * 2, audio.size());
+        int fadeStart = audio.size() - fadeFloats;
+        for (int i = 0; i < fadeFloats; ++i)
+        {
+            float t = 1.0f - (float)i / (float)fadeFloats; // 1.0 → 0.0
+            audio[fadeStart + i] *= t;
+        }
+    }
+
+    // Дополнить тишиной до полного размера фрейма если клип кончился раньше
+    int wantFloats = static_cast<int>(duration * 44100 * 2 + 0.5);
+    if (audio.size() < wantFloats)
+        audio.resize(wantFloats, 0.0f);
 
     const int SR  = 44100;
     const int CH  = 2;
@@ -1502,5 +1564,3 @@ QImage RenderEngine::applyEffectsToFrame(const QImage& frame,
     }
     return result;
 }
-
-

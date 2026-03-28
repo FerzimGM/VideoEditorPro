@@ -1246,7 +1246,7 @@ QVector<float> Timeline::getMixedAudio(double time, double duration,
                                        bool t1muted, bool t2muted)
 {
     const int SR = 44100, CH = 2;
-    int totalFloats = static_cast<int>(duration * SR * CH);
+    int totalFloats = static_cast<int>(duration * SR * CH + 0.5);
     if (totalFloats <= 0) return {};
 
     QVector<float> mixed(totalFloats, 0.0f);
@@ -1284,7 +1284,7 @@ QVector<float> Timeline::getMixedAudio(double time, double duration,
         QVector<float> audio = dec->decodeAudioRange(srcTime, readDuration);
         // Если запрошенный чанк длиннее прочитанного (конец клипа) — добиваем тишиной
         if (audio.isEmpty()) return;
-        int wantFloats = static_cast<int>(duration * 44100 * 2);
+        int wantFloats = static_cast<int>(duration * 44100 * 2 + 0.5);
         if (audio.size() < wantFloats)
             audio.resize(wantFloats, 0.0f); // тишина за концом клипа
 

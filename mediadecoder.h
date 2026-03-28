@@ -51,6 +51,7 @@ public:
     QImage getFrameAt(double timestamp);
     QImage seekAndDecode(double timestamp);   // Быстрая версия: пропускает кадры без sws_scale
     QImage getNextFrame();
+    double getLastVideoPts() const { return m_lastVideoPts; }
 
     // ===== ДЕКОДИРОВАНИЕ АУДИО =====
     // Декодировать аудио в диапазоне [startTime, startTime+duration]
@@ -97,6 +98,9 @@ private:
 
     // Позиция последнего декодированного аудио (для sequential)
     double m_lastAudioPos;
+
+    // PTS последнего декодированного видеокадра (для проверки в рендере)
+    double m_lastVideoPts = -1.0;
 
     // Буфер переполнения: сэмплы декодированные сверх запроса.
     // AAC-фрейм = 1024 сэмплов, запрос на 33мс = ~1470 сэмплов.

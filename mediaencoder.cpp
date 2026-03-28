@@ -632,15 +632,30 @@ bool MediaEncoder::finish()
     }
 
     // Flush оставшиеся аудио сэмплы (дополняем тишиной до frame_size)
-    if (m_audioEnabled && m_audioCodecContext && !m_audioBuffer.isEmpty())
+    if (m_audioEnabled && m_audioCodecContext)
     {
         int frameSize = m_audioCodecContext->frame_size;
         int need = frameSize * AUDIO_CHANNELS;
-        while (m_audioBuffer.size() < need)
+
+        // ── Компенсация AAC priming delay + видео B-frame буферизации ────
+        // AAC encoder добавляет initial_padding (~2048 сэмплов = ~46мс) в начало.
+        // Видео с max_b_frames=2 буферизует ~2 кадра (~66мс).
+        // Без компенсации: аудио stream в контейнере на ~110мс короче видео →
+        // плееры обрезают конец видео по окончании аудио.
+        // Добавляем 2 полных AAC-фрейма тишины (~46мс) чтобы аудио
+        // гарантированно покрыл весь видео stream.
+        int paddingFrames = 2;
+        for (int p = 0; p < paddingFrames; ++p)
         {
-            m_audioBuffer.append(0.0f);
+            for (int i = 0; i < need; ++i)
+                m_audioBuffer.append(0.0f);
         }
-        flushAudioBuffer();
+
+        // Кодируем все оставшиеся фреймы
+        while (m_audioBuffer.size() >= need)
+        {
+            flushAudioBuffer();
+        }
     }
 
     // Flush видео кодера
