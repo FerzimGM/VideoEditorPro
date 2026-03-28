@@ -146,9 +146,19 @@ private:
 
     void sortClips();
     double getClipSourceDuration(const QString& filepath);
-    double toSourceTime(const QString& filepath, double timelineTime) const;
-    // clipKey = "filepath|startTime|trimStart" — уникален для каждого разрезанного клипа
+    double toSourceTime(const QString& filepath, int trackIndex, double timelineTime) const;
     MediaDecoder* getOrCreateAudioDecoder(const QString& clipKey, const QString& filepath);
+
+    // Ключ для m_decoderThreads / m_frameCaches: filepath|trackIndex
+    // Каждая дорожка получает свой DecoderThread, даже для одного файла.
+    static QString decoderKey(const QString& fp, int track) {
+        return fp + "|" + QString::number(track);
+    }
+    static void parseDecoderKey(const QString& key, QString& fp, int& track) {
+        int sep = key.lastIndexOf('|');
+        fp = key.left(sep);
+        track = key.mid(sep + 1).toInt();
+    }
 
     QImage getCompositeFrame(double time,
                              int selectedClipId = -1,

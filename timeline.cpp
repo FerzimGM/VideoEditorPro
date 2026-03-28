@@ -206,14 +206,15 @@ bool Timeline::addClip(const QString& filepath, int trackIndex, double startTime
     newClip.effects["_uid"] = static_cast<double>(++m_nextUid);
     m_clips.append(newClip);
 
-    // Запустить поток декодирования
-    if (!m_decoderThreads.contains(filepath))
+    // Запустить поток декодирования — один на каждый filepath|trackIndex
+    QString dk = decoderKey(filepath, trackIndex);
+    if (!m_decoderThreads.contains(dk))
     {
         auto* cache = new FrameCache();
         auto* thread = new DecoderThread(filepath, fps, cache, this);
 
-        m_frameCaches[filepath] = cache;
-        m_decoderThreads[filepath] = thread;
+        m_frameCaches[dk] = cache;
+        m_decoderThreads[dk] = thread;
 
         connect(thread, &DecoderThread::frameReady, this, [this](int /*frameNum*/) {
             emit frameReady(QImage(), m_currentTime);
@@ -400,10 +401,11 @@ bool Timeline::splitClip(int uidOrIndex, double splitTime)
 
     // После разреза secondClip имеет новый trimStart — кэш невалиден
     const QString& fp = firstClip.filepath;
-    if (m_frameCaches.contains(fp))
-        m_frameCaches[fp]->clear();
-    if (m_decoderThreads.contains(fp))
-        m_decoderThreads[fp]->seekTo(toSourceTime(fp, m_currentTime));
+    QString dk = decoderKey(fp, firstClip.trackIndex);
+    if (m_frameCaches.contains(dk))
+        m_frameCaches[dk]->clear();
+    if (m_decoderThreads.contains(dk))
+        m_decoderThreads[dk]->seekTo(toSourceTime(fp, firstClip.trackIndex, m_currentTime));
 
     emit clipsChanged();
 
@@ -466,10 +468,10 @@ bool Timeline::trimClip(int uidOrIndex, double newTrimStart, double newTrimEnd)
     // Кэш содержит кадры по старым номерам (вычисленным из старого trimStart).
     // После изменения trimStart frameNum = clipTime*fps даёт другой номер -
     // кэш промахивается - чёрный экран.
-    if (m_frameCaches.contains(clip.filepath))
-        m_frameCaches[clip.filepath]->clear();
-    if (m_decoderThreads.contains(clip.filepath))
-        m_decoderThreads[clip.filepath]->seekTo(toSourceTime(clip.filepath, m_currentTime));
+    if (m_frameCaches.contains(decoderKey(clip.filepath, clip.trackIndex)))
+        m_frameCaches[decoderKey(clip.filepath, clip.trackIndex)]->clear();
+    if (m_decoderThreads.contains(decoderKey(clip.filepath, clip.trackIndex)))
+        m_decoderThreads[decoderKey(clip.filepath, clip.trackIndex)]->seekTo(toSourceTime(clip.filepath, clip.trackIndex, m_currentTime));
 
     emit clipModified(index);
     emit totalDurationChanged();
@@ -532,10 +534,12 @@ bool Timeline::setClipLeftTrim(int uidOrIndex, double newStartTime, double newTr
     m_clips[index].duration  = newDuration;
 
     const QString& fp = m_clips[index].filepath;
-    if (m_frameCaches.contains(fp))
-        m_frameCaches[fp]->clear();
-    if (m_decoderThreads.contains(fp))
-        m_decoderThreads[fp]->seekTo(toSourceTime(fp, m_currentTime));
+    int trk = m_clips[index].trackIndex;
+    QString dk = decoderKey(fp, trk);
+    if (m_frameCaches.contains(dk))
+        m_frameCaches[dk]->clear();
+    if (m_decoderThreads.contains(dk))
+        m_decoderThreads[dk]->seekTo(toSourceTime(fp, trk, m_currentTime));
 
     emit clipsChanged();
     emit totalDurationChanged();
@@ -660,8 +664,11 @@ void Timeline::setCurrentTime(double time)
     bool playing = m_audioEngine && m_audioEngine->isPlaying();
     if (!playing)
     {
-        for (auto it = m_decoderThreads.begin(); it != m_decoderThreads.end(); ++it)
-            it.value()->seekTo(toSourceTime(it.key(), time));
+        for (auto it = m_decoderThreads.begin(); it != m_decoderThreads.end(); ++it) {
+            QString fp; int trk;
+            parseDecoderKey(it.key(), fp, trk);
+            it.value()->seekTo(toSourceTime(fp, trk, time));
+        }
     }
     emit currentTimeChanged();
 }
@@ -697,10 +704,11 @@ QImage Timeline::getCurrentFrameAt(double time, int trackIndex)
 
     double clipTime = time - clip->startTime + clip->trimStart;
     double fps = 25.0;
+    QString dk = decoderKey(clip->filepath, clip->trackIndex);
 
-    if (m_decoderThreads.contains(clip->filepath))
+    if (m_decoderThreads.contains(dk))
     {
-        fps = m_decoderThreads[clip->filepath]->getFps();
+        fps = m_decoderThreads[dk]->getFps();
     }
     else if (m_clipMeta.contains(clip->filepath) && m_clipMeta[clip->filepath].fps > 0)
     {
@@ -711,11 +719,11 @@ QImage Timeline::getCurrentFrameAt(double time, int trackIndex)
 
     // Сообщаем текущую позицию чтобы вытеснение
     // не удаляло кадры рядом с текущей позицией воспроизведения.
-    if (m_frameCaches.contains(clip->filepath))
+    if (m_frameCaches.contains(dk))
     {
-        m_frameCaches[clip->filepath]->setPlayPosition(frameNum);
+        m_frameCaches[dk]->setPlayPosition(frameNum);
         QImage cached;
-        if (m_frameCaches[clip->filepath]->getNearest(frameNum, cached))
+        if (m_frameCaches[dk]->getNearest(frameNum, cached))
         {
             return cached;
         }
@@ -738,9 +746,9 @@ QImage Timeline::getCurrentFrameAt(double time, int trackIndex)
     QImage frame = decoder.getFrameAt(clipTime);
     decoder.closeFile();
 
-    if (!frame.isNull() && m_frameCaches.contains(clip->filepath))
+    if (!frame.isNull() && m_frameCaches.contains(dk))
     {
-        m_frameCaches[clip->filepath]->put(frameNum, frame);
+        m_frameCaches[dk]->put(frameNum, frame);
     }
 
     return frame;
@@ -816,7 +824,7 @@ bool Timeline::loadProject(const QString& filepath)
     {
         for (const TimelineClip& clip : m_clips)
         {
-            if (!m_decoderThreads.contains(clip.filepath) && QFile::exists(clip.filepath))
+            if (!m_decoderThreads.contains(decoderKey(clip.filepath, clip.trackIndex)) && QFile::exists(clip.filepath))
             {
                 MediaDecoder dec;
                 double fps = 25.0;
@@ -838,8 +846,9 @@ bool Timeline::loadProject(const QString& filepath)
 
                 auto* cache = new FrameCache();
                 auto* thread = new DecoderThread(clip.filepath, fps, cache, this);
-                m_frameCaches[clip.filepath] = cache;
-                m_decoderThreads[clip.filepath] = thread;
+                QString dk = decoderKey(clip.filepath, clip.trackIndex);
+                m_frameCaches[dk] = cache;
+                m_decoderThreads[dk] = thread;
 
                 connect(thread, &DecoderThread::frameReady, this, [this](int)
                         {
@@ -1210,11 +1219,10 @@ void Timeline::setImageProvider(EffectImageProvider* provider)
 }
 
 
-//  getOrCreateAudioDecoder — ленивое создание декодера аудио
-//  clipKey = "filepath|startTime|trimStart" — УНИКАЛЕН для каждого клипа.
-//  Без этого два клипа из одного файла (после разреза) делили один декодер →
-//  m_lastAudioPos и m_audioOverflow одного клипа портили аудио другого →
-//  дребезжание, шуршание, рассинхрон на дорожке 2.
+//  getOrCreateAudioDecoder — per-clip декодер аудио
+//  clipKey уникален для каждого клипа (filepath|startTime|trimStart).
+//  Без этого два клипа из одного файла делили один декодер →
+//  m_audioOverflow и m_lastAudioPos одного портили аудио другого.
 
 MediaDecoder* Timeline::getOrCreateAudioDecoder(const QString& clipKey, const QString& filepath)
 {
@@ -1254,11 +1262,7 @@ QVector<float> Timeline::getMixedAudio(double time, double duration,
         // даже если декодер ещё не вернул данные (прогрев)
         hasAudio = true;
 
-        // ── PER-CLIP KEY ──────────────────────────────────────────────────
-        // Ключ = filepath + startTime + trimStart → уникален для каждого
-        // разрезанного клипа. Без этого два клипа из одного файла делили
-        // один декодер → m_audioOverflow одного портил аудио другого →
-        // дребезжание и рассинхрон.
+        // ── PER-CLIP KEY — уникален для каждого разрезанного клипа ────
         QString clipKey = clip->filepath
                           + "|" + QString::number(clip->startTime, 'f', 4)
                           + "|" + QString::number(clip->trimStart, 'f', 4);
@@ -1285,9 +1289,6 @@ QVector<float> Timeline::getMixedAudio(double time, double duration,
             audio.resize(wantFloats, 0.0f); // тишина за концом клипа
 
         const QMap<QString,double>& eff = clip->effects;
-        // clipKey используется для буферов эффектов (reverb/echo) вместо fp.
-        // Раньше два клипа из одного файла делили буферы реверберации →
-        // состояние реверба протекало из одного клипа в другой.
         const int SR = 44100, CH = 2;
 
         // 1 Громкость
@@ -1317,7 +1318,7 @@ QVector<float> Timeline::getMixedAudio(double time, double duration,
             }
         }
 
-        // 4 Реверберация — буфер по clipKey, не по filepath!
+        // 4 Реверберация
         if (eff.value("reverb", 0.0) > 0.01)
         {
             double room = eff.value("reverb", 0.0);
@@ -1335,7 +1336,7 @@ QVector<float> Timeline::getMixedAudio(double time, double duration,
             }
         }
 
-        // 5 Эхо — буфер по clipKey, не по filepath!
+        // 5 Эхо
         if (eff.value("echo", 0.0) > 0.01)
         {
             double str = eff.value("echo", 0.0);
@@ -1581,7 +1582,20 @@ QImage Timeline::getCompositeFrame(double time,
     if (!frame2.isNull())
         return frame2.convertToFormat(QImage::Format_RGB888);
 
-    // Нет клипов — чёрный кадр
+    // Оба кадра null. Почему?
+    // 1) Нет клипов в этот момент → чёрный кадр (правильно)
+    // 2) Клипы есть, но cache miss → return null чтобы видео-таймер
+    //    сохранил предыдущий кадр вместо чёрного мерцания.
+    //    Без этого: cache miss → чёрный → аудио играет → мерцание + рассинхрон.
+    bool hasActiveClip = (clip1 && !clip1->isVideoHidden)
+                      || (clip2 && !clip2->isVideoHidden);
+    if (hasActiveClip)
+    {
+        // Cache miss на активном клипе — сохраняем предыдущий кадр
+        return {};
+    }
+
+    // Нет активных клипов — чёрный кадр
     if (m_clipMeta.isEmpty()) return {};
     auto& meta = m_clipMeta.constBegin().value();
     if (meta.width > 0 && meta.height > 0) {
@@ -1617,24 +1631,25 @@ void Timeline::requestFrameForDisplay(double time, int selectedClipId,
 //  DecoderThread работает в source-координатах, все внешние вызовы
 //  передают timeline-время → нужна конвертация.
 
-double Timeline::toSourceTime(const QString& filepath, double timelineTime) const
+double Timeline::toSourceTime(const QString& filepath, int trackIndex, double timelineTime) const
 {
-    // Ищем клип с этим файлом, который содержит timelineTime
+    // Ищем клип с этим файлом НА КОНКРЕТНОЙ ДОРОЖКЕ, который содержит timelineTime
     for (const auto& clip : m_clips)
     {
         if (clip.filepath == filepath &&
+            clip.trackIndex == trackIndex &&
             timelineTime >= clip.startTime &&
             timelineTime < clip.endTime())
         {
             return timelineTime - clip.startTime + clip.trimStart;
         }
     }
-    // Если попали в зазор между клипами — берём ближайший клип
+    // Если попали в зазор между клипами — берём ближайший клип НА ЭТОЙ ДОРОЖКЕ
     double best = 1e18;
     double result = timelineTime;
     for (const auto& clip : m_clips)
     {
-        if (clip.filepath != filepath) continue;
+        if (clip.filepath != filepath || clip.trackIndex != trackIndex) continue;
         double dist = qMin(qAbs(timelineTime - clip.startTime),
                            qAbs(timelineTime - clip.endTime()));
         if (dist < best)
@@ -1659,10 +1674,30 @@ void Timeline::startPlayback(double fromTime, double speed)
     // DecoderThread хранит кадры по frameNum = sourceTime*fps.
     // Если передать timeline-время (0), а trimStart=47.5 — декодер читает
     // кадры с 0сек источника, а кэш ищет frameNum 47.5*fps=1187 → промах.
+    //
+    // КЛЮЧЕВОЙ ФИКС: НЕ очищаем кэш если нужный кадр уже в нём.
+    // При pause → play кэш содержит кадры вокруг текущей позиции.
+    // Старый код ВСЕГДА вызывал seekTo → cache->clear() → уничтожал все
+    // 400 кадров → sync-decode давал 1 кадр → 0.5-2с cache miss'ов →
+    // видео чёрное/замершее, аудио играет → рассинхрон.
     for (auto it = m_decoderThreads.begin(); it != m_decoderThreads.end(); ++it) {
-        double srcTime = toSourceTime(it.key(), fromTime);
-        it.value()->seekTo(srcTime);
-        it.value()->updatePlayPosition(srcTime);
+        QString fp; int trk;
+        parseDecoderKey(it.key(), fp, trk);
+        double srcTime = toSourceTime(fp, trk, fromTime);
+        int frameNum = (int)(srcTime * it.value()->getFps() + 0.5);
+        FrameCache* cache = m_frameCaches.value(it.key(), nullptr);
+
+        if (cache && cache->contains(frameNum))
+        {
+            // Кадр уже в кэше — НЕ очищаем! Только обновляем позицию.
+            it.value()->updatePlayPosition(srcTime);
+        }
+        else
+        {
+            // Кадра нет — нужен полный seek (очистка кэша + перемотка декодера)
+            it.value()->seekTo(srcTime);
+            it.value()->updatePlayPosition(srcTime);
+        }
     }
 
     //  Sync-decode первого кадра
@@ -1692,8 +1727,11 @@ void Timeline::startPlayback(double fromTime, double speed)
                     emit currentTimeChanged();
                     emit playbackTimeUpdated(t);
                     // Сообщаем DecoderThread текущую SOURCE-позицию для prefetch
-                    for (auto it = m_decoderThreads.begin(); it != m_decoderThreads.end(); ++it)
-                        it.value()->updatePlayPosition(toSourceTime(it.key(), t));
+                    for (auto it = m_decoderThreads.begin(); it != m_decoderThreads.end(); ++it) {
+                        QString fp; int trk;
+                        parseDecoderKey(it.key(), fp, trk);
+                        it.value()->updatePlayPosition(toSourceTime(fp, trk, t));
+                    }
                     // Видео обновляется отдельным m_videoTimer (не здесь)
                 });
 
@@ -1725,8 +1763,13 @@ void Timeline::startPlayback(double fromTime, double speed)
             QImage frame = getCompositeFrame(renderTime);
             if (frame.isNull())
             {
+                // ── Cache miss: sync decode с коротким cooldown ──────────
+                // Раньше cooldown = 500мс → видео замирало на полсекунды
+                // пока аудио играло → рассинхрон на дорожке 2.
+                // 80мс = ~2.5 кадра при 30fps — заметный, но терпимый
+                // стоп, и видео быстро догоняет аудио.
                 qint64 now = QDateTime::currentMSecsSinceEpoch();
-                if (now - m_lastSyncDecodeMs > 500)
+                if (now - m_lastSyncDecodeMs > 80)
                 {
                     m_lastSyncDecodeMs = now;
                     m_forceNextFrame = true;
@@ -1743,7 +1786,15 @@ void Timeline::startPlayback(double fromTime, double speed)
     m_videoTimer->start(33);
 
     m_currentTime = fromTime;
-    m_audioEngine->startPlayback(fromTime, speed, totalDuration());
+    // Передаём РЕАЛЬНЫЙ конец последнего клипа, без +20с UI-падинга.
+    // Старый totalDuration() добавлял +20с → pastEnd срабатывал через 20с
+    // после конца клипов → воспроизведение тянулось в тишину.
+    double actualEnd = 0.0;
+    for (const auto& c : m_clips)
+        if (c.endTime() > actualEnd) actualEnd = c.endTime();
+    if (actualEnd < 0.1) actualEnd = totalDuration();  // fallback
+
+    m_audioEngine->startPlayback(fromTime, speed, actualEnd);
 }
 
 void Timeline::stopPlayback()

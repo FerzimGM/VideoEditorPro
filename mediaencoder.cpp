@@ -275,7 +275,22 @@ bool MediaEncoder::initializeVideo() {
     m_videoCodecContext->codec_id  = videoCodecId;
     m_videoCodecContext->width     = m_width;
     m_videoCodecContext->height    = m_height;
-    m_videoCodecContext->time_base = AVRational{1, static_cast<int>(m_fps)};
+
+    // ── КРИТИЧЕСКИЙ ФИКС: правильный time_base для дробных fps ──────────
+    // Старый код: time_base = {1, (int)m_fps}
+    //   При fps=29.97 → (int)29.97 = 29 → кадр длится 1/29=34.48мс вместо 33.37мс
+    //   За 1800 кадров: видео=62.07с, аудио=60с → аудио кончается раньше!
+    //   При fps=23.976 → (int)23.976 = 23 → дрейф 4.2% → 2.5с за минуту.
+    //
+    // Фикс: используем стандартные rational fps для NTSC, иначе высокий знаменатель.
+    if (qAbs(m_fps - 29.97) < 0.03)
+        m_videoCodecContext->time_base = AVRational{1001, 30000};   // 29.97fps
+    else if (qAbs(m_fps - 23.976) < 0.03)
+        m_videoCodecContext->time_base = AVRational{1001, 24000};   // 23.976fps
+    else if (qAbs(m_fps - 59.94) < 0.06)
+        m_videoCodecContext->time_base = AVRational{1001, 60000};   // 59.94fps
+    else
+        m_videoCodecContext->time_base = AVRational{1, static_cast<int>(m_fps + 0.5)}; // round, not truncate
     // GOP = 2 секунды: хороший баланс между случайным доступом и сжатием.
     // Слишком маленький GOP (напр. 1) даёт большой файл, слишком большой — долгий seek.
     m_videoCodecContext->gop_size  = static_cast<int>(m_fps * 2);
@@ -710,6 +725,7 @@ void MediaEncoder::setCodec(const QString& codecName)
 
 void MediaEncoder::setFormat(const QString& format)
 {
+    m_format = format;
 #ifndef QT_NO_DEBUG
     qDebug() << "📦 setFormat:" << format;
 #endif

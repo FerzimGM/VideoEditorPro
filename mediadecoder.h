@@ -49,6 +49,7 @@ public:
 
     // ===== ДЕКОДИРОВАНИЕ ВИДЕО =====
     QImage getFrameAt(double timestamp);
+    QImage seekAndDecode(double timestamp);   // Быстрая версия: пропускает кадры без sws_scale
     QImage getNextFrame();
 
     // ===== ДЕКОДИРОВАНИЕ АУДИО =====

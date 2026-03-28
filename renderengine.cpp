@@ -64,12 +64,22 @@ void RenderWorker::process()
     }
 
     double frameTime = 1.0 / m_fps;
-    int totalFrames = static_cast<int>(totalDuration * m_fps);
+    int totalFrames = static_cast<int>(std::ceil(totalDuration * m_fps));
     int currentFrame = 0;
     int lastPercent = -1;
 
-    for (double time = 0.0; time < totalDuration && !m_cancelled; time += frameTime)
+    // Аудио-счётчик: точное число сэмплов вместо float * SR.
+    // Старый код: int totalFloats = (int)(frameTime * SR * CH) → целочисленное усечение
+    // теряло ~2 сэмпла на кадр → аудио короче видео → "аудио кончается раньше".
+    int64_t audioSamplesWritten = 0;
+    const int SR = MediaDecoder::OUTPUT_SAMPLE_RATE;
+    const int CH = MediaDecoder::OUTPUT_CHANNELS;
+
+    for (int f = 0; f < totalFrames && !m_cancelled; ++f)
     {
+        // Время вычисляется от номера кадра — без float-накопления
+        double time = (double)f / m_fps;
+
         QImage frame = compositeVideoAt(time);
         if (frame.isNull())
         {
@@ -86,8 +96,23 @@ void RenderWorker::process()
             return;
         }
 
-        QVector<float> audio = mixAudioAt(time, frameTime);
-        if (!audio.isEmpty()) encoder.writeAudioSamples(audio);
+        // Аудио: точное число сэмплов для этого кадра.
+        // Для 30fps: кадр 0 → 0..1470, кадр 1 → 1470..2940, ...
+        // Никакой потери от float → int.
+        int64_t audioSampleEnd = (int64_t)((f + 1) / m_fps * SR + 0.5);
+        int samplesThisFrame = (int)(audioSampleEnd - audioSamplesWritten);
+        int floatsThisFrame  = samplesThisFrame * CH;
+        double audioDuration = (double)samplesThisFrame / SR;
+
+        QVector<float> audio = mixAudioAt(time, audioDuration);
+        // Гарантируем правильный размер — pad или trim
+        if (audio.size() < floatsThisFrame)
+            audio.resize(floatsThisFrame, 0.0f);
+        else if (audio.size() > floatsThisFrame)
+            audio.resize(floatsThisFrame);
+
+        encoder.writeAudioSamples(audio);
+        audioSamplesWritten += samplesThisFrame;
 
         currentFrame++;
         int percent = (totalFrames > 0) ? (currentFrame * 100) / totalFrames : 0;
@@ -359,9 +384,6 @@ QImage RenderWorker::compositeVideoAt(double time)
 
 QImage RenderWorker::decodeVideoFrame(TimelineClip* clip, double timelineTime)
 {
-    // КЛЮЧ = filepath + startTime + trimStart — уникален для каждого разрезанного клипа.
-    // Без этого два клипа из одного файла делили один декодер, и sequential read
-    // прыгал между разными участками файла → рассинхрон аудио/видео при экспорте.
     QString key = clip->filepath
                   + "|" + QString::number(clip->startTime, 'f', 4)
                   + "|" + QString::number(clip->trimStart, 'f', 4);
@@ -422,7 +444,9 @@ QVector<float> RenderWorker::decodeAudioChunk(TimelineClip* clip,
                                               double timelineTime,
                                               double duration)
 {
-    // КЛЮЧ = filepath + startTime + trimStart — уникален для каждого разрезанного клипа.
+    // PER-CLIP KEY — уникален для каждого разрезанного клипа.
+    // Без этого два клипа из одного файла делили один декодер →
+    // m_audioOverflow и m_lastAudioPos одного портили аудио другого.
     QString key = clip->filepath
                   + "|" + QString::number(clip->startTime, 'f', 4)
                   + "|" + QString::number(clip->trimStart, 'f', 4);
@@ -451,9 +475,8 @@ QVector<float> RenderWorker::decodeAudioChunk(TimelineClip* clip,
     if (audio.isEmpty()) return audio;
 
     const int SR  = 44100;
-    const int CH  = 2; // стерео (interleaved L,R)
-    // Буферы эффектов (reverb, echo) должны быть per-clip, не per-file.
-    // Иначе два клипа из одного файла делят состояние реверба → артефакты.
+    const int CH  = 2;
+    // Per-clip key для буферов эффектов (reverb, echo)
     const QString& clipBufKey = key;
 
     // ── Вспомогательная лямбда: получить/инициализировать кольцевой буфер ──

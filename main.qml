@@ -666,13 +666,25 @@ QtObject {
 
                 var fmt = root._exportFormat || "MP4"
 
-                // Синхронизируем clipStates - C++ и запускаем рендер
+                // Синхронизируем clipStates → C++ и запускаем рендер.
+                // КРИТИЧНО: итерируем по РЕАЛЬНЫМ UID клипов, не по индексам.
+                // clipStates хранит данные по UID (из getClipsForTrack → id),
+                // а не по последовательным индексам 0,1,2.
+                // Старый код: for(i=0; i<clipCount; i++) clipStates.isVideoHidden(i)
+                //   → проверял _hidden["0_v"], _hidden["1_v"] вместо _hidden["uid_v"]
+                //   → hidden состояние терялось → видео показывалось в рендере.
                 var hiddenMap = {}
                 var mutedMap = {}
-                for (var i = 0; i < cppTimeline.clipCount; i++) {
-                    hiddenMap[i + "_v"] = clipStates.isVideoHidden(i)
-                    hiddenMap[i + "_a"] = clipStates.isAudioHidden(i)
-                    mutedMap[i] = clipStates.isMuted(i)
+                var allClips = []
+                var c1 = cppTimeline.getClipsForTrack(1)
+                var c2 = cppTimeline.getClipsForTrack(2)
+                for (var j = 0; j < c1.length; j++) allClips.push(c1[j])
+                for (var j2 = 0; j2 < c2.length; j2++) allClips.push(c2[j2])
+                for (var k = 0; k < allClips.length; k++) {
+                    var clipId = allClips[k].id
+                    hiddenMap[clipId + "_v"] = clipStates.isVideoHidden(clipId)
+                    hiddenMap[clipId + "_a"] = clipStates.isAudioHidden(clipId)
+                    mutedMap[clipId] = clipStates.isMuted(clipId)
                 }
                 cppTimeline.syncClipStatesForRender(hiddenMap, mutedMap)
                 cppTimeline.renderToFile(filepath, w, h, fmt)

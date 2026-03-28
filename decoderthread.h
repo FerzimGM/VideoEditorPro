@@ -45,7 +45,24 @@ public:
     void updatePlayPosition(double time)
     {
         QMutexLocker lock(&m_mutex);
-        if (time > m_playPosition) m_playPosition = time;
+        // ── КЛЮЧЕВОЙ ФИКС: seek при прыжке между клипами ─────────────
+        // Раньше: только увеличивали m_playPosition, thread декодировал
+        // последовательно от старой позиции до новой. Для двух клипов
+        // из одного файла на дорожке 2 (source 25→35) thread тратил
+        // сотни мс на decode 10с промежутка → cache miss → видео замирало
+        // пока аудио играло → рассинхрон.
+        // Теперь: если прыжок > 2с — делаем seek, кэш очищается,
+        // thread начинает декодировать с нужной позиции сразу.
+        if (time > m_playPosition + 2.0)
+        {
+            m_seekTime      = time;
+            m_playPosition  = time;
+            m_seekRequested = true;
+        }
+        else if (time > m_playPosition)
+        {
+            m_playPosition = time;
+        }
         m_condition.wakeAll();
     }
 
@@ -99,15 +116,31 @@ protected:
                     currentTime = m_seekTime;
                     prefetchBase = m_seekTime;
                     m_seekRequested = false;
+                    // Очищаем кэш при реальном seek (перемотка, смена клипа).
+                    // Без этого старые кадры из предыдущей позиции остаются в кэше
+                    // и getNearest может вернуть стухший кадр → мерцание.
+                    // Защита от ненужной очистки при pause→play — в startPlayback:
+                    // он проверяет cache->contains() и НЕ вызывает seekTo если кадр есть.
                     m_cache->clear();
-                    needSeek = true;  // после seek нужно позиционировать декодер
+                    m_cache->setPlayPosition((int)(m_seekTime * m_fps + 0.5));
+                    needSeek = true;
                 }
             }
 
             // Одиночный seek только при смене позиции, дальше — getNextFrame()
             if (needSeek)
             {
-                decoder.seekTo(currentTime);
+                // seekAndDecode: seek + пропуск кадров до нужного PTS
+                // БЕЗ sws_scale на промежуточных кадрах (в 5x быстрее getFrameAt).
+                // После неё декодер стоит на правильной позиции →
+                // getNextFrame() вернёт следующий кадр с правильным PTS.
+                QImage seekFrame = decoder.seekAndDecode(currentTime);
+                if (!seekFrame.isNull())
+                {
+                    int seekFrameNum = (int)(currentTime * m_fps + 0.5);
+                    m_cache->put(seekFrameNum, seekFrame);
+                    emit frameReady(seekFrameNum);
+                }
                 needSeek = false;
             }
 

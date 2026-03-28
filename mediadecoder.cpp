@@ -281,6 +281,50 @@ QImage MediaDecoder::getFrameAt(double timestamp)
     return lastGood;
 }
 
+// ===== БЫСТРЫЙ SEEK + DECODE =====
+// Как getFrameAt, но НЕ вызывает avFrameToQImage для промежуточных кадров.
+// getFrameAt: seek → decode+convert каждый кадр (5мс × 150 = 750мс при 5с keyframe gap)
+// seekAndDecode: seek → decode каждый (1мс) → convert только целевой = ~160мс
+// Используется DecoderThread для быстрого seek без притормаживаний.
+QImage MediaDecoder::seekAndDecode(double timestamp)
+{
+    if (!m_videoCodecContext || !m_videoStream) return QImage();
+    if (!seekTo(timestamp)) return QImage();
+
+    double timeBase = av_q2d(m_videoStream->time_base);
+    double fps = getFrameRate();
+    double frameDur = (fps > 0) ? (1.0 / fps) : 0.04;
+
+    for (int decoded = 0; decoded < 300; ++decoded)
+    {
+        if (av_read_frame(m_formatContext, m_packet) < 0) break;
+        if (m_packet->stream_index != m_videoStreamIndex)
+        {
+            av_packet_unref(m_packet); continue;
+        }
+        int ret = avcodec_send_packet(m_videoCodecContext, m_packet);
+        av_packet_unref(m_packet);
+        if (ret < 0) continue;
+
+        ret = avcodec_receive_frame(m_videoCodecContext, m_frame);
+        if (ret != 0) continue;
+
+        double pts = 0.0;
+        if (m_frame->best_effort_timestamp != AV_NOPTS_VALUE)
+            pts = m_frame->best_effort_timestamp * timeBase;
+        else if (m_frame->pts != AV_NOPTS_VALUE)
+            pts = m_frame->pts * timeBase;
+
+        if (pts >= timestamp - frameDur * 0.5)
+        {
+            // Целевой кадр найден — конвертируем ТОЛЬКО его
+            return avFrameToQImage(m_frame);
+        }
+        // Промежуточный кадр — пропускаем БЕЗ sws_scale/QImage (быстро)
+    }
+    return QImage();
+}
+
 // ===== ПОЛУЧИТЬ СЛЕДУЮЩИЙ ВИДЕОКАДР =====
 QImage MediaDecoder::getNextFrame() {
     if (!m_videoCodecContext) return QImage();
@@ -379,8 +423,25 @@ QVector<float> MediaDecoder::decodeAudioRange(double startTime, double duration)
         int64_t t = static_cast<int64_t>(startTime * AV_TIME_BASE);
         av_seek_frame(m_formatContext, -1, t, AVSEEK_FLAG_BACKWARD);
         avcodec_flush_buffers(m_audioCodecContext);
-        // Drain ресемплера: вытаскиваем остатки, не переинициализируем.
-        swr_convert(m_swrContext, nullptr, 0, nullptr, 0);
+
+        // ── Правильный drain ресемплера ──────────────────────────────────
+        // Старый код: swr_convert(ctx, nullptr, 0, nullptr, 0) — это NO-OP!
+        // FFmpeg drain = swr_convert(ctx, &outbuf, N, NULL, 0) — null INPUT, реальный OUTPUT.
+        // Без drain ресемплер хранит ~23мс аудио от ПРЕДЫДУЩЕЙ позиции →
+        // эти сэмплы попадают в начало нового чанка → шуршание/хрипение.
+        {
+            uint8_t* drainBuf = nullptr;
+            int drainMax = 4096;
+            av_samples_alloc(&drainBuf, nullptr,
+                             OUTPUT_CHANNELS, drainMax, AV_SAMPLE_FMT_FLT, 0);
+            if (drainBuf)
+            {
+                // Drain до полной очистки внутреннего буфера
+                while (swr_convert(m_swrContext, &drainBuf, drainMax, nullptr, 0) > 0) {}
+                av_freep(&drainBuf);
+            }
+        }
+
         m_lastAudioPos = startTime;
     }
     else if (!m_audioOverflow.isEmpty() &&
@@ -522,6 +583,23 @@ QVector<float> MediaDecoder::decodeAudioRange(double startTime, double duration)
     }
 
     m_lastAudioPos = startTime + duration;
+
+    // ── Микро fade-in после seek: сглаживание разрыва ────────────────────
+    // При seek av_seek_frame прыгает к keyframe, skip обрезает сэмплы,
+    // но на стыке "последний пропущенный → первый реальный" — резкий скачок
+    // амплитуды → щелчок. При разрезанном видео (trimStart>0) каждый
+    // переход между клипами = seek = щелчок → "шуршание".
+    // Fade-in первых ~3мс (132 сэмпла * 2 канала) убирает скачок.
+    if (needSeek && !result.isEmpty())
+    {
+        const int FADE_SAMPLES = 132; // ~3мс при 44100Hz
+        int fadeFloats = qMin(FADE_SAMPLES * OUTPUT_CHANNELS, result.size());
+        for (int i = 0; i < fadeFloats; ++i)
+        {
+            float t = (float)i / (float)fadeFloats; // 0.0 → 1.0
+            result[i] *= t;
+        }
+    }
 
     // ── Сохраняем переполнение, не выбрасываем ───
     // сохраняем лишнее в m_audioOverflow для следующего вызова.

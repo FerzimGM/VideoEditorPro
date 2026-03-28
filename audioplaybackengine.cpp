@@ -210,8 +210,10 @@ void AudioPlaybackEngine::onFeedTimer()
     emit timeUpdated(getCurrentAudioTime());
 
     bool pastEnd     = (m_writeHead >= m_totalDuration - 0.05);
-    bool longSilence = (m_silentChunks >= 30)
-                       && (m_writeHead - m_startStreamTime > 5.0);
+    // Safety net: если pastEnd не сработал (ошибка в totalDuration),
+    // останавливаем после 15с непрерывной тишины.
+    // Старый порог 2.4с ложно срабатывал в промежутках между клипами.
+    bool longSilence = (m_silentChunks >= 200);
 
     if (pastEnd || longSilence)
     {
