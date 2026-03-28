@@ -375,9 +375,11 @@ QVector<float> MediaDecoder::decodeAudioRange(double startTime, double duration)
     {
         m_audioOverflow.clear();
         m_skipDone = false;
+
         int64_t t = static_cast<int64_t>(startTime * AV_TIME_BASE);
         av_seek_frame(m_formatContext, -1, t, AVSEEK_FLAG_BACKWARD);
         avcodec_flush_buffers(m_audioCodecContext);
+        // Drain ресемплера: вытаскиваем остатки, не переинициализируем.
         swr_convert(m_swrContext, nullptr, 0, nullptr, 0);
         m_lastAudioPos = startTime;
     }
@@ -461,12 +463,18 @@ QVector<float> MediaDecoder::decodeAudioRange(double startTime, double duration)
             {
                 const float* p = reinterpret_cast<const float*>(outBuf);
 
-                // ── КЛЮЧЕВОЙ ФИКС РАССИНХРОНА ─────────────────────────────────
-                // После AVSEEK_FLAG_BACKWARD первый кадр начинается ДО startTime.
-                // Пропускаем лишние сэмплы чтобы начать ровно с startTime.
-                // m_skipDone гарантирует что skip происходит ОДИН РАЗ после seek.
-                // Старый вариант проверял result.isEmpty() — но если m_audioOverflow
-                // не пуст, result уже не пустой → skip не срабатывал → рассинхрон.
+                // ── ФИКС РАССИНХРОНА: точный skip после seek ─────────────────
+                // После AVSEEK_FLAG_BACKWARD seek уезжает к видео-keyframe,
+                // который может быть на 2-5с ДО startTime.
+                // Пропускаем ВСЕ кадры до startTime, не только первый.
+                //
+                // m_skipDone = true только когда мы ВЗЯЛИ часть кадра.
+                // Если весь кадр пропущен (skipFloats == converted*CH) —
+                // следующий кадр тоже ДО startTime и тоже нужен skip.
+                //
+                // Без этого: trimStart=25с, seek к 22с → первый кадр (22.0с)
+                // пропущен целиком, m_skipDone=true → следующие 130 кадров
+                // (22.0-25.0с) добавляются БЕЗ skip → 3с мусора → дребезжание.
                 int skipFloats = 0;
                 if (!m_skipDone && framePts >= 0.0 && framePts < startTime - 0.001)
                 {
@@ -474,7 +482,10 @@ QVector<float> MediaDecoder::decodeAudioRange(double startTime, double duration)
                     int skipSamples = static_cast<int>(skipSec * OUTPUT_SAMPLE_RATE + 0.5);
                     skipFloats = qMin(skipSamples * OUTPUT_CHANNELS,
                                       converted   * OUTPUT_CHANNELS);
-                    m_skipDone = true;
+                    // Ставим done ТОЛЬКО если взяли хоть часть кадра
+                    if (skipFloats < converted * OUTPUT_CHANNELS)
+                        m_skipDone = true;
+                    // Иначе — весь кадр пропущен, следующий тоже нужно проверить
                 }
 
                 for (int i = skipFloats; i < converted * OUTPUT_CHANNELS; ++i)
