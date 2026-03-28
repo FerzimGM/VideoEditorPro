@@ -115,6 +115,7 @@ template <> constexpr inline auto Timeline::qt_create_metaobjectdata<qt_meta_tag
         "height",
         "format",
         "cancelRender",
+        "playSystemBeep",
         "currentTime",
         "totalDuration",
         "clipCount"
@@ -309,14 +310,16 @@ template <> constexpr inline auto Timeline::qt_create_metaobjectdata<qt_meta_tag
         }}),
         // Method 'cancelRender'
         QtMocHelpers::MethodData<void()>(76, 2, QMC::AccessPublic, QMetaType::Void),
+        // Method 'playSystemBeep'
+        QtMocHelpers::MethodData<void()>(77, 2, QMC::AccessPublic, QMetaType::Void),
     };
     QtMocHelpers::UintData qt_properties {
         // property 'currentTime'
-        QtMocHelpers::PropertyData<double>(77, QMetaType::Double, QMC::DefaultPropertyFlags | QMC::Writable | QMC::StdCppSet, 0),
+        QtMocHelpers::PropertyData<double>(78, QMetaType::Double, QMC::DefaultPropertyFlags | QMC::Writable | QMC::StdCppSet, 0),
         // property 'totalDuration'
-        QtMocHelpers::PropertyData<double>(78, QMetaType::Double, QMC::DefaultPropertyFlags, 1),
+        QtMocHelpers::PropertyData<double>(79, QMetaType::Double, QMC::DefaultPropertyFlags, 1),
         // property 'clipCount'
-        QtMocHelpers::PropertyData<int>(79, QMetaType::Int, QMC::DefaultPropertyFlags, 2),
+        QtMocHelpers::PropertyData<int>(80, QMetaType::Int, QMC::DefaultPropertyFlags, 2),
     };
     QtMocHelpers::UintData qt_enums {
     };
@@ -415,6 +418,7 @@ void Timeline::qt_static_metacall(QObject *_o, QMetaObject::Call _c, int _id, vo
         case 49: { bool _r = _t->renderToFile((*reinterpret_cast<std::add_pointer_t<QString>>(_a[1])));
             if (_a[0]) *reinterpret_cast<bool*>(_a[0]) = std::move(_r); }  break;
         case 50: _t->cancelRender(); break;
+        case 51: _t->playSystemBeep(); break;
         default: ;
         }
     }
@@ -481,14 +485,14 @@ int Timeline::qt_metacall(QMetaObject::Call _c, int _id, void **_a)
     if (_id < 0)
         return _id;
     if (_c == QMetaObject::InvokeMetaMethod) {
-        if (_id < 51)
+        if (_id < 52)
             qt_static_metacall(this, _c, _id, _a);
-        _id -= 51;
+        _id -= 52;
     }
     if (_c == QMetaObject::RegisterMethodArgumentMetaType) {
-        if (_id < 51)
+        if (_id < 52)
             *reinterpret_cast<QMetaType *>(_a[0]) = QMetaType();
-        _id -= 51;
+        _id -= 52;
     }
     if (_c == QMetaObject::ReadProperty || _c == QMetaObject::WriteProperty
             || _c == QMetaObject::ResetProperty || _c == QMetaObject::BindableProperty

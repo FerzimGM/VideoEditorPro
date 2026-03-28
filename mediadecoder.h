@@ -102,6 +102,7 @@ private:
     // Читаем 2 AAC-фрейма (2048), лишние 578 кладём сюда — не выбрасываем.
     // Следующий вызов начинает с этих 578 → непрерывный поток без дырок.
     QVector<float> m_audioOverflow;
+    bool m_skipDone = false;
 
     // Кэшированные параметры SwsContext (для пересоздания при смене формата)
     AVPixelFormat m_cachedSwsFmt;

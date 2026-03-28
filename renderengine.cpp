@@ -359,13 +359,29 @@ QImage RenderWorker::compositeVideoAt(double time)
 
 QImage RenderWorker::decodeVideoFrame(TimelineClip* clip, double timelineTime)
 {
-    MediaDecoder* decoder = getVideoDecoder(clip->filepath);
-    if (!decoder || !decoder->hasVideo()) return QImage();
+    // КЛЮЧ = filepath + startTime + trimStart — уникален для каждого разрезанного клипа.
+    // Без этого два клипа из одного файла делили один декодер, и sequential read
+    // прыгал между разными участками файла → рассинхрон аудио/видео при экспорте.
+    QString key = clip->filepath
+                  + "|" + QString::number(clip->startTime, 'f', 4)
+                  + "|" + QString::number(clip->trimStart, 'f', 4);
+
+    MediaDecoder* decoder;
+    if (m_videoDecoders.contains(key)) {
+        decoder = m_videoDecoders[key];
+    } else {
+        decoder = new MediaDecoder();
+        if (!decoder->openFile(clip->filepath)) {
+            delete decoder;
+            return QImage();
+        }
+        m_videoDecoders[key] = decoder;
+    }
+    if (!decoder->hasVideo()) return QImage();
 
     double sourceTime = clip->sourceTimeAt(timelineTime);
     double fps = decoder->getFrameRate();
     double frameDur = (fps > 0) ? (1.0 / fps) : 0.04;
-    QString key = clip->filepath;
     double lastPos = m_videoPositions.value(key, -1.0);
 
     bool needSeek = (lastPos < 0.0) ||
@@ -406,16 +422,39 @@ QVector<float> RenderWorker::decodeAudioChunk(TimelineClip* clip,
                                               double timelineTime,
                                               double duration)
 {
-    MediaDecoder* decoder = getAudioDecoder(clip->filepath);
-    if (!decoder || !decoder->hasAudio()) return QVector<float>();
+    // КЛЮЧ = filepath + startTime + trimStart — уникален для каждого разрезанного клипа.
+    QString key = clip->filepath
+                  + "|" + QString::number(clip->startTime, 'f', 4)
+                  + "|" + QString::number(clip->trimStart, 'f', 4);
+
+    MediaDecoder* decoder;
+    if (m_audioDecoders.contains(key)) {
+        decoder = m_audioDecoders[key];
+    } else {
+        decoder = new MediaDecoder();
+        if (!decoder->openFile(clip->filepath)) {
+            delete decoder;
+            return QVector<float>();
+        }
+        m_audioDecoders[key] = decoder;
+    }
+    if (!decoder->hasAudio()) return QVector<float>();
 
     double sourceTime = clip->sourceTimeAt(timelineTime);
-    QVector<float> audio = decoder->decodeAudioRange(sourceTime, duration);
+
+    // Ограничиваем до конца клипа — не читаем за trimEnd
+    double timeToEnd = clip->endTime() - timelineTime;
+    double readDur = qMin(duration, timeToEnd);
+    if (readDur <= 0.0) return QVector<float>();
+
+    QVector<float> audio = decoder->decodeAudioRange(sourceTime, readDur);
     if (audio.isEmpty()) return audio;
 
     const int SR  = 44100;
     const int CH  = 2; // стерео (interleaved L,R)
-    const QString fp = clip->filepath;
+    // Буферы эффектов (reverb, echo) должны быть per-clip, не per-file.
+    // Иначе два клипа из одного файла делят состояние реверба → артефакты.
+    const QString& clipBufKey = key;
 
     // ── Вспомогательная лямбда: получить/инициализировать кольцевой буфер ──
     auto getCBuf = [&](const QString& key, int size) -> QVector<float>&
@@ -487,8 +526,8 @@ QVector<float> RenderWorker::decodeAudioChunk(TimelineClip* clip,
         float wet = static_cast<float>(roomSize * 0.45f);
         float dry = 1.0f - wet * 0.6f;
 
-        QVector<float>& buf = getCBuf(fp + "_reverb", D);
-        int& wp = getPos(fp + "_reverb");
+        QVector<float>& buf = getCBuf(clipBufKey + "_reverb", D);
+        int& wp = getPos(clipBufKey + "_reverb");
 
         for (int i = 0; i < audio.size(); ++i)
         {
@@ -512,8 +551,8 @@ QVector<float> RenderWorker::decodeAudioChunk(TimelineClip* clip,
         int D = qMax(CH * 2, SR / 1000 * delayMs * CH); // min=CH*2
         float feedback = static_cast<float>(strength * 0.55f);  // < 1 → затухает
 
-        QVector<float>& buf = getCBuf(fp + "_echo", D);
-        int& wp = getPos(fp + "_echo");
+        QVector<float>& buf = getCBuf(clipBufKey + "_echo", D);
+        int& wp = getPos(clipBufKey + "_echo");
 
         for (int i = 0; i < audio.size(); ++i) {
             float delayed = buf[wp];

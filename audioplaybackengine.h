@@ -34,6 +34,7 @@ public:
     void setTrackMuted(int track, bool muted);
 
     double getCurrentAudioTime() const;
+    double getWriteHead() const { return m_writeHead; }
     bool   isPlaying() const { return m_playing; }
 
 signals:

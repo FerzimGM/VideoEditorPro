@@ -124,6 +124,7 @@ void MediaDecoder::closeFile()
     m_audioStreamIndex = -1;
     m_lastAudioPos = -1.0;
     m_audioOverflow.clear();
+    m_skipDone = false;
     m_cachedSwsFmt = AV_PIX_FMT_NONE;
     m_cachedSwsW = 0;
     m_cachedSwsH = 0;
@@ -362,18 +363,30 @@ QVector<float> MediaDecoder::decodeAudioRange(double startTime, double duration)
     int totalFloats  = totalSamples * OUTPUT_CHANNELS;
 
     // ── Seek только при прыжке ────────────────────────────────────────────
-    bool needSeek = (m_lastAudioPos < 0.0) ||
-                    (startTime < m_lastAudioPos - 0.05) ||
-                    (startTime > m_lastAudioPos + duration * 8.0);
+    // Порог forward: 1.5с вместо duration*8.
+    // При 20мс чанках duration*8=160мс — слишком мало, каждый стык клипов
+    // вызывал лишний seek. 1.5с — достаточно для нормальных пауз.
+    double fwdThreshold = qMax(1.5, duration * 3.0);
+    bool needSeek = (m_lastAudioPos < 0.0)                         ||
+                    (startTime < m_lastAudioPos - 0.02)             ||
+                    (startTime > m_lastAudioPos + fwdThreshold);
 
     if (needSeek)
     {
         m_audioOverflow.clear();
+        m_skipDone = false;
         int64_t t = static_cast<int64_t>(startTime * AV_TIME_BASE);
         av_seek_frame(m_formatContext, -1, t, AVSEEK_FLAG_BACKWARD);
         avcodec_flush_buffers(m_audioCodecContext);
-        swr_convert(m_swrContext, nullptr, 0, nullptr, 0); // сброс задержки swr
+        swr_convert(m_swrContext, nullptr, 0, nullptr, 0);
         m_lastAudioPos = startTime;
+    }
+    else if (!m_audioOverflow.isEmpty() &&
+             qAbs(startTime - m_lastAudioPos) > 0.015)
+    {
+        // Overflow с предыдущего вызова не соответствует текущей позиции —
+        // сбрасываем, иначе звук из другого места попадёт в начало чанка.
+        m_audioOverflow.clear();
     }
 
     // ── Результат = остаток с прошлого вызова + новые сэмплы ─────────────
@@ -407,15 +420,23 @@ QVector<float> MediaDecoder::decodeAudioRange(double startTime, double duration)
 
         while (avcodec_receive_frame(m_audioCodecContext, audioFrame) == 0)
         {
-            // Пропускаем кадры до начала нашего окна.
-            // При startTime близком к 0 НЕ пропускаем — AAC/MP3 кодеки дают
-            // отрицательный или нулевой PTS для первых кадров, иначе result пустой.
-            if (audioFrame->pts != AV_NOPTS_VALUE && startTime > 0.1)
+            // Получаем PTS кадра (best_effort_timestamp точнее pts для B-frames)
+            double frameTimeBase = av_q2d(m_audioStream->time_base);
+            double framePts = -1.0;
+            if (audioFrame->best_effort_timestamp != AV_NOPTS_VALUE)
+                framePts = audioFrame->best_effort_timestamp * frameTimeBase;
+            else if (audioFrame->pts != AV_NOPTS_VALUE)
+                framePts = audioFrame->pts * frameTimeBase;
+
+            double frameDur = (double)audioFrame->nb_samples
+                              / m_audioCodecContext->sample_rate;
+
+            // Пропускаем кадры полностью ДО нашего окна.
+            // Порог -0.001 вместо -0.005: точнее, меньше пропускается лишнего.
+            if (framePts >= 0.0 && startTime > 0.05)
             {
-                double frameEnd = audioFrame->pts * av_q2d(m_audioStream->time_base)
-                + (double)audioFrame->nb_samples
-                    / m_audioCodecContext->sample_rate;
-                if (frameEnd < startTime - 0.005)
+                double frameEnd = framePts + frameDur;
+                if (frameEnd < startTime - 0.001)
                 {
                     av_frame_unref(audioFrame);
                     continue;
@@ -435,10 +456,28 @@ QVector<float> MediaDecoder::decodeAudioRange(double startTime, double duration)
                                         &outBuf, maxOut,
                                         (const uint8_t**)audioFrame->data,
                                         audioFrame->nb_samples);
+
             if (converted > 0)
             {
                 const float* p = reinterpret_cast<const float*>(outBuf);
-                for (int i = 0; i < converted * OUTPUT_CHANNELS; ++i)
+
+                // ── КЛЮЧЕВОЙ ФИКС РАССИНХРОНА ─────────────────────────────────
+                // После AVSEEK_FLAG_BACKWARD первый кадр начинается ДО startTime.
+                // Пропускаем лишние сэмплы чтобы начать ровно с startTime.
+                // m_skipDone гарантирует что skip происходит ОДИН РАЗ после seek.
+                // Старый вариант проверял result.isEmpty() — но если m_audioOverflow
+                // не пуст, result уже не пустой → skip не срабатывал → рассинхрон.
+                int skipFloats = 0;
+                if (!m_skipDone && framePts >= 0.0 && framePts < startTime - 0.001)
+                {
+                    double skipSec = startTime - framePts;
+                    int skipSamples = static_cast<int>(skipSec * OUTPUT_SAMPLE_RATE + 0.5);
+                    skipFloats = qMin(skipSamples * OUTPUT_CHANNELS,
+                                      converted   * OUTPUT_CHANNELS);
+                    m_skipDone = true;
+                }
+
+                for (int i = skipFloats; i < converted * OUTPUT_CHANNELS; ++i)
                     result.append(p[i]);
             }
             if (outBuf) av_freep(&outBuf);

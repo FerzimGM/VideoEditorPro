@@ -150,6 +150,90 @@ QtObject {
             visible: false
         }
 
+        // ── Уведомление об окончании рендера ─────────────────────────────────
+        // Всплывающая плашка снизу по центру экрана. Появляется на 4 секунды.
+        Rectangle {
+            id: renderDoneNotification
+            anchors.bottom: parent.bottom
+            anchors.horizontalCenter: parent.horizontalCenter
+            anchors.bottomMargin: 60
+            width: notifText.width + 48
+            height: 44
+            radius: 22
+            color: "#1E6E3C"
+            border.color: "#2ECC71"
+            border.width: 1
+            opacity: 0
+            z: 9999
+            visible: opacity > 0
+
+            Text {
+                id: notifText
+                anchors.centerIn: parent
+                text: "✅  Экспорт завершён!"
+                color: "white"
+                font.family: Theme.fontFamily
+                font.pixelSize: 14
+                font.bold: true
+            }
+
+            function show() {
+                opacity = 1
+                notifTimer.restart()
+            }
+
+            Behavior on opacity {
+                NumberAnimation { duration: 300 }
+            }
+
+            Timer {
+                id: notifTimer
+                interval: 4000
+                onTriggered: renderDoneNotification.opacity = 0
+            }
+        }
+
+        Rectangle {
+            id: renderErrorNotification
+            anchors.bottom: parent.bottom
+            anchors.horizontalCenter: parent.horizontalCenter
+            anchors.bottomMargin: 60
+            width: errNotifText.width + 48
+            height: 44
+            radius: 22
+            color: "#7B1A1A"
+            border.color: "#EF5350"
+            border.width: 1
+            opacity: 0
+            z: 9999
+            visible: opacity > 0
+
+            Text {
+                id: errNotifText
+                anchors.centerIn: parent
+                text: "❌  Ошибка экспорта"
+                color: "white"
+                font.family: Theme.fontFamily
+                font.pixelSize: 14
+                font.bold: true
+            }
+
+            function show() {
+                opacity = 1
+                errNotifTimer.restart()
+            }
+
+            Behavior on opacity {
+                NumberAnimation { duration: 300 }
+            }
+
+            Timer {
+                id: errNotifTimer
+                interval: 5000
+                onTriggered: renderErrorNotification.opacity = 0
+            }
+        }
+
         // КОНТЕКСТНЫЕ МЕНЮ
         // В дочерних компонентах (.qml файлах) Overlay.overlay возвращает null в Qt 6.
         // Хранит видимость видео/аудио полос каждого клипа
@@ -222,9 +306,12 @@ QtObject {
                     if (DEBUG_MODE)
                         console.log("✅ Экспорт завершён!")
                     exportDialog.close()
+                    cppTimeline.playSystemBeep()
+                    renderDoneNotification.show()
                 } else {
                     if (DEBUG_MODE)
                         console.log("❌ Ошибка экспорта")
+                    renderErrorNotification.show()
                 }
             }
         }
@@ -579,18 +666,13 @@ QtObject {
 
                 var fmt = root._exportFormat || "MP4"
 
-                // Синхронизируем clipStates -> C++ и запускаем рендер.
-                // ВАЖНО: используем UID клипов из clipsCache, НЕ sequential-индексы.
-                // clipStates._hidden хранит по UID ("5_v": true).
-                // isVideoHidden(0) никогда не найдёт скрытый клип с UID=5.
+                // Синхронизируем clipStates - C++ и запускаем рендер
                 var hiddenMap = {}
                 var mutedMap = {}
-                var allClips = clipsCache.track1.concat(clipsCache.track2)
-                for (var ci = 0; ci < allClips.length; ci++) {
-                    var clipId = allClips[ci].id
-                    hiddenMap[clipId + "_v"] = clipStates.isVideoHidden(clipId)
-                    hiddenMap[clipId + "_a"] = clipStates.isAudioHidden(clipId)
-                    mutedMap[clipId] = clipStates.isMuted(clipId)
+                for (var i = 0; i < cppTimeline.clipCount; i++) {
+                    hiddenMap[i + "_v"] = clipStates.isVideoHidden(i)
+                    hiddenMap[i + "_a"] = clipStates.isAudioHidden(i)
+                    mutedMap[i] = clipStates.isMuted(i)
                 }
                 cppTimeline.syncClipStatesForRender(hiddenMap, mutedMap)
                 cppTimeline.renderToFile(filepath, w, h, fmt)

@@ -123,8 +123,23 @@ void AudioPlaybackEngine::setTrackMuted(int track, bool muted)
 double AudioPlaybackEngine::getCurrentAudioTime() const
 {
     if (!m_playing) return m_startStreamTime;
-    qint64 ms = QDateTime::currentMSecsSinceEpoch() - m_playStartMs;
-    return m_playStartTime + (ms / 1000.0) * m_speed;
+
+    if (!m_sink)
+    {
+        qint64 ms = QDateTime::currentMSecsSinceEpoch() - m_playStartMs;
+        return m_playStartTime + (ms / 1000.0) * m_speed;
+    }
+
+    // m_writeHead = сколько секунд timeline-аудио отправлено в sink.
+    // sink буферизует часть данных, которые ещё не проиграны динамиком.
+    // Реальная слышимая позиция = writeHead − буфер_sink (в timeline-секундах).
+    qint64 bufferedBytes = m_sink->bufferSize() - m_sink->bytesFree();
+    if (bufferedBytes < 0) bufferedBytes = 0;
+    double bufferedSec = (double)bufferedBytes
+                         / (double)(sizeof(float) * CHANNELS * SAMPLE_RATE);
+
+    double audibleTime = m_writeHead - bufferedSec * m_speed;
+    return qMax(m_startStreamTime, audibleTime);
 }
 
 void AudioPlaybackEngine::onFeedTimer()

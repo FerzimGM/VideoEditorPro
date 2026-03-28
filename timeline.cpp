@@ -19,6 +19,10 @@
 #include <cmath>
 #include <QTimer>
 
+#ifdef Q_OS_WIN
+#include <windows.h>
+#endif
+
 Timeline::Timeline(QObject *parent)
     : QObject(parent)
     , m_currentTime(0.0)
@@ -309,6 +313,11 @@ bool Timeline::moveClip(int uidOrIndex, int newTrackIndex, double newStartTime)
     emit clipsChanged();
     emit clipModified(index);
 
+    // Сброс аудио-декодеров: m_lastAudioPos устарел после изменения структуры клипов.
+    // Декодер с устаревшей позицией читает последовательно с неверного места → шуршание.
+    qDeleteAll(m_audioDecoders);
+    m_audioDecoders.clear();
+
     QMetaObject::invokeMethod(this, [this]() {
         if (m_audioEngine && m_audioEngine->isPlaying())
         {
@@ -398,6 +407,11 @@ bool Timeline::splitClip(int uidOrIndex, double splitTime)
 
     emit clipsChanged();
 
+    // Сброс аудио-декодеров: m_lastAudioPos устарел после изменения структуры клипов.
+    // Декодер с устаревшей позицией читает последовательно с неверного места → шуршание.
+    qDeleteAll(m_audioDecoders);
+    m_audioDecoders.clear();
+
     QMetaObject::invokeMethod(this, [this]() {
         // Если идёт воспроизведение — перезапускаем с точного аудио-времени.
         // Иначе AudioPlaybackEngine работает со старой структурой клипов
@@ -462,6 +476,11 @@ bool Timeline::trimClip(int uidOrIndex, double newTrimStart, double newTrimEnd)
     emit clipsChanged();
 
     // Обновить превью после обрезки
+    // Сброс аудио-декодеров: m_lastAudioPos устарел после изменения структуры клипов.
+    // Декодер с устаревшей позицией читает последовательно с неверного места → шуршание.
+    qDeleteAll(m_audioDecoders);
+    m_audioDecoders.clear();
+
     QMetaObject::invokeMethod(this, [this]() {
         // Если идёт воспроизведение — перезапускаем с точного аудио-времени.
         // Иначе AudioPlaybackEngine работает со старой структурой клипов
@@ -520,6 +539,11 @@ bool Timeline::setClipLeftTrim(int uidOrIndex, double newStartTime, double newTr
 
     emit clipsChanged();
     emit totalDurationChanged();
+
+    // Сброс аудио-декодеров: m_lastAudioPos устарел после изменения структуры клипов.
+    // Декодер с устаревшей позицией читает последовательно с неверного места → шуршание.
+    qDeleteAll(m_audioDecoders);
+    m_audioDecoders.clear();
 
     QMetaObject::invokeMethod(this, [this]() {
         // Если идёт воспроизведение — перезапускаем с точного аудио-времени.
@@ -1112,20 +1136,19 @@ bool Timeline::renderToFile(const QString& outputPath, int width, int height, co
     m_renderEngine->setOutputResolution(width, height);
     m_renderEngine->setOutputFormat(format);
 
-    // ── Битрейт видео — зависит от разрешения вывода ─────────────────────────
-    // Таблица: 640x360=2Mbps, 720p=6Mbps, 1080p=10Mbps, 4K=35Mbps.
-    // Используем верхнюю границу рекомендуемого диапазона для максимального качества.
-    // CRF в libx264 переопределит битрейт автоматически, но для h264_mf/mpeg4
-    // битрейт — единственный параметр качества.
+    // ── Битрейт видео зависит от разрешения ──────────────────────────────────
+    // Используем ВЕРХНИЙ предел рекомендованного диапазона — лучше качество.
+    // libx264 с CRF=18 переопределит битрейт автоматически (bit_rate=0 при CRF).
+    // Для h264_mf / mpeg4 битрейт — единственный регулятор качества.
     {
         int pixels = width * height;
-        int videoBitrate;
-        if      (pixels <= 640  * 360)  videoBitrate =  2000000;  // 640×360:  2 Mbps
-        else if (pixels <= 1280 * 720)  videoBitrate =  6000000;  // 720p:     6 Mbps
-        else if (pixels <= 1920 * 1080) videoBitrate = 10000000;  // 1080p:   10 Mbps
-        else if (pixels <= 2560 * 1440) videoBitrate = 20000000;  // 1440p:   20 Mbps
-        else                            videoBitrate = 35000000;  // 4K:      35 Mbps
-        m_renderEngine->setBitrate(videoBitrate);
+        int vbr;
+        if      (pixels <= 640  * 360)  vbr =  2500000;  //  360p →  2.5 Mbps
+        else if (pixels <= 1280 * 720)  vbr =  8000000;  //  720p →  8 Mbps
+        else if (pixels <= 1920 * 1080) vbr = 12000000;  // 1080p → 12 Mbps
+        else if (pixels <= 2560 * 1440) vbr = 25000000;  // 1440p → 25 Mbps
+        else                            vbr = 40000000;  //   4K  → 40 Mbps
+        m_renderEngine->setBitrate(vbr);
     }
 
     // Определить FPS из первого клипа
@@ -1169,6 +1192,16 @@ void Timeline::cancelRender()
     }
 }
 
+void Timeline::playSystemBeep()
+{
+#ifdef Q_OS_WIN
+    MessageBeep(MB_ICONASTERISK);
+#else
+    fprintf(stderr, "\a");
+    fflush(stderr);
+#endif
+}
+
 //  setImageProvider — вызвать из main.cpp ПОСЛЕ регистрации провайдера
 
 void Timeline::setImageProvider(EffectImageProvider* provider)
@@ -1178,11 +1211,15 @@ void Timeline::setImageProvider(EffectImageProvider* provider)
 
 
 //  getOrCreateAudioDecoder — ленивое создание декодера аудио
+//  clipKey = "filepath|startTime|trimStart" — УНИКАЛЕН для каждого клипа.
+//  Без этого два клипа из одного файла (после разреза) делили один декодер →
+//  m_lastAudioPos и m_audioOverflow одного клипа портили аудио другого →
+//  дребезжание, шуршание, рассинхрон на дорожке 2.
 
-MediaDecoder* Timeline::getOrCreateAudioDecoder(const QString& filepath)
+MediaDecoder* Timeline::getOrCreateAudioDecoder(const QString& clipKey, const QString& filepath)
 {
-    if (m_audioDecoders.contains(filepath))
-        return m_audioDecoders[filepath];
+    if (m_audioDecoders.contains(clipKey))
+        return m_audioDecoders[clipKey];
 
     auto* dec = new MediaDecoder();
     if (!dec->openFile(filepath))
@@ -1190,7 +1227,7 @@ MediaDecoder* Timeline::getOrCreateAudioDecoder(const QString& filepath)
         delete dec;
         return nullptr;
     }
-    m_audioDecoders[filepath] = dec;
+    m_audioDecoders[clipKey] = dec;
     return dec;
 }
 
@@ -1217,15 +1254,40 @@ QVector<float> Timeline::getMixedAudio(double time, double duration,
         // даже если декодер ещё не вернул данные (прогрев)
         hasAudio = true;
 
-        MediaDecoder* dec = getOrCreateAudioDecoder(clip->filepath);
+        // ── PER-CLIP KEY ──────────────────────────────────────────────────
+        // Ключ = filepath + startTime + trimStart → уникален для каждого
+        // разрезанного клипа. Без этого два клипа из одного файла делили
+        // один декодер → m_audioOverflow одного портил аудио другого →
+        // дребезжание и рассинхрон.
+        QString clipKey = clip->filepath
+                          + "|" + QString::number(clip->startTime, 'f', 4)
+                          + "|" + QString::number(clip->trimStart, 'f', 4);
+
+        MediaDecoder* dec = getOrCreateAudioDecoder(clipKey, clip->filepath);
         if (!dec || !dec->hasAudio()) return;
 
         double srcTime = clip->sourceTimeAt(time);
-        QVector<float> audio = dec->decodeAudioRange(srcTime, duration);
+
+        // ── КРИТИЧНО: ограничиваем duration до конца клипа ───────────────────
+        // Без этого последний 20мс-чанк может заехать за trimEnd.
+        // Пример: clip.endTime()=17.5, time=17.49, duration=0.02 →
+        // srcTime=17.99, читаем до 18.01 — это уже за trimEnd (18.00).
+        // Слышим 10мс удалённой части источника — "аудио из обрезанного".
+        double timeToClipEnd = clip->endTime() - time;
+        double readDuration  = qMin(duration, timeToClipEnd);
+        if (readDuration <= 0.0) return;
+
+        QVector<float> audio = dec->decodeAudioRange(srcTime, readDuration);
+        // Если запрошенный чанк длиннее прочитанного (конец клипа) — добиваем тишиной
         if (audio.isEmpty()) return;
+        int wantFloats = static_cast<int>(duration * 44100 * 2);
+        if (audio.size() < wantFloats)
+            audio.resize(wantFloats, 0.0f); // тишина за концом клипа
 
         const QMap<QString,double>& eff = clip->effects;
-        const QString fp = clip->filepath;
+        // clipKey используется для буферов эффектов (reverb/echo) вместо fp.
+        // Раньше два клипа из одного файла делили буферы реверберации →
+        // состояние реверба протекало из одного клипа в другой.
         const int SR = 44100, CH = 2;
 
         // 1 Громкость
@@ -1255,14 +1317,14 @@ QVector<float> Timeline::getMixedAudio(double time, double duration,
             }
         }
 
-        // 4 Реверберация
+        // 4 Реверберация — буфер по clipKey, не по filepath!
         if (eff.value("reverb", 0.0) > 0.01)
         {
             double room = eff.value("reverb", 0.0);
             int D = qMax(CH*2, SR/1000*(int)(25+room*75)*CH);
             float g=(float)(room*0.65), wet=(float)(room*0.45), dry=1.0f-wet*0.6f;
-            auto& buf = m_audioDelayBufs[fp+"_reverb"];
-            auto& wp = m_audioDelayPos[fp+"_reverb"];
+            auto& buf = m_audioDelayBufs[clipKey+"_reverb"];
+            auto& wp = m_audioDelayPos[clipKey+"_reverb"];
             if ((int)buf.size()!=D){buf.assign(D,0.0f);wp=0;}
             for (int i=0;i<audio.size();++i)
             {
@@ -1273,14 +1335,14 @@ QVector<float> Timeline::getMixedAudio(double time, double duration,
             }
         }
 
-        // 5 Эхо
+        // 5 Эхо — буфер по clipKey, не по filepath!
         if (eff.value("echo", 0.0) > 0.01)
         {
             double str = eff.value("echo", 0.0);
             int D = qMax(CH*2, SR/1000*(int)(150+str*350)*CH);
             float fb=(float)(str*0.55);
-            auto& buf = m_audioDelayBufs[fp+"_echo"];
-            auto& wp  = m_audioDelayPos[fp+"_echo"];
+            auto& buf = m_audioDelayBufs[clipKey+"_echo"];
+            auto& wp  = m_audioDelayPos[clipKey+"_echo"];
 
             if ((int)buf.size()!=D)
             {
@@ -1351,9 +1413,18 @@ QVector<float> Timeline::getMixedAudio(double time, double duration,
     mixTrack(2, t2muted);
 
     if (!hasAudio) return {};
-    for (float& s : mixed) s = qBound(-1.0f, s, 1.0f);
+
+    // Зажать и очистить NaN/Inf перед отдачей в QAudioSink и AAC-энкодер.
+    // Суммирование двух треков или эффекты pitch/normalize могут дать >1.0.
+    // NaN от деления на ноль в normalize создаёт треск и шипение при кодировании.
+    for (float& s : mixed)
+    {
+        if (!std::isfinite(s)) s = 0.0f;
+        s = qBound(-1.0f, s, 1.0f);
+    }
     return mixed;
 }
+
 
 
 //  alphaComposite — Porter-Duff «src over» для хромакея

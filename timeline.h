@@ -98,6 +98,7 @@ public:
                                   int width = 1920, int height = 1080,
                                   const QString& format = "MP4");
     Q_INVOKABLE void cancelRender();
+    Q_INVOKABLE void playSystemBeep();
 
 signals:
     void currentTimeChanged();
@@ -146,7 +147,8 @@ private:
     void sortClips();
     double getClipSourceDuration(const QString& filepath);
     double toSourceTime(const QString& filepath, double timelineTime) const;
-    MediaDecoder* getOrCreateAudioDecoder(const QString& filepath);
+    // clipKey = "filepath|startTime|trimStart" — уникален для каждого разрезанного клипа
+    MediaDecoder* getOrCreateAudioDecoder(const QString& clipKey, const QString& filepath);
 
     QImage getCompositeFrame(double time,
                              int selectedClipId = -1,

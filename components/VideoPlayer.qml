@@ -141,20 +141,9 @@ Rectangle {
 
     onPlaybackSpeedChanged: {
         if (isPlaying) {
-            speedDebounceTimer.restart()
-        }
-    }
-
-    Timer {
-        id: speedDebounceTimer
-        interval: 200
-        repeat: false
-        onTriggered: {
-            if (videoPlayer.isPlaying) {
-                var exactTime = cppTimeline.getPlaybackTime()
-                cppTimeline.stopPlayback()
-                cppTimeline.startPlayback(exactTime, videoPlayer.playbackSpeed)
-            }
+            var exactTime = cppTimeline.getPlaybackTime()
+            cppTimeline.stopPlayback()
+            cppTimeline.startPlayback(exactTime, videoPlayer.playbackSpeed)
         }
     }
 
