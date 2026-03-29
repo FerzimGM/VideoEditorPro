@@ -3,16 +3,21 @@
 
 // FrameCache — скользящее окно кэша кадров.
 //
-// ПРЕЖНЯЯ ОШИБКА (причина зависаний каждые ~3с):
-//   Старый код при переполнении проверял first.key() < m_playPosition - 10.
-//   Если кадры позади не попадали в этот диапазон — удалял последний кадр ВПЕРЕДИ.
-//   DecoderThread тут же его перепрефетчивал → снова удалялся → бесконечный цикл.
-//   Кадры нужные для воспроизведения постоянно вытеснялись → зависание.
+// ПРАВИЛО ВЫТЕСНЕНИЯ:
+//   Удаляем только кадры ПОЗАДИ (playPos - KEEP_BEHIND).
+//   Кадры впереди (prefetch-буфер) — не трогаем никогда.
 //
-// ПРАВИЛЬНАЯ СТРАТЕГИЯ:
-//   Удалять только кадры ПОЗАДИ playPos (они уже воспроизведены).
-//   Кадры впереди — prefetch-буфер — не трогать никогда.
-//   m_playPosition обновляется из getCurrentFrameAt при каждом тике → всегда актуален.
+// РАЗМЕР:
+//   MAX_FRAMES = 150: PREFETCH_AHEAD=2.5с × 30fps = 75 кадров вперёд
+//                   + KEEP_BEHIND = 30 кадров позади
+//                   + 45 кадров запаса при рывках декодера.
+//   Память: 150 × 1920×1080 × 3б ≈ 935 МБ на поток.
+//   При 2 потоках ≈ 1.9 ГБ — приемлемо для 32 ГБ RAM.
+//
+// СТАРАЯ ОШИБКА (причина циклических зависаний каждые ~20с):
+//   if (first.key() < m_playPosition - 10) erase(first)
+//   else erase(last)   ← удалял только что задекодированный кадр ВПЕРЕДИ
+//   → DecoderThread перепрефетчивал его → снова удалялся → бесконечный цикл.
 
 #include <QMap>
 #include <QImage>
@@ -20,41 +25,33 @@
 #include <QMutexLocker>
 
 struct FrameCache {
-    // 120 кадров = 4с при 30fps.
-    // PREFETCH_AHEAD = 2.5с = ~75 кадров + 45 кадров хвоста позади.
-    // Память: 120 × 1920×1080 × 3б ≈ 750 МБ на поток.
-    // При 2 потоках ≈ 1.5 ГБ — нормально для современного ПК.
-    // Старое значение 90 было на грани: prefetch 75 кадров + хвост 15 = ровно 90,
-    // при любом рассинхроне кадры впереди начинали вытесняться → зависания.
-    static const int MAX_FRAMES  = 120;
-    static const int KEEP_BEHIND = 20; // кадров позади которые не трогаем
+    static const int MAX_FRAMES  = 150;
+    static const int KEEP_BEHIND = 30;
 
     void put(int frameNumber, const QImage& image)
     {
         QMutexLocker lock(&m_mutex);
         m_frames[frameNumber] = image;
 
-        // Вытесняем только кадры ПОЗАДИ playPos.
-        // Цикл while: если позади несколько старых кадров — удаляем все лишние за раз.
         while (m_frames.size() > MAX_FRAMES)
         {
             auto first = m_frames.begin();
             if (first.key() < m_playPosition - KEEP_BEHIND)
             {
-                // Кадр достаточно далеко позади — безопасно удалить
+                // Кадр достаточно далеко позади — удаляем
                 m_frames.erase(first);
             }
             else
             {
-                // Нет кадров позади для вытеснения.
-                // Это значит prefetch ушёл слишком далеко вперёд (>MAX_FRAMES кадров).
-                // Удаляем самый дальний кадр ВПЕРЕДИ — DecoderThread сам притормозит
-                // через условие aheadOf > PREFETCH_AHEAD и переспрефетчировать не будет.
+                // Нет старых кадров позади.
+                // Prefetch ушёл слишком далеко вперёд — удаляем самый дальний.
+                // DecoderThread остановится через PREFETCH_AHEAD и не будет
+                // перепрефетчировать его (в отличие от старого кода).
                 auto last = m_frames.end(); --last;
                 if (last.key() > m_playPosition + KEEP_BEHIND)
                     m_frames.erase(last);
                 else
-                    break; // все кадры в нужной зоне — не трогаем
+                    break; // все кадры в нужной зоне — выходим
             }
         }
     }
@@ -67,7 +64,10 @@ struct FrameCache {
         return false;
     }
 
-    bool getNearest(int frameNumber, QImage& out, int maxDistance = 5)
+    // maxDistance по умолчанию = 2 (±67мс при 30fps).
+    // Старое значение 5 (±167мс) давало визуальное дёргание:
+    // getNearest возвращал кадр из будущего когда декодер чуть опережал.
+    bool getNearest(int frameNumber, QImage& out, int maxDistance = 2)
     {
         QMutexLocker lock(&m_mutex);
         if (m_frames.isEmpty()) return false;
@@ -105,8 +105,8 @@ struct FrameCache {
         m_playPosition = 0;
     }
 
-    int size()   { QMutexLocker lock(&m_mutex); return m_frames.size(); }
-    bool contains(int n) { QMutexLocker lock(&m_mutex); return m_frames.contains(n); }
+    int size()            { QMutexLocker l(&m_mutex); return m_frames.size(); }
+    bool contains(int n)  { QMutexLocker l(&m_mutex); return m_frames.contains(n); }
 
 private:
     QMap<int, QImage> m_frames;

@@ -46,10 +46,10 @@ public:
     void updatePlayPosition(double time)
     {
         QMutexLocker lock(&m_mutex);
-        // Только обновляем позицию для prefetch-логики (aheadOf > PREFETCH_AHEAD).
-        // Seek управляется явно из Timeline через seekTo().
-        // Старый авто-seek при прыжке >2с вызывал cache->clear() из зазора
-        // между клипами → рывки каждые несколько секунд.
+        // Только обновляем позицию для prefetch.
+        // Seek управляется явно из Timeline — никакого авто-seek здесь.
+        // Авто-seek при прыжке >2с вызывал cache->clear() из зазора между
+        // клипами → рывки каждые несколько секунд воспроизведения.
         if (time > m_playPosition)
             m_playPosition = time;
         m_condition.wakeAll();

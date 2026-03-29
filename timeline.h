@@ -143,12 +143,9 @@ private:
     QHash<QString, std::vector<float>> m_audioDelayBufs;
     QHash<QString, int> m_audioDelayPos;
     qint64 m_lastSyncDecodeMs = 0;
-
-    // Буфер последних успешных кадров — при cache miss показываем предыдущий кадр
-    QImage m_lastFrame1;
-    QImage m_lastFrame2;
-    // Starttime активного клипа по дорожкам — для детекции перехода в видео-таймере
-    double m_lastClip1Start = -1.0;
+    QImage m_lastFrame1;  // буфер последнего кадра дорожки 1 для cache miss
+    QImage m_lastFrame2;  // буфер последнего кадра дорожки 2 для cache miss
+    double m_lastClip1Start = -1.0; // для детекции перехода между клипами
     double m_lastClip2Start = -1.0;
 
     void sortClips();
