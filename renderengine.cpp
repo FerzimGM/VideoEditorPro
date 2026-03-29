@@ -1211,10 +1211,29 @@ QImage RenderWorker::applyClipEffects(const QImage& frame, const TimelineClip& c
 {
     if (clip.effects.isEmpty()) return frame;
     QImage result = frame;
+
+    // ── Хромакей применяется ПОСЛЕДНИМ ──────────────────────────────────
+    // Все визуальные эффекты (brightness, temperature и т.д.) конвертируют
+    // кадр в RGB888. Если хромакей (ARGB32) применить раньше — следующий
+    // эффект уничтожит альфа-канал → зелёный фон остаётся.
+    // Решение: сначала все эффекты (RGB888), потом хромакей (→ ARGB32).
+    bool hasChromaKey = false;
+    double chromaThr = 0.35, chromaSoft = 0.10;
+
     for (auto it = clip.effects.begin(); it != clip.effects.end(); ++it)
     {
         const QString& name = it.key();
         double value = it.value();
+
+        // Пропускаем хромакей — применим в конце
+        if (name == "chroma_key" && value > 0.5) {
+            hasChromaKey = true;
+            chromaThr  = clip.effects.value("chroma_threshold",  0.35);
+            chromaSoft = clip.effects.value("chroma_smoothness", 0.10);
+            continue;
+        }
+        if (name == "chroma_threshold" || name == "chroma_smoothness") continue;
+
         if (name == "brightness") result = applyBrightness(result, value);
         else if (name == "contrast") result = applyContrast(result, value);
         else if (name == "saturation") result = applySaturation(result, value);
@@ -1235,28 +1254,24 @@ QImage RenderWorker::applyClipEffects(const QImage& frame, const TimelineClip& c
         }
         else if (name == "grain" && value > 0.0)
         {
-            // frameIndex: делаем уникальным по времени для "живого" зерна
             int fi = static_cast<int>(clip.effects.value("_frameIdx", 0));
             result = Effects::grain(result, value, fi);
         }
-        else if (name == "chroma_key" && value > 0.5)
-        {
-            // Хромакей: убираем зелёный фон, результат ARGB32
-            double thr  = clip.effects.value("chroma_threshold",  0.35);
-            double soft = clip.effects.value("chroma_smoothness", 0.10);
-            result = Effects::chromaKey(result, thr, soft);
-            // Флаг — композитор знает что нужно альфа-наложение
-        }
         else if (name == "auto_enhance" && value > 0.0)
         {
-            // Авто-улучшение: резкость + контраст + насыщенность пропорционально силе
-            double s = value;  // 0..1
+            double s = value;
             if (s > 0.01) result = Effects::sharpness(result, 0.3 + s * 0.7);
             if (s > 0.01) result = applyContrast(result, 1.0 + s * 0.15);
             if (s > 0.01) result = applySaturation(result, 1.0 + s * 0.2);
         }
-        // volume/reverb/echo/mono/stereo/pitch/normalize/fade обрабатываются в decodeAudioChunk
     }
+
+    // Хромакей — последний: результат ARGB32 не будет затёрт другими эффектами
+    if (hasChromaKey)
+    {
+        result = Effects::chromaKey(result, chromaThr, chromaSoft);
+    }
+
     return result;
 }
 
@@ -1513,12 +1528,24 @@ QImage RenderEngine::applyEffectsToFrame(const QImage& frame,
 {
     QImage result = frame;
 
+    // Хромакей применяется ПОСЛЕДНИМ (как в applyClipEffects)
+    bool hasChromaKey = false;
+    double chromaThr = 0.35, chromaSoft = 0.10;
+
     for (auto it = effects.constBegin(); it != effects.constEnd(); ++it) {
         const QString& name = it.key();
         double value = it.value();
 
-        // Служебные поля — пропускаем
         if (name.startsWith('_')) continue;
+
+        // Пропускаем хромакей — применим в конце
+        if (name == "chroma_key" && value > 0.5) {
+            hasChromaKey = true;
+            chromaThr  = effects.value("chroma_threshold",  0.35);
+            chromaSoft = effects.value("chroma_smoothness", 0.10);
+            continue;
+        }
+        if (name == "chroma_threshold" || name == "chroma_smoothness") continue;
 
         if (name == "brightness"  && qAbs(value) > 0.001)
             result = applyBrightness(result, value);
@@ -1550,11 +1577,6 @@ QImage RenderEngine::applyEffectsToFrame(const QImage& frame,
             result = applyTint(result, value, effects.value("tint_strength", 0.0));
         else if (name == "grain"       && value > 0.01)
             result = applyGrain(result, value, frameIndex);
-        else if (name == "chroma_key"  && value > 0.5) {
-            double thr  = effects.value("chroma_threshold",  0.35);
-            double soft = effects.value("chroma_smoothness", 0.10);
-            result = applyChromaKey(result, thr, soft);
-        }
         else if (name == "auto_enhance" && value > 0.0) {
             double s = value;
             if (s > 0.01) result = applySharpness(result, 0.3 + s * 0.7);
@@ -1562,5 +1584,14 @@ QImage RenderEngine::applyEffectsToFrame(const QImage& frame,
             if (s > 0.01) result = applySaturation(result, 1.0 + s * 0.2);
         }
     }
+
+    // Хромакей — последний: ARGB32 не затрётся следующим эффектом
+    if (hasChromaKey)
+    {
+        result = applyChromaKey(result, chromaThr, chromaSoft);
+    }
+
     return result;
 }
+
+
