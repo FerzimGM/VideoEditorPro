@@ -511,11 +511,27 @@ release\moc_decoderthread.cpp: ..\..\decoderthread.h \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qwaitcondition.h \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\QDeadlineTimer \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\QAtomicInt \
+		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\QDateTime \
+		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qdatetime.h \
+		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qcalendar.h \
+		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qlocale.h \
+		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qvariant.h \
+		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qdebug.h \
+		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qtextstream.h \
+		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qcontiguouscache.h \
+		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qsharedpointer.h \
+		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qshareddata.h \
+		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qsharedpointer_impl.h \
+		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qmap.h \
+		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qshareddata_impl.h \
+		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qset.h \
+		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qhash.h \
+		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qvarlengtharray.h \
+		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qalloc.h \
+		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\q23utility.h \
+		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\q20utility.h \
 		..\..\FrameCache.h \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\QMap \
-		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qmap.h \
-		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qshareddata.h \
-		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qshareddata_impl.h \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtGui\QImage \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtGui\qimage.h \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtGui\qtguiglobal.h \
@@ -530,8 +546,6 @@ release\moc_decoderthread.cpp: ..\..\decoderthread.h \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qrect.h \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qcheckedint_impl.h \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qmargins.h \
-		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\q23utility.h \
-		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\q20utility.h \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qsize.h \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qpoint.h \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtGui\qpixelformat.h \
@@ -2549,6 +2563,7 @@ release\timeline.obj: ..\..\timeline.cpp ..\..\timeline.h \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qwaitcondition.h \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\QDeadlineTimer \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\QAtomicInt \
+		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\QDateTime \
 		..\..\mediadecoder.h \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\QVector \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\qvector.h \
@@ -2610,7 +2625,6 @@ release\timeline.obj: ..\..\timeline.cpp ..\..\timeline.h \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtMultimedia\QMediaDevices \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtMultimedia\qmediadevices.h \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtMultimedia\QAudioDevice \
-		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\QDateTime \
 		..\..\EffectImageProvider.h \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtQuick\QQuickImageProvider \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtQuick\qquickimageprovider.h \

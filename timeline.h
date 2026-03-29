@@ -142,7 +142,14 @@ private:
     // Персистентные кольцевые буферы для аудиоэффектов (reverb/echo) в live-режиме
     QHash<QString, std::vector<float>> m_audioDelayBufs;
     QHash<QString, int> m_audioDelayPos;
-    qint64 m_lastSyncDecodeMs = 0; // разрешить sync-decode при следующем cache miss
+    qint64 m_lastSyncDecodeMs = 0;
+
+    // Буфер последних успешных кадров — при cache miss показываем предыдущий кадр
+    QImage m_lastFrame1;
+    QImage m_lastFrame2;
+    // Starttime активного клипа по дорожкам — для детекции перехода в видео-таймере
+    double m_lastClip1Start = -1.0;
+    double m_lastClip2Start = -1.0;
 
     void sortClips();
     double getClipSourceDuration(const QString& filepath);

@@ -5,6 +5,7 @@
 #include <QMutex>
 #include <QWaitCondition>
 #include <QAtomicInt>
+#include <QDateTime>
 #include "FrameCache.h"
 #include "mediadecoder.h"
 
@@ -45,24 +46,12 @@ public:
     void updatePlayPosition(double time)
     {
         QMutexLocker lock(&m_mutex);
-        // ── КЛЮЧЕВОЙ ФИКС: seek при прыжке между клипами ─────────────
-        // Раньше: только увеличивали m_playPosition, thread декодировал
-        // последовательно от старой позиции до новой. Для двух клипов
-        // из одного файла на дорожке 2 (source 25→35) thread тратил
-        // сотни мс на decode 10с промежутка → cache miss → видео замирало
-        // пока аудио играло → рассинхрон.
-        // Теперь: если прыжок > 2с — делаем seek, кэш очищается,
-        // thread начинает декодировать с нужной позиции сразу.
-        if (time > m_playPosition + 2.0)
-        {
-            m_seekTime      = time;
-            m_playPosition  = time;
-            m_seekRequested = true;
-        }
-        else if (time > m_playPosition)
-        {
+        // Только обновляем позицию для prefetch-логики (aheadOf > PREFETCH_AHEAD).
+        // Seek управляется явно из Timeline через seekTo().
+        // Старый авто-seek при прыжке >2с вызывал cache->clear() из зазора
+        // между клипами → рывки каждые несколько секунд.
+        if (time > m_playPosition)
             m_playPosition = time;
-        }
         m_condition.wakeAll();
     }
 
@@ -102,7 +91,13 @@ protected:
 
         double currentTime = 0.0;
         double prefetchBase = 0.0;
-        const double PREFETCH_AHEAD = 8.0; // при 2x скорости нужно 8с буфера
+
+        // ФИКС БАГ 3: снижено с 8.0 до 2.5 секунд.
+        // 8 секунд буфера при 30fps = 240 кадров на поток заранее.
+        // Это разгоняло Баг 1 (сигнал-шторм) и Баг 2 (память).
+        // 2.5 секунды достаточно для плавного воспроизведения даже при 2x скорости.
+        const double PREFETCH_AHEAD = 2.5;
+
         bool needSeek = true;  // при старте делаем один seek на начало
 
         while (true) {
@@ -139,7 +134,7 @@ protected:
                 {
                     int seekFrameNum = (int)(currentTime * m_fps + 0.5);
                     m_cache->put(seekFrameNum, seekFrame);
-                    emit frameReady(seekFrameNum);
+                    emitFrameReady(seekFrameNum);
                 }
                 needSeek = false;
             }
@@ -155,7 +150,7 @@ protected:
                 if (!frame.isNull())
                 {
                     m_cache->put(frameNum, frame);
-                    emit frameReady(frameNum);
+                    emitFrameReady(frameNum);
                     // Сообщаем кэшу текущую позицию воспроизведения
                     // чтобы при вытеснении не удалялись нужные кадры
                     {
@@ -193,6 +188,22 @@ protected:
     }
 
 private:
+    // ФИКС БАГ 1: rate-limit на emit frameReady.
+    // DecoderThread может декодировать 200+ fps — без лимита это
+    // 200 сигналов/сек × 5 потоков = 1000 ивентов в очереди UI.
+    // Очередь Qt переполняется → лаг нарастает. Пауза дренирует → норм.
+    // Лимит 40мс (~25fps) — достаточно для обновления превью на паузе
+    // и не перегружает очередь во время воспроизведения.
+    void emitFrameReady(int frameNum)
+    {
+        qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+        if (nowMs - m_lastEmitMs >= 40)
+        {
+            m_lastEmitMs = nowMs;
+            emit frameReady(frameNum);
+        }
+    }
+
     QString m_filepath;
     double m_fps;
     FrameCache* m_cache;
@@ -201,10 +212,9 @@ private:
     bool m_seekRequested;
     double m_seekTime;
     double m_playPosition = 0.0;
+    qint64 m_lastEmitMs = 0;
     QMutex m_mutex;
     QWaitCondition m_condition;
 };
 
 #endif // DECODERTHREAD_H
-
-
