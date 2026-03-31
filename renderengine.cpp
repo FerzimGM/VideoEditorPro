@@ -736,6 +736,45 @@ QVector<float> RenderWorker::decodeAudioChunk(TimelineClip* clip,
 namespace Effects
 {
 
+// ── Alpha-preservation helper ─────────────────────────────────────────────
+// Все функции в этом namespace конвертируют кадр в RGB888 и теряют альфу.
+// После применения хромакея кадр становится ARGB32.
+// Чтобы grayscale/sepia/blur и т.д. не уничтожали альфу — используем этот
+// хелпер: запоминаем альфа-маску ДО эффекта, восстанавливаем ПОСЛЕ.
+// Использование: auto result = preserveAlpha(frame, [&](QImage& f){ f = blur(f, r); });
+template<typename Func>
+static QImage preserveAlpha(const QImage& frame, Func applyEffect)
+{
+    if (frame.format() != QImage::Format_ARGB32)
+    {
+        // Нет альфы — просто применяем эффект
+        QImage copy = frame;
+        applyEffect(copy);
+        return copy;
+    }
+    // Сохраняем альфа-канал попиксельно
+    int w = frame.width(), h = frame.height();
+    QVector<uchar> alphaMap(w * h);
+    for (int y = 0; y < h; ++y) {
+        const QRgb* line = reinterpret_cast<const QRgb*>(frame.constScanLine(y));
+        for (int x = 0; x < w; ++x)
+            alphaMap[y * w + x] = (uchar)qAlpha(line[x]);
+    }
+    // Применяем эффект (он конвертирует в RGB888)
+    QImage copy = frame;
+    applyEffect(copy);
+    // Восстанавливаем альфу: конвертируем результат в ARGB32 и вставляем маску
+    QImage result = copy.convertToFormat(QImage::Format_ARGB32);
+    for (int y = 0; y < h; ++y) {
+        QRgb* line = reinterpret_cast<QRgb*>(result.scanLine(y));
+        for (int x = 0; x < w; ++x) {
+            uchar a = alphaMap[y * w + x];
+            line[x] = qRgba(qRed(line[x]), qGreen(line[x]), qBlue(line[x]), a);
+        }
+    }
+    return result;
+}
+
 static void rgbToHsv(int r, int g, int b, double& h, double& s, double& v)
 {
     double rd = r/255.0, gd = g/255.0, bd = b/255.0;
@@ -771,262 +810,215 @@ static void hsvToRgb(double h, double s, double v, int& r, int& g, int& b)
 
 QImage blur(const QImage& frame, double radius)
 {
-    QImage src = frame.convertToFormat(QImage::Format_RGB888);
-    QImage result = src.copy();
-    int r = qMax(1, static_cast<int>(radius));
-    int w = src.width(), h = src.height();
-    QImage temp = src.copy();
-    for (int y = 0; y < h; ++y)
-    {
-        const uchar* sl = src.constScanLine(y);
-        uchar* dl = temp.scanLine(y);
-        for (int x = 0; x < w; ++x)
-        {
-
-            int sR=0,sG=0,sB=0,cnt=0;
-
-            for (int dx=-r;dx<=r;++dx)
-            {
-
-                int nx=qBound(0,x+dx,w-1);
-                sR+=sl[nx*3];
-                sG+=sl[nx*3+1];
-                sB+=sl[nx*3+2];
-                ++cnt;
-            }
-            if (cnt > 0)
-            {
-                dl[x*3]=sR/cnt;
-                dl[x*3+1]=sG/cnt;
-                dl[x*3+2]=sB/cnt;
+    auto doBlur = [&](QImage& src) {
+        src = src.convertToFormat(QImage::Format_RGB888);
+        QImage result = src.copy();
+        int r = qMax(1, static_cast<int>(radius));
+        int w = src.width(), h = src.height();
+        QImage temp = src.copy();
+        for (int y = 0; y < h; ++y) {
+            const uchar* sl = src.constScanLine(y);
+            uchar* dl = temp.scanLine(y);
+            for (int x = 0; x < w; ++x) {
+                int sR=0,sG=0,sB=0,cnt=0;
+                for (int dx=-r;dx<=r;++dx) {
+                    int nx=qBound(0,x+dx,w-1);
+                    sR+=sl[nx*3]; sG+=sl[nx*3+1]; sB+=sl[nx*3+2]; ++cnt;
+                }
+                if (cnt>0) { dl[x*3]=sR/cnt; dl[x*3+1]=sG/cnt; dl[x*3+2]=sB/cnt; }
             }
         }
-    }
-    for (int x=0;x<w;++x) for (int y=0;y<h;++y)
-        {
+        for (int x=0;x<w;++x) for (int y=0;y<h;++y) {
             int sR=0,sG=0,sB=0,cnt=0;
-            for (int dy=-r;dy<=r;++dy)
-            {
+            for (int dy=-r;dy<=r;++dy) {
                 int ny=qBound(0,y+dy,h-1);
                 const uchar*l=temp.constScanLine(ny);
-                sR+=l[x*3];sG+=l[x*3+1];
-                sB+=l[x*3+2];++cnt;
+                sR+=l[x*3]; sG+=l[x*3+1]; sB+=l[x*3+2]; ++cnt;
             }
             uchar* out=result.scanLine(y);
-            if (cnt > 0)
-            {
-                out[x*3]=sR/cnt;
-                out[x*3+1]=sG/cnt;
-                out[x*3+2]=sB/cnt;
-            }
+            if (cnt>0) { out[x*3]=sR/cnt; out[x*3+1]=sG/cnt; out[x*3+2]=sB/cnt; }
         }
-    return result;
+        src = result;
+    };
+    return preserveAlpha(frame, doBlur);
 }
 
 QImage sharpness(const QImage& frame, double strength)
 {
-    QImage blurred = blur(frame, 1.0);
-    QImage src  = frame.convertToFormat(QImage::Format_RGB888);
-    QImage bsrc = blurred.convertToFormat(QImage::Format_RGB888);
-    QImage result = src.copy();
-    for (int y=0;y<src.height();++y)
-    {
-        const uchar*s=src.constScanLine(y); const uchar*b=bsrc.constScanLine(y); uchar*d=result.scanLine(y);
-        for (int x=0;x<src.width()*3;++x)
-        {
-            int v=(int)s[x]+(int)((s[x]-b[x])*strength);
-            d[x]=(uchar)qBound(0,v,255);
+    return preserveAlpha(frame, [&](QImage& f) {
+        QImage blurred = blur(f, 1.0);
+        QImage src  = f.convertToFormat(QImage::Format_RGB888);
+        QImage bsrc = blurred.convertToFormat(QImage::Format_RGB888);
+        QImage result = src.copy();
+        for (int y=0;y<src.height();++y) {
+            const uchar*s=src.constScanLine(y); const uchar*b=bsrc.constScanLine(y); uchar*d=result.scanLine(y);
+            for (int x=0;x<src.width()*3;++x) {
+                int v=(int)s[x]+(int)((s[x]-b[x])*strength);
+                d[x]=(uchar)qBound(0,v,255);
+            }
         }
-    }
-    return result;
+        f = result;
+    });
 }
 
 QImage hue(const QImage& frame, double degrees)
 {
-    QImage result = frame.convertToFormat(QImage::Format_RGB888);
-    for (int y=0;y<result.height();++y)
-    {
-        uchar* line=result.scanLine(y);
-        for (int x=0;x<result.width();++x)
-        {
-            int idx=x*3; double h,s,v;
-            rgbToHsv(line[idx],line[idx+1],line[idx+2],h,s,v);
-            h = fmod(h + degrees + 360.0, 360.0);
-            int r,g,b; hsvToRgb(h,s,v,r,g,b);
-            line[idx]=r; line[idx+1]=g; line[idx+2]=b;
+    return preserveAlpha(frame, [&](QImage& f) {
+        f = f.convertToFormat(QImage::Format_RGB888);
+        for (int y=0;y<f.height();++y) {
+            uchar* line=f.scanLine(y);
+            for (int x=0;x<f.width();++x) {
+                int idx=x*3; double h,s,v;
+                rgbToHsv(line[idx],line[idx+1],line[idx+2],h,s,v);
+                h = fmod(h + degrees + 360.0, 360.0);
+                int r,g,b; hsvToRgb(h,s,v,r,g,b);
+                line[idx]=r; line[idx+1]=g; line[idx+2]=b;
+            }
         }
-    }
-    return result;
+    });
 }
 
 QImage sepia(const QImage& frame, double intensity)
 {
-    QImage result = frame.convertToFormat(QImage::Format_RGB888);
-    for (int y=0;y<result.height();++y)
-    {
-        uchar* line=result.scanLine(y);
-        for (int x=0;x<result.width();++x)
-        {
-            int idx=x*3, r=line[idx], g=line[idx+1], b=line[idx+2];
-            int sr=qBound(0,(int)(r*0.393+g*0.769+b*0.189),255);
-            int sg=qBound(0,(int)(r*0.349+g*0.686+b*0.168),255);
-            int sb=qBound(0,(int)(r*0.272+g*0.534+b*0.131),255);
-            line[idx]  =(uchar)(r+(sr-r)*intensity);
-            line[idx+1]=(uchar)(g+(sg-g)*intensity);
-            line[idx+2]=(uchar)(b+(sb-b)*intensity);
+    return preserveAlpha(frame, [&](QImage& f) {
+        f = f.convertToFormat(QImage::Format_RGB888);
+        for (int y=0;y<f.height();++y) {
+            uchar* line=f.scanLine(y);
+            for (int x=0;x<f.width();++x) {
+                int idx=x*3, r=line[idx], g=line[idx+1], b=line[idx+2];
+                int sr=qBound(0,(int)(r*0.393+g*0.769+b*0.189),255);
+                int sg=qBound(0,(int)(r*0.349+g*0.686+b*0.168),255);
+                int sb=qBound(0,(int)(r*0.272+g*0.534+b*0.131),255);
+                line[idx]  =(uchar)(r+(sr-r)*intensity);
+                line[idx+1]=(uchar)(g+(sg-g)*intensity);
+                line[idx+2]=(uchar)(b+(sb-b)*intensity);
+            }
         }
-    }
-    return result;
+    });
 }
 
 QImage vignette(const QImage& frame, double strength)
 {
-    QImage result = frame.convertToFormat(QImage::Format_RGB888);
-    int w=result.width(), h=result.height();
-    double cx=w/2.0, cy=h/2.0, maxDist2=cx*cx+cy*cy;
-    for (int y=0;y<h;++y)
-    {
-        uchar* line=result.scanLine(y);
-        for (int x=0;x<w;++x)
-        {
-            double dx=x-cx, dy=y-cy;
-            double factor=qBound(0.0, 1.0-strength*(dx*dx+dy*dy)/maxDist2, 1.0);
-            int idx=x*3;
-            line[idx]  =(uchar)(line[idx]  *factor);
-            line[idx+1]=(uchar)(line[idx+1]*factor);
-            line[idx+2]=(uchar)(line[idx+2]*factor);
+    return preserveAlpha(frame, [&](QImage& f) {
+        f = f.convertToFormat(QImage::Format_RGB888);
+        int w=f.width(), h=f.height();
+        double cx=w/2.0, cy=h/2.0, maxDist2=cx*cx+cy*cy;
+        for (int y=0;y<h;++y) {
+            uchar* line=f.scanLine(y);
+            for (int x=0;x<w;++x) {
+                double dx=x-cx, dy=y-cy;
+                double factor=qBound(0.0, 1.0-strength*(dx*dx+dy*dy)/maxDist2, 1.0);
+                int idx=x*3;
+                line[idx]  =(uchar)(line[idx]  *factor);
+                line[idx+1]=(uchar)(line[idx+1]*factor);
+                line[idx+2]=(uchar)(line[idx+2]*factor);
+            }
         }
-    }
-    return result;
+    });
 }
 
-// Инверсия цветов
 QImage invert(const QImage& frame)
 {
-    QImage result = frame.convertToFormat(QImage::Format_RGB888);
-    for (int y=0;y<result.height();++y)
-    {
-        uchar* line=result.scanLine(y);
-        for (int x=0;x<result.width()*3;++x)
-            line[x] = 255 - line[x];
-    }
-    return result;
+    return preserveAlpha(frame, [](QImage& f) {
+        f = f.convertToFormat(QImage::Format_RGB888);
+        for (int y=0;y<f.height();++y) {
+            uchar* line=f.scanLine(y);
+            for (int x=0;x<f.width()*3;++x) line[x] = 255 - line[x];
+        }
+    });
 }
 
-// Постеризация: levels 2..8 — уменьшает количество цветов
 QImage posterize(const QImage& frame, double levels)
 {
-    int lvl = qBound(2, static_cast<int>(levels), 16);
-    int step = 256 / lvl;
-    QImage result = frame.convertToFormat(QImage::Format_RGB888);
-    for (int y=0;y<result.height();++y)
-    {
-        uchar* line=result.scanLine(y);
-        for (int x=0;x<result.width()*3;++x)
-            line[x] = (uchar)qBound(0, (line[x] / step) * step, 255);
-    }
-    return result;
+    return preserveAlpha(frame, [&](QImage& f) {
+        int lvl = qBound(2, static_cast<int>(levels), 16);
+        int step = 256 / lvl;
+        f = f.convertToFormat(QImage::Format_RGB888);
+        for (int y=0;y<f.height();++y) {
+            uchar* line=f.scanLine(y);
+            for (int x=0;x<f.width()*3;++x)
+                line[x] = (uchar)qBound(0, (line[x] / step) * step, 255);
+        }
+    });
 }
 
-// Пикселизация: blockSize 1..64
 QImage pixelate(const QImage& frame, double blockSize)
 {
-    int bs = qBound(2, static_cast<int>(blockSize), 64);
-    QImage result = frame.convertToFormat(QImage::Format_RGB888);
-    int w=result.width(), h=result.height();
-    for (int by=0;by<h;by+=bs) for (int bx=0;bx<w;bx+=bs)
-        {
-            // Средний цвет блока
+    return preserveAlpha(frame, [&](QImage& f) {
+        int bs = qBound(2, static_cast<int>(blockSize), 64);
+        f = f.convertToFormat(QImage::Format_RGB888);
+        int w=f.width(), h=f.height();
+        for (int by=0;by<h;by+=bs) for (int bx=0;bx<w;bx+=bs) {
             long sR=0,sG=0,sB=0,cnt=0;
-            for (int dy=0;dy<bs&&by+dy<h;++dy) for (int dx=0;dx<bs&&bx+dx<w;++dx)
-                {
-                    const uchar*l=result.constScanLine(by+dy); int idx=(bx+dx)*3;
-                    sR+=l[idx]; sG+=l[idx+1]; sB+=l[idx+2]; ++cnt;
-                }
+            for (int dy=0;dy<bs&&by+dy<h;++dy) for (int dx=0;dx<bs&&bx+dx<w;++dx) {
+                const uchar*l=f.constScanLine(by+dy); int idx=(bx+dx)*3;
+                sR+=l[idx]; sG+=l[idx+1]; sB+=l[idx+2]; ++cnt;
+            }
             uchar r=(uchar)(sR/cnt), g=(uchar)(sG/cnt), b=(uchar)(sB/cnt);
-            // Заливаем блок
-            for (int dy=0;dy<bs&&by+dy<h;++dy)
-            {
-                uchar*l=result.scanLine(by+dy);
-                for (int dx=0;dx<bs&&bx+dx<w;++dx)
-                {
+            for (int dy=0;dy<bs&&by+dy<h;++dy) {
+                uchar*l=f.scanLine(by+dy);
+                for (int dx=0;dx<bs&&bx+dx<w;++dx) {
                     int idx=(bx+dx)*3; l[idx]=r; l[idx+1]=g; l[idx+2]=b;
                 }
             }
         }
-    return result;
+    });
 }
 
-// Цветовая температура: value > 0 = тёплый (больше красного), < 0 = холодный (больше синего)
 QImage temperature(const QImage& frame, double value)
 {
-    QImage result = frame.convertToFormat(QImage::Format_RGB888);
-    int warmR = static_cast<int>( value * 30);  // +/- до 30 единиц
-    int warmB = static_cast<int>(-value * 20);
-    for (int y=0;y<result.height();++y)
-    {
-        uchar* line=result.scanLine(y);
-        for (int x=0;x<result.width();++x)
-        {
-            int idx=x*3;
-            line[idx]   = (uchar)qBound(0, (int)line[idx]   + warmR, 255);
-            line[idx+2] = (uchar)qBound(0, (int)line[idx+2] + warmB, 255);
+    return preserveAlpha(frame, [&](QImage& f) {
+        f = f.convertToFormat(QImage::Format_RGB888);
+        int warmR = static_cast<int>( value * 30);
+        int warmB = static_cast<int>(-value * 20);
+        for (int y=0;y<f.height();++y) {
+            uchar* line=f.scanLine(y);
+            for (int x=0;x<f.width();++x) {
+                int idx=x*3;
+                line[idx]   = (uchar)qBound(0, (int)line[idx]   + warmR, 255);
+                line[idx+2] = (uchar)qBound(0, (int)line[idx+2] + warmB, 255);
+            }
         }
-    }
-    return result;
+    });
 }
 
-// Цветовой тинт: окрашивает изображение в заданный цвет (hue 0..360, strength 0..1)
 QImage tint(const QImage& frame, double hue, double strength)
 {
-    // Конвертируем hue в RGB-цвет тинта
-    int tr,tg,tb;
-    hsvToRgb(hue, 1.0, 1.0, tr, tg, tb);
-    QImage result = frame.convertToFormat(QImage::Format_RGB888);
-    for (int y=0;y<result.height();++y)
-    {
-        uchar* line=result.scanLine(y);
-        for (int x=0;x<result.width();++x)
-        {
-            int idx=x*3;
-            int r=line[idx], g=line[idx+1], b=line[idx+2];
-            int gray=(int)(0.299*r+0.587*g+0.114*b);
-            // Смешиваем серый с цветом тинта
-            line[idx]  =(uchar)qBound(0,(int)(gray+(tr-gray)*strength),255);
-            line[idx+1]=(uchar)qBound(0,(int)(gray+(tg-gray)*strength),255);
-            line[idx+2]=(uchar)qBound(0,(int)(gray+(tb-gray)*strength),255);
+    return preserveAlpha(frame, [&](QImage& f) {
+        int tr,tg,tb; hsvToRgb(hue, 1.0, 1.0, tr, tg, tb);
+        f = f.convertToFormat(QImage::Format_RGB888);
+        for (int y=0;y<f.height();++y) {
+            uchar* line=f.scanLine(y);
+            for (int x=0;x<f.width();++x) {
+                int idx=x*3, r=line[idx], g=line[idx+1], b=line[idx+2];
+                int gray=(int)(0.299*r+0.587*g+0.114*b);
+                line[idx]  =(uchar)qBound(0,(int)(gray+(tr-gray)*strength),255);
+                line[idx+1]=(uchar)qBound(0,(int)(gray+(tg-gray)*strength),255);
+                line[idx+2]=(uchar)qBound(0,(int)(gray+(tb-gray)*strength),255);
+            }
         }
-    }
-    return result;
+    });
 }
 
-
-
-// ЗЕРНИСТОСТЬ (Film Grain) — псевдослучайный шум, seed зависит от
-// координаты пикселя + номер кадра (детерминировано, но "живой" шум)
-// strength 0..1
-
-QImage grain(const QImage& frame, double strength, int frameIndex = 0)
+QImage grain(const QImage& frame, double strength, int frameIndex)
 {
-    QImage result = frame.convertToFormat(QImage::Format_RGB888);
-    int w = result.width(), h = result.height();
-    float s = static_cast<float>(strength * 60.0); // max ±60 единиц
-    for (int y = 0; y < h; ++y)
-    {
-        uchar* line = result.scanLine(y);
-        for (int x = 0; x < w; ++x)
-        {
-            // Быстрый детерминированный шум без rand() (thread-safe)
-            uint32_t seed = static_cast<uint32_t>(y * 7919 + x * 6271 + frameIndex * 1013);
-            seed ^= seed << 13; seed ^= seed >> 17; seed ^= seed << 5;
-            float noise = (static_cast<float>(seed & 0xFFFF) / 32767.5f - 1.0f) * s;
-            int idx = x * 3;
-            line[idx] = (uchar)qBound(0, (int)line[idx] + (int)noise, 255);
-            line[idx+1] = (uchar)qBound(0, (int)line[idx+1] + (int)noise, 255);
-            line[idx+2] = (uchar)qBound(0, (int)line[idx+2] + (int)noise, 255);
+    return preserveAlpha(frame, [&](QImage& f) {
+        f = f.convertToFormat(QImage::Format_RGB888);
+        int w = f.width(), h = f.height();
+        float s = static_cast<float>(strength * 60.0);
+        for (int y = 0; y < h; ++y) {
+            uchar* line = f.scanLine(y);
+            for (int x = 0; x < w; ++x) {
+                uint32_t seed = static_cast<uint32_t>(y * 7919 + x * 6271 + frameIndex * 1013);
+                seed ^= seed << 13; seed ^= seed >> 17; seed ^= seed << 5;
+                float noise = (static_cast<float>(seed & 0xFFFF) / 32767.5f - 1.0f) * s;
+                int idx = x * 3;
+                line[idx]   = (uchar)qBound(0, (int)line[idx]   + (int)noise, 255);
+                line[idx+1] = (uchar)qBound(0, (int)line[idx+1] + (int)noise, 255);
+                line[idx+2] = (uchar)qBound(0, (int)line[idx+2] + (int)noise, 255);
+            }
         }
-    }
-    return result;
+    });
 }
 
 
@@ -1428,14 +1420,28 @@ void RenderEngine::cancel()
 
 QImage RenderEngine::applyBrightness(const QImage& frame, double value)
 {
-    QImage result = frame.convertToFormat(QImage::Format_RGB888);
+    // Если кадр ARGB32 (после хромакея) — работаем с ARGB32, сохраняя альфа.
+    // Иначе конвертируем в RGB888 как раньше.
+    bool hasAlpha = (frame.format() == QImage::Format_ARGB32);
+    QImage result = hasAlpha ? frame.copy() : frame.convertToFormat(QImage::Format_RGB888);
     int shift = static_cast<int>(value * 255.0);
-    for (int y=0;y<result.height();++y)
+    for (int y = 0; y < result.height(); ++y)
     {
-        uchar* line=result.scanLine(y);
-        for (int x=0;x<result.width()*3;++x)
-        {
-            int v=(int)line[x]+shift; line[x]=(uchar)qBound(0,v,255);
+        if (hasAlpha) {
+            QRgb* line = reinterpret_cast<QRgb*>(result.scanLine(y));
+            for (int x = 0; x < result.width(); ++x) {
+                int a = qAlpha(line[x]);
+                if (a == 0) continue; // прозрачный пиксель — не трогаем
+                int r = qBound(0, qRed(line[x])   + shift, 255);
+                int g = qBound(0, qGreen(line[x]) + shift, 255);
+                int b = qBound(0, qBlue(line[x])  + shift, 255);
+                line[x] = qRgba(r, g, b, a);
+            }
+        } else {
+            uchar* line = result.scanLine(y);
+            for (int x = 0; x < result.width() * 3; ++x) {
+                int v = (int)line[x] + shift; line[x] = (uchar)qBound(0, v, 255);
+            }
         }
     }
     return result;
@@ -1443,14 +1449,26 @@ QImage RenderEngine::applyBrightness(const QImage& frame, double value)
 
 QImage RenderEngine::applyContrast(const QImage& frame, double value)
 {
-    QImage result = frame.convertToFormat(QImage::Format_RGB888);
-    for (int y=0;y<result.height();++y)
+    bool hasAlpha = (frame.format() == QImage::Format_ARGB32);
+    QImage result = hasAlpha ? frame.copy() : frame.convertToFormat(QImage::Format_RGB888);
+    for (int y = 0; y < result.height(); ++y)
     {
-        uchar* line=result.scanLine(y);
-        for (int x=0;x<result.width()*3;++x)
-        {
-            int v=(int)((line[x]-128)*value+128);
-            line[x]=(uchar)qBound(0,v,255);
+        if (hasAlpha) {
+            QRgb* line = reinterpret_cast<QRgb*>(result.scanLine(y));
+            for (int x = 0; x < result.width(); ++x) {
+                int a = qAlpha(line[x]);
+                if (a == 0) continue;
+                int r = qBound(0, (int)((qRed(line[x])   - 128) * value + 128), 255);
+                int g = qBound(0, (int)((qGreen(line[x]) - 128) * value + 128), 255);
+                int b = qBound(0, (int)((qBlue(line[x])  - 128) * value + 128), 255);
+                line[x] = qRgba(r, g, b, a);
+            }
+        } else {
+            uchar* line = result.scanLine(y);
+            for (int x = 0; x < result.width() * 3; ++x) {
+                int v = (int)((line[x] - 128) * value + 128);
+                line[x] = (uchar)qBound(0, v, 255);
+            }
         }
     }
     return result;
@@ -1458,17 +1476,30 @@ QImage RenderEngine::applyContrast(const QImage& frame, double value)
 
 QImage RenderEngine::applySaturation(const QImage& frame, double value)
 {
-    QImage result = frame.convertToFormat(QImage::Format_RGB888);
-    for (int y=0;y<result.height();++y)
+    bool hasAlpha = (frame.format() == QImage::Format_ARGB32);
+    QImage result = hasAlpha ? frame.copy() : frame.convertToFormat(QImage::Format_RGB888);
+    for (int y = 0; y < result.height(); ++y)
     {
-        uchar* line=result.scanLine(y);
-        for (int x=0;x<result.width();++x)
-        {
-            int idx=x*3, r=line[idx], g=line[idx+1], b=line[idx+2];
-            int gray=(int)(0.299*r+0.587*g+0.114*b);
-            line[idx]  =(uchar)qBound(0,gray+(int)((r-gray)*value),255);
-            line[idx+1]=(uchar)qBound(0,gray+(int)((g-gray)*value),255);
-            line[idx+2]=(uchar)qBound(0,gray+(int)((b-gray)*value),255);
+        if (hasAlpha) {
+            QRgb* line = reinterpret_cast<QRgb*>(result.scanLine(y));
+            for (int x = 0; x < result.width(); ++x) {
+                int a = qAlpha(line[x]);
+                if (a == 0) continue;
+                int r = qRed(line[x]), g = qGreen(line[x]), b = qBlue(line[x]);
+                int gray = (int)(0.299*r + 0.587*g + 0.114*b);
+                line[x] = qRgba(qBound(0, gray + (int)((r-gray)*value), 255),
+                                 qBound(0, gray + (int)((g-gray)*value), 255),
+                                 qBound(0, gray + (int)((b-gray)*value), 255), a);
+            }
+        } else {
+            uchar* line = result.scanLine(y);
+            for (int x = 0; x < result.width(); ++x) {
+                int idx = x*3, r = line[idx], g = line[idx+1], b = line[idx+2];
+                int gray = (int)(0.299*r + 0.587*g + 0.114*b);
+                line[idx]   = (uchar)qBound(0, gray + (int)((r-gray)*value), 255);
+                line[idx+1] = (uchar)qBound(0, gray + (int)((g-gray)*value), 255);
+                line[idx+2] = (uchar)qBound(0, gray + (int)((b-gray)*value), 255);
+            }
         }
     }
     return result;
@@ -1476,14 +1507,25 @@ QImage RenderEngine::applySaturation(const QImage& frame, double value)
 
 QImage RenderEngine::applyGrayscale(const QImage& frame)
 {
-    QImage result = frame.convertToFormat(QImage::Format_RGB888);
-    for (int y=0;y<result.height();++y)
+    bool hasAlpha = (frame.format() == QImage::Format_ARGB32);
+    QImage result = hasAlpha ? frame.copy() : frame.convertToFormat(QImage::Format_RGB888);
+    for (int y = 0; y < result.height(); ++y)
     {
-        uchar* line=result.scanLine(y);
-        for (int x=0;x<result.width();++x)
-        {
-            int idx=x*3, gray=(int)(0.299*line[idx]+0.587*line[idx+1]+0.114*line[idx+2]);
-            line[idx]=line[idx+1]=line[idx+2]=(uchar)gray;
+        if (hasAlpha) {
+            QRgb* line = reinterpret_cast<QRgb*>(result.scanLine(y));
+            for (int x = 0; x < result.width(); ++x) {
+                int a = qAlpha(line[x]);
+                if (a == 0) continue;
+                int gray = (int)(0.299*qRed(line[x]) + 0.587*qGreen(line[x]) + 0.114*qBlue(line[x]));
+                line[x] = qRgba(gray, gray, gray, a);
+            }
+        } else {
+            uchar* line = result.scanLine(y);
+            for (int x = 0; x < result.width(); ++x) {
+                int idx = x*3;
+                int gray = (int)(0.299*line[idx] + 0.587*line[idx+1] + 0.114*line[idx+2]);
+                line[idx] = line[idx+1] = line[idx+2] = (uchar)gray;
+            }
         }
     }
     return result;
@@ -1518,9 +1560,11 @@ QImage RenderEngine::applyTransition(const QImage& from, const QImage& to, int t
 }
 
 // RenderEngine::applyEffectsToFrame
-// Применяет весь стек видео-эффектов из QMap<QString,double> к кадру.
-// Порядок совпадает с RenderWorker::applyClipEffects — результат идентичен.
-// Используется Timeline для live-превью без рендера.
+// ПОРЯДОК ПРИМЕНЕНИЯ ЭФФЕКТОВ:
+//   1. Хромакей — ПЕРВЫМ, пока исходные цвета не тронуты.
+//      После него кадр становится ARGB32 с прозрачным фоном.
+//   2. Все остальные эффекты — сохраняют альфа-канал через hasAlpha-ветки.
+//      grayscale/sepia/invert работают с RGB-каналами, не трогая альфу.
 
 QImage RenderEngine::applyEffectsToFrame(const QImage& frame,
                                          const QMap<QString, double>& effects,
@@ -1528,24 +1572,22 @@ QImage RenderEngine::applyEffectsToFrame(const QImage& frame,
 {
     QImage result = frame;
 
-    // Хромакей применяется ПОСЛЕДНИМ (как в applyClipEffects)
-    bool hasChromaKey = false;
-    double chromaThr = 0.35, chromaSoft = 0.10;
+    // ШАГ 1: Хромакей первым — работает с исходными цветами
+    if (effects.value("chroma_key", 0.0) > 0.5)
+    {
+        double thr  = effects.value("chroma_threshold",  0.35);
+        double soft = effects.value("chroma_smoothness", 0.10);
+        result = applyChromaKey(result, thr, soft);
+        // result теперь ARGB32; все apply* функции умеют работать с ARGB32
+    }
 
+    // ШАГ 2: Остальные эффекты (apply* функции сохраняют альфа если ARGB32)
     for (auto it = effects.constBegin(); it != effects.constEnd(); ++it) {
         const QString& name = it.key();
         double value = it.value();
 
         if (name.startsWith('_')) continue;
-
-        // Пропускаем хромакей — применим в конце
-        if (name == "chroma_key" && value > 0.5) {
-            hasChromaKey = true;
-            chromaThr  = effects.value("chroma_threshold",  0.35);
-            chromaSoft = effects.value("chroma_smoothness", 0.10);
-            continue;
-        }
-        if (name == "chroma_threshold" || name == "chroma_smoothness") continue;
+        if (name == "chroma_key" || name == "chroma_threshold" || name == "chroma_smoothness") continue;
 
         if (name == "brightness"  && qAbs(value) > 0.001)
             result = applyBrightness(result, value);
@@ -1583,12 +1625,6 @@ QImage RenderEngine::applyEffectsToFrame(const QImage& frame,
             if (s > 0.01) result = applyContrast(result,  1.0 + s * 0.15);
             if (s > 0.01) result = applySaturation(result, 1.0 + s * 0.2);
         }
-    }
-
-    // Хромакей — последний: ARGB32 не затрётся следующим эффектом
-    if (hasChromaKey)
-    {
-        result = applyChromaKey(result, chromaThr, chromaSoft);
     }
 
     return result;
