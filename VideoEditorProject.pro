@@ -1,4 +1,4 @@
-QT = core quick quickcontrols2 multimedia widgets
+QT = core quick quickcontrols2 multimedia widgets concurrent
 
 CONFIG += c++17
 

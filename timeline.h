@@ -11,6 +11,7 @@
 #include <QTimer>
 #include <QHash>
 #include <vector>
+#include <atomic>
 #include "timelineclip.h"
 #include <QMap>
 
@@ -142,11 +143,15 @@ private:
     // Персистентные кольцевые буферы для аудиоэффектов (reverb/echo) в live-режиме
     QHash<QString, std::vector<float>> m_audioDelayBufs;
     QHash<QString, int> m_audioDelayPos;
-    qint64 m_lastSyncDecodeMs = 0;
-    QImage m_lastFrame1;  // буфер последнего кадра дорожки 1 для cache miss
-    QImage m_lastFrame2;  // буфер последнего кадра дорожки 2 для cache miss
-    double m_lastClip1Start = -1.0; // для детекции перехода между клипами
-    double m_lastClip2Start = -1.0;
+    qint64 m_lastSyncDecodeMs = 0; // разрешить sync-decode при следующем cache miss
+
+    // ── Фоновый поток применения эффектов ────────────────────────────────
+    // getCompositeFrame + applyEffectsToFrame вынесены в QtConcurrent::run.
+    // m_frameProcessing: true пока фоновый вызов ещё выполняется.
+    // Без флага: два параллельных вызова могут перепутать кадры.
+    // QFutureWatcher уведомляет UI-поток когда кадр готов.
+    std::atomic<bool> m_bgFrameProcessing{false};
+    QFutureWatcher<QImage>* m_frameWatcher = nullptr;
 
     void sortClips();
     double getClipSourceDuration(const QString& filepath);

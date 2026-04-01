@@ -46,12 +46,24 @@ public:
     void updatePlayPosition(double time)
     {
         QMutexLocker lock(&m_mutex);
-        // Только обновляем позицию для prefetch.
-        // Seek управляется явно из Timeline — никакого авто-seek здесь.
-        // Авто-seek при прыжке >2с вызывал cache->clear() из зазора между
-        // клипами → рывки каждые несколько секунд воспроизведения.
-        if (time > m_playPosition)
+        // ── КЛЮЧЕВОЙ ФИКС: seek при прыжке между клипами ─────────────
+        // Раньше: только увеличивали m_playPosition, thread декодировал
+        // последовательно от старой позиции до новой. Для двух клипов
+        // из одного файла на дорожке 2 (source 25→35) thread тратил
+        // сотни мс на decode 10с промежутка → cache miss → видео замирало
+        // пока аудио играло → рассинхрон.
+        // Теперь: если прыжок > 2с — делаем seek, кэш очищается,
+        // thread начинает декодировать с нужной позиции сразу.
+        if (time > m_playPosition + 2.0)
+        {
+            m_seekTime      = time;
+            m_playPosition  = time;
+            m_seekRequested = true;
+        }
+        else if (time > m_playPosition)
+        {
             m_playPosition = time;
+        }
         m_condition.wakeAll();
     }
 
@@ -76,10 +88,20 @@ signals:
 protected:
     void run() override {
         MediaDecoder decoder;
+        // Превью-режим: кадры в половинном разрешении (в 4 раза меньше пикселей).
+        // DecoderThread используется только для живого воспроизведения —
+        // рендер в файл использует собственные декодеры без этого флага.
+        decoder.setPreviewMode(true);
         if (!decoder.openFile(m_filepath))
         {
             return;
         }
+#ifndef QT_NO_DEBUG
+        if (decoder.isUsingGPU())
+            qDebug() << "DecoderThread: GPU decode active for" << m_filepath;
+        else
+            qDebug() << "DecoderThread: CPU decode for" << m_filepath;
+#endif
 
         // ИСПРАВЛЕНИЕ 1: ставим m_running=true ДО входа в цикл
         // и синхронизируем m_seekTime с начальным currentTime

@@ -448,6 +448,7 @@ Makefile: ..\..\VideoEditorProject.pro P:\QTCreator\6.10.1\msvc2022_64\mkspecs\w
 		P:\QTCreator\6.10.1\msvc2022_64\lib\Qt6Gui.prl \
 		P:\QTCreator\6.10.1\msvc2022_64\lib\Qt6Qml.prl \
 		P:\QTCreator\6.10.1\msvc2022_64\lib\Qt6Network.prl \
+		P:\QTCreator\6.10.1\msvc2022_64\lib\Qt6Concurrent.prl \
 		P:\QTCreator\6.10.1\msvc2022_64\lib\Qt6Core.prl \
 		P:\QTCreator\6.10.1\msvc2022_64\lib\Qt6EntryPoint.prl \
 		P:\QTCreator\6.10.1\msvc2022_64\mkspecs\features\build_pass.prf \
@@ -460,6 +461,7 @@ Makefile: ..\..\VideoEditorProject.pro P:\QTCreator\6.10.1\msvc2022_64\mkspecs\w
 		P:\QTCreator\6.10.1\msvc2022_64\lib\Qt6Guid.prl \
 		P:\QTCreator\6.10.1\msvc2022_64\lib\Qt6Qmld.prl \
 		P:\QTCreator\6.10.1\msvc2022_64\lib\Qt6Networkd.prl \
+		P:\QTCreator\6.10.1\msvc2022_64\lib\Qt6Concurrentd.prl \
 		P:\QTCreator\6.10.1\msvc2022_64\lib\Qt6Cored.prl \
 		P:\QTCreator\6.10.1\msvc2022_64\lib\Qt6EntryPointd.prl
 	$(QMAKE) -o Makefile ..\..\VideoEditorProject.pro -spec win32-msvc "CONFIG+=debug" "CONFIG+=qml_debug"
@@ -827,6 +829,7 @@ P:\QTCreator\6.10.1\msvc2022_64\lib\Qt6Widgets.prl:
 P:\QTCreator\6.10.1\msvc2022_64\lib\Qt6Gui.prl:
 P:\QTCreator\6.10.1\msvc2022_64\lib\Qt6Qml.prl:
 P:\QTCreator\6.10.1\msvc2022_64\lib\Qt6Network.prl:
+P:\QTCreator\6.10.1\msvc2022_64\lib\Qt6Concurrent.prl:
 P:\QTCreator\6.10.1\msvc2022_64\lib\Qt6Core.prl:
 P:\QTCreator\6.10.1\msvc2022_64\lib\Qt6EntryPoint.prl:
 P:\QTCreator\6.10.1\msvc2022_64\mkspecs\features\build_pass.prf:
@@ -839,6 +842,7 @@ P:\QTCreator\6.10.1\msvc2022_64\lib\Qt6Widgetsd.prl:
 P:\QTCreator\6.10.1\msvc2022_64\lib\Qt6Guid.prl:
 P:\QTCreator\6.10.1\msvc2022_64\lib\Qt6Qmld.prl:
 P:\QTCreator\6.10.1\msvc2022_64\lib\Qt6Networkd.prl:
+P:\QTCreator\6.10.1\msvc2022_64\lib\Qt6Concurrentd.prl:
 P:\QTCreator\6.10.1\msvc2022_64\lib\Qt6Cored.prl:
 P:\QTCreator\6.10.1\msvc2022_64\lib\Qt6EntryPointd.prl:
 qmake: FORCE

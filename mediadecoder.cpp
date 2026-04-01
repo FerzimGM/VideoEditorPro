@@ -117,6 +117,14 @@ void MediaDecoder::closeFile()
     {
         avformat_close_input(&m_formatContext);
     }
+    // Освобождаем GPU-контекст после закрытия кодека
+    if (m_hwDeviceCtx)
+    {
+        av_buffer_unref(&m_hwDeviceCtx);
+        m_hwDeviceCtx = nullptr;
+        m_hwDeviceType = AV_HWDEVICE_TYPE_NONE;
+        m_hwPixFmt = AV_PIX_FMT_NONE;
+    }
 
     m_videoStream = nullptr;
     m_audioStream = nullptr;
@@ -129,9 +137,18 @@ void MediaDecoder::closeFile()
     m_cachedSwsFmt = AV_PIX_FMT_NONE;
     m_cachedSwsW = 0;
     m_cachedSwsH = 0;
+    m_cachedDstW = 0;
+    m_cachedDstH = 0;
 }
 
 // ===== ИНИЦИАЛИЗАЦИЯ ВИДЕО =====
+// Порядок попыток GPU-декодирования (только Windows):
+//   1. D3D11VA  — DirectX 11, Windows 8+, все современные GPU
+//   2. DXVA2    — DirectX 9, Windows 7+, старые GPU
+//   3. CPU      — всегда работает, fallback
+//
+// Если GPU-декодирование недоступно (старый драйвер, VM, нет GPU) —
+// автоматически используется CPU. Программа не падает.
 bool MediaDecoder::initializeVideo()
 {
     m_videoStreamIndex = av_find_best_stream(
@@ -145,6 +162,20 @@ bool MediaDecoder::initializeVideo()
         m_videoStream->codecpar->codec_id);
     if (!codec) return false;
 
+    // Пробуем GPU-декодирование (только если не аудио-только файл)
+    if (m_videoStream->codecpar->width > 0)
+    {
+        if (tryInitHardwareDecoder(codec))
+        {
+#ifndef QT_NO_DEBUG
+            qDebug() << "GPU decoder active:"
+                     << av_hwdevice_get_type_name(m_hwDeviceType);
+#endif
+            return true;
+        }
+    }
+
+    // Fallback: CPU декодирование (стандартный путь)
     m_videoCodecContext = avcodec_alloc_context3(codec);
     if (!m_videoCodecContext) return false;
 
@@ -155,7 +186,7 @@ bool MediaDecoder::initializeVideo()
         return false;
     }
 
-    // Многопоточное декодирование для ускорения
+    // Многопоточное CPU-декодирование
     m_videoCodecContext->thread_count = 4;
 
     if (avcodec_open2(m_videoCodecContext, codec, nullptr) < 0)
@@ -164,7 +195,88 @@ bool MediaDecoder::initializeVideo()
         return false;
     }
 
+#ifndef QT_NO_DEBUG
+    qDebug() << "CPU decoder (software):" << codec->name;
+#endif
     return true;
+}
+
+// ===== GPU-ДЕКОДИРОВАНИЕ: попытка инициализации =====
+// Возвращает true если GPU-декодер успешно создан.
+// При любой ошибке освобождает ресурсы и возвращает false —
+// вызывающий код переходит к CPU.
+//
+// КАК РАБОТАЕТ:
+// FFmpeg использует концепцию "hardware device context" (AVHWDeviceContext).
+// Это объект который представляет GPU и его контекст декодирования.
+// av_hwdevice_ctx_create создаёт его — FFmpeg сам занимается DirectX.
+//
+// После создания контекста мы находим формат пикселей GPU-кадра (m_hwPixFmt).
+// Декодированные кадры живут в памяти GPU — avFrameToQImage копирует их
+// в RAM через av_hwframe_transfer_data прежде чем создать QImage.
+bool MediaDecoder::tryInitHardwareDecoder(const AVCodec* codec)
+{
+    // Список GPU-декодеров по приоритету (Windows-only)
+    static const AVHWDeviceType hwTypes[] = {
+        AV_HWDEVICE_TYPE_D3D11VA,  // DirectX 11, Windows 8+
+        AV_HWDEVICE_TYPE_DXVA2,    // DirectX 9,  Windows 7+
+        AV_HWDEVICE_TYPE_NONE      // sentinel
+    };
+
+    for (int i = 0; hwTypes[i] != AV_HWDEVICE_TYPE_NONE; ++i)
+    {
+        AVHWDeviceType hwType = hwTypes[i];
+
+        // Проверяем поддерживает ли кодек этот тип GPU
+        AVPixelFormat hwFmt = AV_PIX_FMT_NONE;
+        for (int cfg = 0; ; ++cfg)
+        {
+            const AVCodecHWConfig* config = avcodec_get_hw_config(codec, cfg);
+            if (!config) break;
+            if (config->methods & AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX
+                && config->device_type == hwType)
+            {
+                hwFmt = config->pix_fmt;
+                break;
+            }
+        }
+        if (hwFmt == AV_PIX_FMT_NONE) continue; // кодек не поддерживает
+
+        // Создаём GPU-контекст
+        AVBufferRef* hwCtx = nullptr;
+        if (av_hwdevice_ctx_create(&hwCtx, hwType, nullptr, nullptr, 0) < 0)
+            continue; // GPU недоступен, пробуем следующий
+
+        // Создаём AVCodecContext с GPU-контекстом
+        AVCodecContext* codecCtx = avcodec_alloc_context3(codec);
+        if (!codecCtx) { av_buffer_unref(&hwCtx); continue; }
+
+        if (avcodec_parameters_to_context(codecCtx, m_videoStream->codecpar) < 0)
+        {
+            avcodec_free_context(&codecCtx);
+            av_buffer_unref(&hwCtx);
+            continue;
+        }
+
+        codecCtx->hw_device_ctx = av_buffer_ref(hwCtx);
+        codecCtx->thread_count  = 1; // GPU декодирует сам, CPU-потоки не нужны
+
+        if (avcodec_open2(codecCtx, codec, nullptr) < 0)
+        {
+            avcodec_free_context(&codecCtx);
+            av_buffer_unref(&hwCtx);
+            continue;
+        }
+
+        // Успех — сохраняем
+        m_videoCodecContext = codecCtx;
+        m_hwDeviceCtx       = hwCtx;
+        m_hwDeviceType      = hwType;
+        m_hwPixFmt          = hwFmt;
+        return true;
+    }
+
+    return false; // все попытки провалились → CPU fallback
 }
 
 // ===== ИНИЦИАЛИЗАЦИЯ АУДИО =====
@@ -361,46 +473,106 @@ QImage MediaDecoder::getNextFrame() {
     return QImage();
 }
 
+// ===== КОНВЕРТАЦИЯ AVFrame → QImage =====
+// Два режима:
+//   CPU-кадр: сразу в sws_scale
+//   GPU-кадр: сначала av_hwframe_transfer_data (GPU RAM → CPU RAM), потом sws_scale
+//
+// ПРЕВЬЮ-РЕЖИМ (m_previewMode = true):
+//   sws_scale масштабирует кадр в width/2 × height/2 за один проход.
+//   Это в 4 раза меньше пикселей → в 4 раза меньше нагрузки на CPU.
+//   QML растягивает маленький QImage на весь экран (PreserveAspectFit).
+//   Для рендера в файл m_previewMode = false → полное разрешение.
 QImage MediaDecoder::avFrameToQImage(AVFrame* frame)
 {
     if (!frame || frame->width <= 0 || frame->height <= 0) return QImage();
 
-    int width = frame->width;
-    int height = frame->height;
-    AVPixelFormat srcFmt = (AVPixelFormat)frame->format;
+    AVFrame* swFrame = frame;
+    AVFrame* transferred = nullptr;
 
-    if (!m_swsContext ||
-        srcFmt != m_cachedSwsFmt ||
-        width != m_cachedSwsW   ||
-        height != m_cachedSwsH)
+    // GPU → CPU: если кадр находится в видеопамяти GPU
+    if (frame->format == m_hwPixFmt && m_hwDeviceCtx)
     {
-        if (m_swsContext) { sws_freeContext(m_swsContext); m_swsContext = nullptr;
+        transferred = av_frame_alloc();
+        if (!transferred) return QImage();
+
+        // Копируем кадр из GPU RAM в CPU RAM.
+        // После этого transferred->format = AV_PIX_FMT_NV12 или YUV420P
+        // (зависит от GPU-драйвера) — sws_scale умеет работать с обоими.
+        if (av_hwframe_transfer_data(transferred, frame, 0) < 0)
+        {
+            av_frame_free(&transferred);
+            return QImage();
         }
-        m_swsContext = sws_getContext(
-            width, height, srcFmt,
-            width, height, AV_PIX_FMT_RGB24,
-            SWS_BILINEAR, nullptr, nullptr, nullptr);
-        if (!m_swsContext) return QImage();
-        m_cachedSwsFmt = srcFmt;
-        m_cachedSwsW = width;
-        m_cachedSwsH = height;
+        transferred->width  = frame->width;
+        transferred->height = frame->height;
+        swFrame = transferred;
     }
 
-    int numBytes = av_image_get_buffer_size(AV_PIX_FMT_RGB24, width, height, 32);
+    int srcWidth  = swFrame->width;
+    int srcHeight = swFrame->height;
+    AVPixelFormat srcFmt = (AVPixelFormat)swFrame->format;
+
+    // Целевой размер: половинный в preview-режиме, полный иначе
+    int dstWidth  = m_previewMode ? srcWidth  / 2 : srcWidth;
+    int dstHeight = m_previewMode ? srcHeight / 2 : srcHeight;
+    // Гарантируем чётность (sws_scale требует чётные размеры для YUV)
+    dstWidth  = (dstWidth  / 2) * 2;
+    dstHeight = (dstHeight / 2) * 2;
+    if (dstWidth  < 2) dstWidth  = 2;
+    if (dstHeight < 2) dstHeight = 2;
+
+    // Пересоздаём SwsContext если изменился формат, размер или режим превью
+    if (!m_swsContext
+        || srcFmt   != m_cachedSwsFmt
+        || srcWidth != m_cachedSwsW
+        || srcHeight!= m_cachedSwsH
+        || dstWidth != m_cachedDstW
+        || dstHeight!= m_cachedDstH)
+    {
+        if (m_swsContext) { sws_freeContext(m_swsContext); m_swsContext = nullptr; }
+
+        // SWS_BILINEAR — быстро и достаточно качественно для превью.
+        // SWS_LANCZOS дал бы лучше качество при масштабировании,
+        // но в 3-5 раз медленнее — не нужно для 30fps воспроизведения.
+        m_swsContext = sws_getContext(
+            srcWidth, srcHeight, srcFmt,
+            dstWidth, dstHeight, AV_PIX_FMT_RGB24,
+            SWS_BILINEAR, nullptr, nullptr, nullptr);
+
+        if (!m_swsContext)
+        {
+            if (transferred) av_frame_free(&transferred);
+            return QImage();
+        }
+        m_cachedSwsFmt = srcFmt;
+        m_cachedSwsW   = srcWidth;
+        m_cachedSwsH   = srcHeight;
+        m_cachedDstW   = dstWidth;
+        m_cachedDstH   = dstHeight;
+    }
+
+    int numBytes = av_image_get_buffer_size(AV_PIX_FMT_RGB24, dstWidth, dstHeight, 32);
     uint8_t* buffer = (uint8_t*)av_malloc(numBytes + AV_INPUT_BUFFER_PADDING_SIZE);
-    if (!buffer) return QImage();
+    if (!buffer)
+    {
+        if (transferred) av_frame_free(&transferred);
+        return QImage();
+    }
 
     av_image_fill_arrays(m_rgbFrame->data, m_rgbFrame->linesize,
-                         buffer, AV_PIX_FMT_RGB24, width, height, 32);
+                         buffer, AV_PIX_FMT_RGB24, dstWidth, dstHeight, 32);
 
     sws_scale(m_swsContext,
-              (const uint8_t* const*)frame->data, frame->linesize,
-              0, height, m_rgbFrame->data, m_rgbFrame->linesize);
+              (const uint8_t* const*)swFrame->data, swFrame->linesize,
+              0, srcHeight, m_rgbFrame->data, m_rgbFrame->linesize);
 
-    QImage image(m_rgbFrame->data[0], width, height,
+    QImage image(m_rgbFrame->data[0], dstWidth, dstHeight,
                  m_rgbFrame->linesize[0], QImage::Format_RGB888);
     QImage result = image.copy();
+
     av_free(buffer);
+    if (transferred) av_frame_free(&transferred);
     return result;
 }
 
