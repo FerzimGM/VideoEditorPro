@@ -18,11 +18,7 @@
 #include <QDateTime>
 #include <cmath>
 #include <QTimer>
-// QtConcurrent: запуск тяжёлых операций в фоновом потоке из пула.
-// Используется для выноса applyEffectsToFrame из UI-потока.
-// QFutureWatcher позволяет получить результат когда он готов.
 #include <QtConcurrent/QtConcurrent>
-#include <QFuture>
 #include <QFutureWatcher>
 
 #ifdef Q_OS_WIN
@@ -1754,33 +1750,27 @@ void Timeline::startPlayback(double fromTime, double speed)
                 });
 
         connect(m_audioEngine, &AudioPlaybackEngine::playbackEnded,
-                this, &Timeline::playbackEnded);
+                this, [this]() {
+                    // Останавливаем видео-таймер СРАЗУ — он может тикнуть
+                    // ещё раз между playbackEnded и обработкой в QML,
+                    // запуская фоновый поток когда мы уже завершаем работу.
+                    if (m_videoTimer) m_videoTimer->stop();
+                    m_currentTime = m_audioEngine->getCurrentAudioTime();
+                    emit playbackEnded();
+                });
     }
 
-    //  Видео-таймер с фоновым потоком для эффектов (~30fps)
-    //
-    // ПРОБЛЕМА которую решаем:
-    //   getCompositeFrame() + applyEffectsToFrame() блокируют UI-поток.
-    //   Хромакей + температура на 1080p = 15-25мс. Бюджет кадра = 33мс.
-    //   Остаток 8-18мс не хватает для Qt event loop → интерфейс подтормаживает.
-    //
-    // РЕШЕНИЕ — QtConcurrent::run:
-    //   UI-поток запускает задачу в глобальный пул потоков Qt и сразу возвращается.
-    //   Рабочий поток применяет эффекты параллельно.
-    //   QFutureWatcher::finished() уведомляет UI-поток когда кадр готов.
-    //   UI-поток только вызывает setFrame + emit — это мгновенно.
-    //
-    // СИНХРОНИЗАЦИЯ:
-    //   m_bgFrameProcessing — атомарный флаг "вычисление идёт".
-    //   Если таймер тикнул а предыдущий кадр ещё не готов — пропускаем тик.
-    //   Без флага два параллельных вызова могут записать кадры в неверном порядке.
+    //  Видео-таймер с фоновым потоком для тяжёлых эффектов (~30fps)
     if (!m_videoTimer) {
-        // Создаём QFutureWatcher один раз — он живёт пока живёт Timeline
-        m_frameWatcher = new QFutureWatcher<QImage>(this);
-        connect(m_frameWatcher, &QFutureWatcher<QImage>::finished,
-                this, [this]() {
-            QImage frame = m_frameWatcher->result();
+        auto* watcher = new QFutureWatcher<QImage>(this);
+        m_frameWatcher = watcher;
+
+        connect(watcher, &QFutureWatcher<QImage>::finished,
+                this, [this, watcher]() {
+            QImage frame = watcher->result();
             m_bgFrameProcessing.store(false);
+            // Проверяем isPlaying — воспроизведение могло закончиться
+            // пока фоновый поток считал кадр. Не показываем устаревший кадр.
             if (!frame.isNull() && m_imageProvider
                 && m_audioEngine && m_audioEngine->isPlaying())
             {
@@ -1792,17 +1782,13 @@ void Timeline::startPlayback(double fromTime, double speed)
         m_videoTimer = new QTimer(this);
         m_videoTimer->setSingleShot(true);
         m_videoTimer->setTimerType(Qt::PreciseTimer);
-        connect(m_videoTimer, &QTimer::timeout, this, [this]() {
-            // Перезапуск ПЕРВЫМ — до любых return
+        connect(m_videoTimer, &QTimer::timeout, this, [this, watcher]() {
             if (m_audioEngine && m_audioEngine->isPlaying())
                 m_videoTimer->start(33);
 
             if (!m_audioEngine || !m_audioEngine->isPlaying()) return;
             if (!m_imageProvider) return;
 
-            // Пропускаем тик если предыдущий кадр ещё рендерится.
-            // Это лучше чем ждать: пропущенный кадр незаметен,
-            // а блокировка UI-потока заметна как зависание интерфейса.
             if (m_bgFrameProcessing.load()) return;
 
             double audioNow = m_audioEngine->getCurrentAudioTime();
@@ -1810,30 +1796,24 @@ void Timeline::startPlayback(double fromTime, double speed)
             double renderTime = qMin(audioNow + RENDER_LATENCY * m_playbackSpeed,
                                      totalDuration());
 
-            // Сначала пробуем взять кадр из кэша (мгновенно, без эффектов)
-            // Это работает когда нет тяжёлых эффектов — самый частый случай.
+            // Быстрый путь: кадр из кэша без тяжёлых эффектов
             QImage quickFrame = getCompositeFrame(renderTime);
             if (!quickFrame.isNull())
             {
-                // Кадр из кэша, без эффектов — показываем сразу в UI-потоке
                 m_imageProvider->setFrame(quickFrame);
                 emit frameReadyForDisplay();
                 return;
             }
 
-            // Cache miss или тяжёлые эффекты — запускаем в фоне
-            // Захватываем renderTime по значению для lambda (критично!)
+            // Cache miss — запускаем decode в фоне
             m_bgFrameProcessing.store(true);
             QFuture<QImage> future = QtConcurrent::run([this, renderTime]() -> QImage {
-                // Этот код выполняется в потоке из QThreadPool.
-                // getCompositeFrame + applyEffectsToFrame работают здесь,
-                // не блокируя UI-поток.
                 m_forceNextFrame = true;
                 QImage frame = getCompositeFrame(renderTime);
                 m_forceNextFrame = false;
                 return frame;
             });
-            m_frameWatcher->setFuture(future);
+            watcher->setFuture(future);
         });
     }
     m_videoTimer->start(33);
@@ -1855,14 +1835,17 @@ void Timeline::stopPlayback()
     if (m_stopping) return;
     m_stopping = true;
 
+    // Останавливаем таймер первым — он не должен запускать новые фоновые задачи
     if (m_videoTimer) m_videoTimer->stop();
 
-    // Если фоновый поток ещё работает — ждём завершения прежде чем чистить состояние.
-    // cancel() + waitForFinished() безопасны даже если future уже завершилась.
-    if (m_frameWatcher && m_frameWatcher->isRunning())
+    // Ждём завершения фонового кадра ПРЕЖДЕ чем трогать m_clips / m_frameCaches.
+    // Без этого: фоновый поток итерирует QMap, UI-поток его же изменяет → краш.
+    // waitForFinished() безопасен даже если future уже завершилась.
+    if (m_frameWatcher)
     {
-        m_frameWatcher->cancel();
-        m_frameWatcher->waitForFinished();
+        auto* w = static_cast<QFutureWatcher<QImage>*>(m_frameWatcher);
+        if (w->isRunning())
+            w->waitForFinished();
     }
     m_bgFrameProcessing.store(false);
 

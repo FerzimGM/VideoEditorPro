@@ -2806,7 +2806,6 @@ release\timeline.obj: ..\..\timeline.cpp ..\..\timeline.h \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtConcurrent\qtconcurrentrun.h \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtConcurrent\qtconcurrenttask.h \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtConcurrent\qtconcurrentversion.h \
-		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\QFuture \
 		P:\QTCreator\6.10.1\msvc2022_64\include\QtCore\QFutureWatcher
 
 release\qrc_qml.obj: release\qrc_qml.cpp 

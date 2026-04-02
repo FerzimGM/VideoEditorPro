@@ -145,13 +145,11 @@ private:
     QHash<QString, int> m_audioDelayPos;
     qint64 m_lastSyncDecodeMs = 0; // разрешить sync-decode при следующем cache miss
 
-    // ── Фоновый поток применения эффектов ────────────────────────────────
-    // getCompositeFrame + applyEffectsToFrame вынесены в QtConcurrent::run.
-    // m_frameProcessing: true пока фоновый вызов ещё выполняется.
-    // Без флага: два параллельных вызова могут перепутать кадры.
-    // QFutureWatcher уведомляет UI-поток когда кадр готов.
+    // Фоновый поток применения эффектов.
+    // void* чтобы не тащить QFutureWatcher (шаблон) в заголовок.
+    // Реальный тип: QFutureWatcher<QImage>*, инициализируется в startPlayback.
     std::atomic<bool> m_bgFrameProcessing{false};
-    QFutureWatcher<QImage>* m_frameWatcher = nullptr;
+    void* m_frameWatcher = nullptr;
 
     void sortClips();
     double getClipSourceDuration(const QString& filepath);

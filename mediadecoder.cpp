@@ -513,9 +513,11 @@ QImage MediaDecoder::avFrameToQImage(AVFrame* frame)
     int srcHeight = swFrame->height;
     AVPixelFormat srcFmt = (AVPixelFormat)swFrame->format;
 
-    // Целевой размер: половинный в preview-режиме, полный иначе
-    int dstWidth  = m_previewMode ? srcWidth  / 2 : srcWidth;
-    int dstHeight = m_previewMode ? srcHeight / 2 : srcHeight;
+    // Целевой размер: 3/4 в preview-режиме (меньше нагрузки, лучше качество чем 1/4),
+    // полный иначе. Делитель 4 давал слишком заметное ухудшение качества.
+    // 3/4 = компромисс: пикселей в ~1.8 раза меньше, качество почти не теряется.
+    int dstWidth  = m_previewMode ? (srcWidth  * 3 / 4) : srcWidth;
+    int dstHeight = m_previewMode ? (srcHeight * 3 / 4) : srcHeight;
     // Гарантируем чётность (sws_scale требует чётные размеры для YUV)
     dstWidth  = (dstWidth  / 2) * 2;
     dstHeight = (dstHeight / 2) * 2;
