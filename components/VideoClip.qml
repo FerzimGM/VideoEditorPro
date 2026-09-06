@@ -3,6 +3,37 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import "../theme.js" as Theme
 
+/**
+ * VideoClip
+ * ---------
+ * The visual representation of a single clip on a track: two strips —
+ * video (blue, on top) and audio (green, on bottom, with a pseudo-
+ * waveform). Each strip independently handles taps (TapHandler) and
+ * dragging (DragHandler), but both share the component's Drag API
+ * (Drag.keys, Drag.mimeData) — so it doesn't matter which strip you grab
+ * the clip by, the drag&drop mechanism works the same either way.
+ *
+ * Three separate mechanisms change the clip's geometry:
+ *   1) Regular dragging (DragHandler on the video/audio strips) — moves
+ *      the clip along X; the final drop is either caught by another
+ *      track's DropArea (Qt.MoveAction, in which case Track.qml itself
+ *      updates C++), or not caught (Qt.IgnoreAction) — in which case the
+ *      clip simply stays on its own track and moved() is emitted for a
+ *      local position recalculation.
+ *   2) Left resize handle — simultaneously shifts the clip's startTime
+ *      AND increases trimStart (trimming from the start of the source
+ *      video). The only handler that calls C++ directly (setClipLeftTrim)
+ *      instead of going through a signal upward — because the operation
+ *      needs to atomically update two parameters at once.
+ *   3) Right resize handle — just changes the visual width; converting
+ *      that to trimEnd is done by Track.qml in its onRightTrimmed handler.
+ *
+ * The context menu (right-click) determines video/audio by the Y
+ * coordinate of the click (mouse.y < videoH means the click landed on
+ * the video strip) and emits a signal upward without opening the menu
+ * itself — the actual menu is declared in main.qml, since Overlay.overlay
+ * in Qt 6 only behaves predictably there.
+ */
 Item {
     id: root
 
@@ -11,7 +42,7 @@ Item {
     property int clipId: -1
     property bool isMuted: false
     property bool selected: false
-    property real clipMaxWidth: 0
+    property real clipMaxWidth: 0     // = source video length * zoom; caps how far the right handle can stretch the clip
     property real pixelsPerSecond: 10
     property int trackNumber: 1
 
@@ -34,11 +65,14 @@ Item {
     // и флаг isVideo чтобы Timeline.qml знал какое меню показать
     signal contextMenuRequested(int clipId, bool isVideo, real globalX, real globalY)
 
-    // DRAG STATE
+    // DRAG STATE — shared between both strips (video/audio), since either
+    // one can be dragged from, but the clip moves as a single whole
     property real _startX: 0
     property bool _dragging: false
 
-    //  DRAG API
+    //  DRAG API — shared Qt Drag config for cross-track transfer;
+    // Drag.mimeData only carries the clip's id, the receiving DropArea
+    // computes the other data (time, track) itself
     Drag.keys: ["clip/move"]
     Drag.mimeData: {
         "clip/id": String(root.clipId)
@@ -141,6 +175,8 @@ Item {
                         _sw = root.width
                         _ox = root.x
                     }
+                    // Move both x AND width in sync: the clip "shrinks"
+                    // from the left while the right edge stays put
                     onPositionChanged: {
                         if (pressed) {
                             var d = mouse.x - _sx
@@ -162,7 +198,8 @@ Item {
                         var deltaSec = deltaX / pps // секунды
 
                         if (cppTimeline) {
-                            // Берём текущий trimStart из C++
+                            // Read the current trimStart from C++ (the QML
+                            // side doesn't keep it — needs a fresh lookup before recalculating)
                             var info = cppTimeline.getClipInfoAt(
                                         (_ox + _sw * 0.5) / pps,
                                         root.trackNumber || 1)
@@ -219,6 +256,9 @@ Item {
                         _sx = mouse.x
                         _sw = root.width
                     }
+                    // The right handle only changes width (x stays put) —
+                    // much simpler than the left one, since it doesn't
+                    // touch trimStart/startTime, only the clip's final length
                     onPositionChanged: {
                         if (pressed) {
                             var nw = _sw + (mouse.x - _sx)
@@ -246,7 +286,10 @@ Item {
 
             // Правый клик обрабатывается rootRightClick на уровне root Item
 
-            // ПЕРЕТАСКИВАНИЕ — только левая кнопка
+            // DRAGGING — left button only. target: null means the
+            // DragHandler doesn't move the Item itself — the x movement
+            // is done manually in onTranslationChanged; the DragHandler
+            // is used purely as a source of press/move/release events
             DragHandler {
                 id: videoDragHandler
                 target: null
@@ -285,6 +328,11 @@ Item {
                     }
                 }
 
+                // The clip's position is updated manually on every drag
+                // tick; the drag hotSpot is recomputed via mapToGlobal+
+                // mapFromGlobal rather than local coordinates — the only
+                // reliable approach in Qt 6 inside a Flickable with an
+                // offset contentX
                 onTranslationChanged: {
                     if (active) {
                         root.x = Math.max(0, root._startX + translation.x)
@@ -315,7 +363,10 @@ Item {
             }
         }
 
-        // АУДИО ПОЛОСА (зелёная)
+        // АУДИО ПОЛОСА (зелёная): visually the same structure as the video
+        // strip, but with an extra isMuted state (silencing audio without
+        // hiding the track) and a pseudo-waveform instead of resize
+        // handles — the audio portion of the clip isn't trimmed separately from the video
         Rectangle {
             id: audioStrip
             width: parent.width
@@ -357,7 +408,9 @@ Item {
                 }
             }
 
-            // Псевдо-осциллограмма
+            // Pseudo-waveform: NOT real audio data, just a deterministic
+            // sine curve based on index — purely a decorative "sound
+            // track" effect, doesn't reflect the clip's actual content
             Row {
                 anchors {
                     left: aLabel.right
@@ -394,7 +447,9 @@ Item {
 
             // Правый клик обрабатывается rootRightClick на уровне root Item
 
-            // ПЕРЕТАСКИВАНИЕ аудио полосы
+            // DRAGGING the audio strip — identical logic to the video
+            // handler above (duplicated, since these are separate visual
+            // Rectangles inside the Column, but the Drag API is shared on root)
             DragHandler {
                 id: audioDragHandler
                 target: null
@@ -456,9 +511,9 @@ Item {
         }
     }
 
-    // ПРАВЫЙ КЛИК — эмитит сигнал наверх в Timeline → main.qml
-    // Меню объявлены ПРЯМО В main.qml (ApplicationWindow) — только там
-    // Overlay.overlay работает корректно в Qt 6.
+    // RIGHT CLICK — emits a signal upward to Timeline → main.qml
+    // The menus are declared DIRECTLY IN main.qml (ApplicationWindow) —
+    // that's the only place Overlay.overlay behaves correctly in Qt 6.
     MouseArea {
         id: rootRightClick
         anchors.fill: parent
@@ -474,6 +529,7 @@ Item {
                 return
             mouse.accepted = true
             var g = root.mapToGlobal(mouse.x, mouse.y)
+            // Distinguish video/audio menu by the click's Y coordinate within the clip
             var isVideo = (mouse.y < root.videoH + 1)
             if (DEBUG_MODE) {
                 console.log("🖱️ ПКМ", isVideo ? "VIDEO" : "AUDIO", "clipId=",
@@ -484,12 +540,13 @@ Item {
     }
 
 
-    // РАМКА ВЫДЕЛЕНИЯ — root уровень (поверх video И audio полос)
-    // КРИТИЧНО: эта рамка должна быть ЗДЕСЬ — прямым потомком root Item,
-    // а НЕ внутри videoStrip. Причина: anchors.fill: parent у потомка Rectangle
-    // заполняет область ВНУТРИ border родителя. Если border рамки и border
-    // videoStrip одного цвета (rubyPrimary) — они сливаются и рамка невидима.
-    // На уровне root: Rectangle покрывает ВСЕ дочерние элементы, z:50 — поверх всего.
+    // SELECTION BORDER — at the root level (drawn over both the video AND audio strips)
+    // CRITICAL: this border must live HERE — as a direct child of the root Item,
+    // NOT inside videoStrip. Reason: a child Rectangle's anchors.fill: parent
+    // fills the area INSIDE the parent's border. If the border's color and
+    // videoStrip's border are the same color (rubyPrimary) — they blend
+    // together and the border becomes invisible.
+    // At the root level: the Rectangle covers ALL child elements, z:50 — on top of everything.
     Rectangle {
         id: selectionBorder
         anchors.fill: parent

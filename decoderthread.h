@@ -9,9 +9,10 @@
 #include "FrameCache.h"
 #include "mediadecoder.h"
 
-// DecoderThread — фоновый поток декодирования.
-// Декодирует кадры заранее и кладёт в FrameCache. Не блокирует UI.
-// Один поток на каждый уникальный видеофайл.
+// DecoderThread runs decoding in the background so the UI thread never
+// blocks on FFmpeg calls. It decodes frames ahead of the playback position
+// and stores them in a FrameCache; one thread is spawned per distinct
+// (file, track) pair.
 class DecoderThread : public QThread
 {
     Q_OBJECT
@@ -27,18 +28,19 @@ public:
         , m_seekTime(0.0)
     {}
 
-    // перемотаться к новому времени
-    // Вызывается из UI-потока (потокобезопасно)
+    // Requests a seek to a new position. Safe to call from the UI thread.
     void seekTo(double time)
     {
         QMutexLocker lock(&m_mutex);
         m_seekTime      = time;
-        m_playPosition  = time; // ВАЖНО: сброс позиции при seek!
-        // Иначе после forward-seek и backward-seek
-        // m_playPosition остаётся на старом (большом) значении
-        //  thread декодирует без PREFETCH_AHEAD-тормоза
-        //  заполняет весь кэш кадрами из середины файла
-        //  нужные кадры вытесняются → чёрный экран
+        // Reset the tracked play position along with the seek target.
+        // Without this, a forward seek followed by a backward seek would
+        // leave m_playPosition at its old (larger) value, so the decode
+        // loop's "stay within PREFETCH_AHEAD" check would never trigger —
+        // it would keep decoding forward and fill the cache with frames
+        // from the middle of the file, evicting the frames actually
+        // needed and producing a black screen.
+        m_playPosition  = time;
         m_seekRequested = true;
         m_condition.wakeAll();
     }
@@ -46,14 +48,16 @@ public:
     void updatePlayPosition(double time)
     {
         QMutexLocker lock(&m_mutex);
-        // ── КЛЮЧЕВОЙ ФИКС: seek при прыжке между клипами ─────────────
-        // Раньше: только увеличивали m_playPosition, thread декодировал
-        // последовательно от старой позиции до новой. Для двух клипов
-        // из одного файла на дорожке 2 (source 25→35) thread тратил
-        // сотни мс на decode 10с промежутка → cache miss → видео замирало
-        // пока аудио играло → рассинхрон.
-        // Теперь: если прыжок > 2с — делаем seek, кэш очищается,
-        // thread начинает декодировать с нужной позиции сразу.
+        // Trigger a real seek on large jumps (e.g. switching between two
+        // clips from the same source file on the timeline). Previously
+        // this only advanced m_playPosition and let the thread decode
+        // sequentially from the old position to the new one; for two
+        // clips sharing a source file on track 2 (e.g. source time
+        // 25s -> 35s) that meant decoding through the entire 10s gap,
+        // causing cache misses, a frozen video frame while audio kept
+        // playing, and audio/video desync. A jump larger than 2s now
+        // clears the cache and reseeks the decoder directly to the
+        // target position.
         if (time > m_playPosition + 2.0)
         {
             m_seekTime      = time;
@@ -67,7 +71,7 @@ public:
         m_condition.wakeAll();
     }
 
-    // Остановить поток (блокирует до завершения, макс 2с)
+    // Stops the thread and blocks until it exits (up to 2s).
     void stop()
     {
         {
@@ -78,19 +82,19 @@ public:
         wait(2000);
     }
 
-    // Нужен Timeline::getCurrentFrameAt для вычисления frameNum
+    // Needed by Timeline::getCurrentFrameAt to compute the frame number.
     double getFps() const { return m_fps; }
 
 signals:
-    // Испускается когда новый кадр готов в кэше
+    // Emitted when a newly decoded frame is available in the cache.
     void frameReady(int frameNumber);
 
 protected:
     void run() override {
         MediaDecoder decoder;
-        // Превью-режим: кадры в половинном разрешении (в 4 раза меньше пикселей).
-        // DecoderThread используется только для живого воспроизведения —
-        // рендер в файл использует собственные декодеры без этого флага.
+        // Preview mode: frames are decoded at half resolution (a quarter
+        // of the pixel count). DecoderThread is only used for live
+        // playback — file export uses its own decoders without this flag.
         decoder.setPreviewMode(true);
         if (!decoder.openFile(m_filepath))
         {
@@ -103,27 +107,28 @@ protected:
             qDebug() << "DecoderThread: CPU decode for" << m_filepath;
 #endif
 
-        // ИСПРАВЛЕНИЕ 1: ставим m_running=true ДО входа в цикл
-        // и синхронизируем m_seekTime с начальным currentTime
+        // Set m_running=true before entering the loop and initialize
+        // m_seekTime to match the starting currentTime.
         {
             QMutexLocker lock(&m_mutex);
             m_running  = true;
-            m_seekTime = 0.0;  // явная инициализация
+            m_seekTime = 0.0;
         }
 
         double currentTime = 0.0;
         double prefetchBase = 0.0;
 
-        // ФИКС БАГ 3: снижено с 8.0 до 2.5 секунд.
-        // 8 секунд буфера при 30fps = 240 кадров на поток заранее.
-        // Это разгоняло Баг 1 (сигнал-шторм) и Баг 2 (память).
-        // 2.5 секунды достаточно для плавного воспроизведения даже при 2x скорости.
+        // Prefetch window, reduced from 8.0s to 2.5s. At 30fps, 8 seconds
+        // of buffer meant decoding 240 frames ahead per thread, which
+        // amplified both the signal-storm issue (rate-limited emits) and
+        // memory pressure. 2.5 seconds is enough headroom for smooth
+        // playback even at 2x speed.
         const double PREFETCH_AHEAD = 2.5;
 
-        bool needSeek = true;  // при старте делаем один seek на начало
+        bool needSeek = true;  // Perform one seek to the start on launch.
 
         while (true) {
-            // Проверяем запрос перемотки
+            // Check for a pending seek request.
             {
                 QMutexLocker lock(&m_mutex);
                 if (!m_running) break;
@@ -133,24 +138,29 @@ protected:
                     currentTime = m_seekTime;
                     prefetchBase = m_seekTime;
                     m_seekRequested = false;
-                    // Очищаем кэш при реальном seek (перемотка, смена клипа).
-                    // Без этого старые кадры из предыдущей позиции остаются в кэше
-                    // и getNearest может вернуть стухший кадр → мерцание.
-                    // Защита от ненужной очистки при pause→play — в startPlayback:
-                    // он проверяет cache->contains() и НЕ вызывает seekTo если кадр есть.
+                    // Clear the cache on every real seek (scrubbing, clip
+                    // change). Otherwise stale frames from the previous
+                    // position remain cached and getNearest() can return
+                    // one of them, causing a visible flicker. Redundant
+                    // seeks on pause->play are avoided upstream in
+                    // startPlayback(), which checks cache->contains()
+                    // before calling seekTo().
                     m_cache->clear();
                     m_cache->setPlayPosition((int)(m_seekTime * m_fps + 0.5));
                     needSeek = true;
                 }
             }
 
-            // Одиночный seek только при смене позиции, дальше — getNextFrame()
+            // Seek only on a position change; subsequent frames use
+            // getNextFrame() for sequential decoding.
             if (needSeek)
             {
-                // seekAndDecode: seek + пропуск кадров до нужного PTS
-                // БЕЗ sws_scale на промежуточных кадрах (в 5x быстрее getFrameAt).
-                // После неё декодер стоит на правильной позиции →
-                // getNextFrame() вернёт следующий кадр с правильным PTS.
+                // seekAndDecode() seeks and skips frames up to the target
+                // PTS without running sws_scale on the intermediate
+                // frames (about 5x faster than getFrameAt()). After this
+                // call the decoder is positioned correctly, so the
+                // following getNextFrame() returns the next frame with
+                // the right PTS.
                 QImage seekFrame = decoder.seekAndDecode(currentTime);
                 if (!seekFrame.isNull())
                 {
@@ -163,25 +173,26 @@ protected:
 
             int frameNum = (int)(currentTime * m_fps + 0.5);
 
-            // Декодируем следующий кадр
+            // Decode the next frame.
             QImage cached;
             if (!m_cache->get(frameNum, cached))
             {
-                // getNextFrame() читает следующий пакет
+                // getNextFrame() reads the next packet sequentially.
                 QImage frame = decoder.getNextFrame();
                 if (!frame.isNull())
                 {
                     m_cache->put(frameNum, frame);
                     emitFrameReady(frameNum);
-                    // Сообщаем кэшу текущую позицию воспроизведения
-                    // чтобы при вытеснении не удалялись нужные кадры
+                    // Report the current play position to the cache so
+                    // eviction doesn't drop frames still needed for
+                    // playback.
                     {
                         QMutexLocker lock(&m_mutex);
                         m_cache->setPlayPosition((int)(m_playPosition * m_fps + 0.5));
                     }
                 } else
                 {
-                    // Конец файла или ошибка чтения — ждём seek
+                    // End of file or a read error — wait for the next seek.
                     QMutexLocker lock(&m_mutex);
                     m_condition.wait(&m_mutex, 100);
                     continue;
@@ -190,7 +201,7 @@ protected:
 
             currentTime += 1.0 / m_fps;
 
-            // Ждём если ушли далеко вперёд
+            // Throttle if we've decoded too far ahead of playback.
             {
                 QMutexLocker lock(&m_mutex);
                 if (!m_running) break;
@@ -210,12 +221,13 @@ protected:
     }
 
 private:
-    // ФИКС БАГ 1: rate-limit на emit frameReady.
-    // DecoderThread может декодировать 200+ fps — без лимита это
-    // 200 сигналов/сек × 5 потоков = 1000 ивентов в очереди UI.
-    // Очередь Qt переполняется → лаг нарастает. Пауза дренирует → норм.
-    // Лимит 40мс (~25fps) — достаточно для обновления превью на паузе
-    // и не перегружает очередь во время воспроизведения.
+    // Rate-limits frameReady emissions. DecoderThread can decode at
+    // 200+ fps; without a limit that's 200 signals/sec x up to 5 threads
+    // queued on the UI event loop, which backs up and causes visible lag.
+    // Pausing drains the queue, so this only bites during active
+    // decoding. A 40ms limit (~25fps) is still fast enough for smooth
+    // preview updates while paused, without overloading the queue during
+    // playback.
     void emitFrameReady(int frameNum)
     {
         qint64 nowMs = QDateTime::currentMSecsSinceEpoch();

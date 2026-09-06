@@ -26,63 +26,63 @@ MediaDecoder::~MediaDecoder()
     closeFile();
 }
 
-// ===== ОТКРЫТЬ ФАЙЛ =====
+// ===== OPEN FILE =====
 bool MediaDecoder::openFile(const QString& filepath)
 {
     closeFile();
     m_filepath = filepath;
 
-    // 1. Открыть файл
+    // 1. Open the file.
     if (avformat_open_input(&m_formatContext, filepath.toUtf8().constData(),
                             nullptr, nullptr) != 0)
     {
-        qWarning() << "❌ Не могу открыть файл:" << filepath;
-        emit error("Не могу открыть файл");
+        qWarning() << "Failed to open file:" << filepath;
+        emit error("Failed to open file");
         return false;
     }
 
-    // 2. Прочитать информацию о потоках
+    // 2. Read stream information.
     if (avformat_find_stream_info(m_formatContext, nullptr) < 0)
     {
-        qWarning() << "❌ Не могу получить информацию о потоках";
-        emit error("Не могу получить информацию о потоках");
+        qWarning() << "Failed to read stream info";
+        emit error("Failed to read stream info");
         closeFile();
         return false;
     }
 
-    // 3. Инициализировать видео и аудио
+    // 3. Initialize video and audio streams.
     bool videoOk = initializeVideo();
     bool audioOk = initializeAudio();
 
     if (!videoOk && !audioOk)
     {
-        qWarning() << "❌ Не найдено ни видео ни аудио потоков";
-        emit error("Не найдено видео/аудио потоков");
+        qWarning() << "No video or audio streams found";
+        emit error("No video or audio streams found");
         closeFile();
         return false;
     }
 
-    // 4. Выделить память для буферов
+    // 4. Allocate scratch buffers.
     m_frame    = av_frame_alloc();
     m_rgbFrame = av_frame_alloc();
     m_packet   = av_packet_alloc();
 
     if (!m_frame || !m_rgbFrame || !m_packet)
     {
-        qWarning() << "❌ Не могу выделить память";
-        emit error("Не могу выделить память");
+        qWarning() << "Failed to allocate buffers";
+        emit error("Failed to allocate buffers");
         closeFile();
         return false;
     }
 
-    // 5. Инициализировать ресемплер аудио (если есть аудио)
+    // 5. Initialize the audio resampler, if an audio stream is present.
     if (audioOk)
     {
         initializeSwrContext();
     }
 
 #ifndef QT_NO_DEBUG
-    qDebug() << "✅ Файл открыт:" << filepath
+    qDebug() << "File opened:" << filepath
              << "V:" << videoOk << "A:" << audioOk
              << "Dur:" << getDuration() << "s";
 #endif
@@ -90,7 +90,7 @@ bool MediaDecoder::openFile(const QString& filepath)
     return true;
 }
 
-// ===== ЗАКРЫТЬ ФАЙЛ =====
+// ===== CLOSE FILE =====
 void MediaDecoder::closeFile()
 {
     freeResources();
@@ -117,7 +117,7 @@ void MediaDecoder::closeFile()
     {
         avformat_close_input(&m_formatContext);
     }
-    // Освобождаем GPU-контекст после закрытия кодека
+    // Release the hardware decoding context after the codec is closed.
     if (m_hwDeviceCtx)
     {
         av_buffer_unref(&m_hwDeviceCtx);
@@ -141,14 +141,14 @@ void MediaDecoder::closeFile()
     m_cachedDstH = 0;
 }
 
-// ===== ИНИЦИАЛИЗАЦИЯ ВИДЕО =====
-// Порядок попыток GPU-декодирования (только Windows):
-//   1. D3D11VA  — DirectX 11, Windows 8+, все современные GPU
-//   2. DXVA2    — DirectX 9, Windows 7+, старые GPU
-//   3. CPU      — всегда работает, fallback
+// ===== VIDEO INITIALIZATION =====
+// Hardware decoding fallback chain (Windows only):
+//   1. D3D11VA — DirectX 11, Windows 8+, all modern GPUs
+//   2. DXVA2   — DirectX 9, Windows 7+, older GPUs
+//   3. CPU     — always available, final fallback
 //
-// Если GPU-декодирование недоступно (старый драйвер, VM, нет GPU) —
-// автоматически используется CPU. Программа не падает.
+// If hardware decoding is unavailable (old driver, VM, no GPU), CPU
+// decoding is used automatically and playback continues normally.
 bool MediaDecoder::initializeVideo()
 {
     m_videoStreamIndex = av_find_best_stream(
@@ -162,7 +162,7 @@ bool MediaDecoder::initializeVideo()
         m_videoStream->codecpar->codec_id);
     if (!codec) return false;
 
-    // Пробуем GPU-декодирование (только если не аудио-только файл)
+    // Try hardware decoding first (skip for audio-only files).
     if (m_videoStream->codecpar->width > 0)
     {
         if (tryInitHardwareDecoder(codec))
@@ -175,7 +175,7 @@ bool MediaDecoder::initializeVideo()
         }
     }
 
-    // Fallback: CPU декодирование (стандартный путь)
+    // Fallback: CPU decoding (the standard path).
     m_videoCodecContext = avcodec_alloc_context3(codec);
     if (!m_videoCodecContext) return false;
 
@@ -186,7 +186,7 @@ bool MediaDecoder::initializeVideo()
         return false;
     }
 
-    // Многопоточное CPU-декодирование
+    // Multi-threaded CPU decoding.
     m_videoCodecContext->thread_count = 4;
 
     if (avcodec_open2(m_videoCodecContext, codec, nullptr) < 0)
@@ -201,22 +201,23 @@ bool MediaDecoder::initializeVideo()
     return true;
 }
 
-// ===== GPU-ДЕКОДИРОВАНИЕ: попытка инициализации =====
-// Возвращает true если GPU-декодер успешно создан.
-// При любой ошибке освобождает ресурсы и возвращает false —
-// вызывающий код переходит к CPU.
+// ===== HARDWARE DECODING: initialization attempt =====
+// Returns true if a GPU decoder was created successfully. On any failure
+// all resources are released and false is returned, so the caller can
+// fall back to CPU decoding.
 //
-// КАК РАБОТАЕТ:
-// FFmpeg использует концепцию "hardware device context" (AVHWDeviceContext).
-// Это объект который представляет GPU и его контекст декодирования.
-// av_hwdevice_ctx_create создаёт его — FFmpeg сам занимается DirectX.
+// How it works:
+// FFmpeg represents the GPU and its decoding context as an
+// AVHWDeviceContext ("hardware device context"). av_hwdevice_ctx_create()
+// creates it; FFmpeg handles the underlying DirectX interop internally.
 //
-// После создания контекста мы находим формат пикселей GPU-кадра (m_hwPixFmt).
-// Декодированные кадры живут в памяти GPU — avFrameToQImage копирует их
-// в RAM через av_hwframe_transfer_data прежде чем создать QImage.
+// Once the context exists, we look up the GPU frame's pixel format
+// (m_hwPixFmt). Decoded frames live in GPU memory — avFrameToQImage()
+// copies them into system RAM via av_hwframe_transfer_data() before
+// building a QImage.
 bool MediaDecoder::tryInitHardwareDecoder(const AVCodec* codec)
 {
-    // Список GPU-декодеров по приоритету (Windows-only)
+    // GPU decoder types in priority order (Windows only).
     static const AVHWDeviceType hwTypes[] = {
         AV_HWDEVICE_TYPE_D3D11VA,  // DirectX 11, Windows 8+
         AV_HWDEVICE_TYPE_DXVA2,    // DirectX 9,  Windows 7+
@@ -227,7 +228,7 @@ bool MediaDecoder::tryInitHardwareDecoder(const AVCodec* codec)
     {
         AVHWDeviceType hwType = hwTypes[i];
 
-        // Проверяем поддерживает ли кодек этот тип GPU
+        // Check whether this codec supports the given hardware type.
         AVPixelFormat hwFmt = AV_PIX_FMT_NONE;
         for (int cfg = 0; ; ++cfg)
         {
@@ -240,14 +241,14 @@ bool MediaDecoder::tryInitHardwareDecoder(const AVCodec* codec)
                 break;
             }
         }
-        if (hwFmt == AV_PIX_FMT_NONE) continue; // кодек не поддерживает
+        if (hwFmt == AV_PIX_FMT_NONE) continue; // Codec doesn't support this device type.
 
-        // Создаём GPU-контекст
+        // Create the hardware device context.
         AVBufferRef* hwCtx = nullptr;
         if (av_hwdevice_ctx_create(&hwCtx, hwType, nullptr, nullptr, 0) < 0)
-            continue; // GPU недоступен, пробуем следующий
+            continue; // Device unavailable — try the next type.
 
-        // Создаём AVCodecContext с GPU-контекстом
+        // Create an AVCodecContext bound to the hardware context.
         AVCodecContext* codecCtx = avcodec_alloc_context3(codec);
         if (!codecCtx) { av_buffer_unref(&hwCtx); continue; }
 
@@ -259,7 +260,7 @@ bool MediaDecoder::tryInitHardwareDecoder(const AVCodec* codec)
         }
 
         codecCtx->hw_device_ctx = av_buffer_ref(hwCtx);
-        codecCtx->thread_count  = 1; // GPU декодирует сам, CPU-потоки не нужны
+        codecCtx->thread_count  = 1; // Decoding runs on the GPU; CPU threads aren't needed.
 
         if (avcodec_open2(codecCtx, codec, nullptr) < 0)
         {
@@ -268,7 +269,7 @@ bool MediaDecoder::tryInitHardwareDecoder(const AVCodec* codec)
             continue;
         }
 
-        // Успех — сохраняем
+        // Success — keep the context.
         m_videoCodecContext = codecCtx;
         m_hwDeviceCtx       = hwCtx;
         m_hwDeviceType      = hwType;
@@ -276,10 +277,10 @@ bool MediaDecoder::tryInitHardwareDecoder(const AVCodec* codec)
         return true;
     }
 
-    return false; // все попытки провалились → CPU fallback
+    return false; // Every hardware option failed — caller falls back to CPU.
 }
 
-// ===== ИНИЦИАЛИЗАЦИЯ АУДИО =====
+// ===== AUDIO INITIALIZATION =====
 bool MediaDecoder::initializeAudio()
 {
     m_audioStreamIndex = av_find_best_stream(
@@ -312,28 +313,28 @@ bool MediaDecoder::initializeAudio()
     return true;
 }
 
-// ===== ИНИЦИАЛИЗАЦИЯ РЕСЕМПЛЕРА АУДИО =====
-// Конвертирует любой формат аудио → float interleaved, 44100Hz, stereo
+// ===== AUDIO RESAMPLER INITIALIZATION =====
+// Converts whatever format the source uses to interleaved float, 44100Hz, stereo.
 bool MediaDecoder::initializeSwrContext()
 {
     if (!m_audioCodecContext) return false;
 
-    // Выходной layout: стерео
+    // Output layout: stereo.
     AVChannelLayout outLayout;
     av_channel_layout_default(&outLayout, OUTPUT_CHANNELS);
 
-    // Входной layout из файла
+    // Input layout, as reported by the source file.
     AVChannelLayout inLayout;
     av_channel_layout_copy(&inLayout, &m_audioCodecContext->ch_layout);
 
     int ret = swr_alloc_set_opts2(
         &m_swrContext,
-        &outLayout,                              // выход: стерео
-        AV_SAMPLE_FMT_FLT,                       // выход: float
-        OUTPUT_SAMPLE_RATE,                       // выход: 44100
-        &inLayout,                                // вход: из файла
-        m_audioCodecContext->sample_fmt,           // вход: формат из файла
-        m_audioCodecContext->sample_rate,           // вход: частота из файла
+        &outLayout,                              // output: stereo
+        AV_SAMPLE_FMT_FLT,                       // output: float
+        OUTPUT_SAMPLE_RATE,                       // output: 44100
+        &inLayout,                                // input: from the file
+        m_audioCodecContext->sample_fmt,           // input: source sample format
+        m_audioCodecContext->sample_rate,           // input: source sample rate
         0, nullptr
         );
 
@@ -342,13 +343,13 @@ bool MediaDecoder::initializeSwrContext()
 
     if (ret < 0 || !m_swrContext)
     {
-        qWarning() << "❌ Не могу создать SwrContext";
+        qWarning() << "Failed to create SwrContext";
         return false;
     }
 
     if (swr_init(m_swrContext) < 0)
     {
-        qWarning() << "❌ Не могу инициализировать SwrContext";
+        qWarning() << "Failed to initialize SwrContext";
         swr_free(&m_swrContext);
         m_swrContext = nullptr;
         return false;
@@ -394,11 +395,14 @@ QImage MediaDecoder::getFrameAt(double timestamp)
     return lastGood;
 }
 
-// ===== БЫСТРЫЙ SEEK + DECODE =====
-// Как getFrameAt, но НЕ вызывает avFrameToQImage для промежуточных кадров.
-// getFrameAt: seek → decode+convert каждый кадр (5мс × 150 = 750мс при 5с keyframe gap)
-// seekAndDecode: seek → decode каждый (1мс) → convert только целевой = ~160мс
-// Используется DecoderThread для быстрого seek без притормаживаний.
+// ===== FAST SEEK + DECODE =====
+// Similar to getFrameAt(), but skips avFrameToQImage() for intermediate
+// frames:
+//   getFrameAt():    seek -> decode+convert every frame (5ms x 150 =~ 750ms
+//                     for a 5s keyframe interval)
+//   seekAndDecode():  seek -> decode every frame (1ms) -> convert only the
+//                     target frame (=~ 160ms)
+// Used by DecoderThread for fast seeking without stalling playback.
 QImage MediaDecoder::seekAndDecode(double timestamp)
 {
     if (!m_videoCodecContext || !m_videoStream) return QImage();
@@ -430,15 +434,15 @@ QImage MediaDecoder::seekAndDecode(double timestamp)
 
         if (pts >= timestamp - frameDur * 0.5)
         {
-            // Целевой кадр найден — конвертируем ТОЛЬКО его
+            // Target frame found — convert only this one.
             return avFrameToQImage(m_frame);
         }
-        // Промежуточный кадр — пропускаем БЕЗ sws_scale/QImage (быстро)
+        // Intermediate frame — skip without sws_scale/QImage conversion.
     }
     return QImage();
 }
 
-// ===== ПОЛУЧИТЬ СЛЕДУЮЩИЙ ВИДЕОКАДР =====
+// ===== GET NEXT VIDEO FRAME =====
 QImage MediaDecoder::getNextFrame() {
     if (!m_videoCodecContext) return QImage();
 
@@ -460,7 +464,7 @@ QImage MediaDecoder::getNextFrame() {
         ret = avcodec_receive_frame(m_videoCodecContext, m_frame);
         if (ret == 0)
         {
-            // Отслеживаем PTS для синхронизации в рендере
+            // Track PTS for render-time A/V synchronization.
             if (timeBase > 0.0 && m_frame->best_effort_timestamp != AV_NOPTS_VALUE)
                 m_lastVideoPts = m_frame->best_effort_timestamp * timeBase;
             else if (timeBase > 0.0 && m_frame->pts != AV_NOPTS_VALUE)
@@ -473,16 +477,16 @@ QImage MediaDecoder::getNextFrame() {
     return QImage();
 }
 
-// ===== КОНВЕРТАЦИЯ AVFrame → QImage =====
-// Два режима:
-//   CPU-кадр: сразу в sws_scale
-//   GPU-кадр: сначала av_hwframe_transfer_data (GPU RAM → CPU RAM), потом sws_scale
+// ===== AVFrame -> QImage CONVERSION =====
+// Two paths:
+//   CPU frame: goes straight into sws_scale.
+//   GPU frame: av_hwframe_transfer_data() copies GPU RAM -> CPU RAM first,
+//              then sws_scale runs as usual.
 //
-// ПРЕВЬЮ-РЕЖИМ (m_previewMode = true):
-//   sws_scale масштабирует кадр в width/2 × height/2 за один проход.
-//   Это в 4 раза меньше пикселей → в 4 раза меньше нагрузки на CPU.
-//   QML растягивает маленький QImage на весь экран (PreserveAspectFit).
-//   Для рендера в файл m_previewMode = false → полное разрешение.
+// Preview mode (m_previewMode == true):
+//   sws_scale downsamples the frame in a single pass. QML then stretches
+//   the smaller QImage to fill the display (PreserveAspectFit). Full
+//   resolution (m_previewMode == false) is used for file export.
 QImage MediaDecoder::avFrameToQImage(AVFrame* frame)
 {
     if (!frame || frame->width <= 0 || frame->height <= 0) return QImage();
@@ -490,15 +494,15 @@ QImage MediaDecoder::avFrameToQImage(AVFrame* frame)
     AVFrame* swFrame = frame;
     AVFrame* transferred = nullptr;
 
-    // GPU → CPU: если кадр находится в видеопамяти GPU
+    // GPU -> CPU: if the frame currently lives in GPU video memory.
     if (frame->format == m_hwPixFmt && m_hwDeviceCtx)
     {
         transferred = av_frame_alloc();
         if (!transferred) return QImage();
 
-        // Копируем кадр из GPU RAM в CPU RAM.
-        // После этого transferred->format = AV_PIX_FMT_NV12 или YUV420P
-        // (зависит от GPU-драйвера) — sws_scale умеет работать с обоими.
+        // Copy the frame from GPU RAM into system RAM. Afterwards,
+        // transferred->format is AV_PIX_FMT_NV12 or YUV420P (depends on
+        // the GPU driver) — sws_scale handles both.
         if (av_hwframe_transfer_data(transferred, frame, 0) < 0)
         {
             av_frame_free(&transferred);
@@ -513,18 +517,21 @@ QImage MediaDecoder::avFrameToQImage(AVFrame* frame)
     int srcHeight = swFrame->height;
     AVPixelFormat srcFmt = (AVPixelFormat)swFrame->format;
 
-    // Целевой размер: 3/4 в preview-режиме (меньше нагрузки, лучше качество чем 1/4),
-    // полный иначе. Делитель 4 давал слишком заметное ухудшение качества.
-    // 3/4 = компромисс: пикселей в ~1.8 раза меньше, качество почти не теряется.
+    // Target size: 3/4 scale in preview mode (a good balance of CPU cost
+    // vs. quality), full size otherwise. A 1/2 (quarter-pixel-count)
+    // scale was tried first but produced a visibly softer image; 3/4
+    // still cuts pixel count by about 1.8x with almost no perceptible
+    // quality loss.
     int dstWidth  = m_previewMode ? (srcWidth  * 3 / 4) : srcWidth;
     int dstHeight = m_previewMode ? (srcHeight * 3 / 4) : srcHeight;
-    // Гарантируем чётность (sws_scale требует чётные размеры для YUV)
+    // Round down to an even size — sws_scale requires even dimensions for YUV.
     dstWidth  = (dstWidth  / 2) * 2;
     dstHeight = (dstHeight / 2) * 2;
     if (dstWidth  < 2) dstWidth  = 2;
     if (dstHeight < 2) dstHeight = 2;
 
-    // Пересоздаём SwsContext если изменился формат, размер или режим превью
+    // Rebuild the SwsContext whenever the format, source size, or target
+    // size (preview vs. full) changes.
     if (!m_swsContext
         || srcFmt   != m_cachedSwsFmt
         || srcWidth != m_cachedSwsW
@@ -534,9 +541,9 @@ QImage MediaDecoder::avFrameToQImage(AVFrame* frame)
     {
         if (m_swsContext) { sws_freeContext(m_swsContext); m_swsContext = nullptr; }
 
-        // SWS_BILINEAR — быстро и достаточно качественно для превью.
-        // SWS_LANCZOS дал бы лучше качество при масштабировании,
-        // но в 3-5 раз медленнее — не нужно для 30fps воспроизведения.
+        // SWS_BILINEAR is fast and good enough for preview playback.
+        // SWS_LANCZOS would give sharper results when scaling but runs
+        // 3-5x slower, which isn't worth it at 30fps.
         m_swsContext = sws_getContext(
             srcWidth, srcHeight, srcFmt,
             dstWidth, dstHeight, AV_PIX_FMT_RGB24,
@@ -578,25 +585,27 @@ QImage MediaDecoder::avFrameToQImage(AVFrame* frame)
     return result;
 }
 
-// ===== ДЕКОДИРОВАНИЕ АУДИО ДИАПАЗОНА =====
-// Возвращает interleaved float PCM: [L0, R0, L1, R1, ...]
-// Всегда OUTPUT_SAMPLE_RATE (44100), OUTPUT_CHANNELS (2)
+// ===== DECODE AN AUDIO RANGE =====
+// Returns interleaved float PCM: [L0, R0, L1, R1, ...], always at
+// OUTPUT_SAMPLE_RATE (44100) / OUTPUT_CHANNELS (2).
 QVector<float> MediaDecoder::decodeAudioRange(double startTime, double duration)
 {
     if (!m_audioCodecContext || !m_swrContext || !m_formatContext)
         return QVector<float>();
 
-    // ── ROUND вместо TRUNCATE ─────────────────────────────────────────────
-    // Старый код: (int)(duration * 44100) → при duration=1470/44100=0.0333...
-    // → 0.0333... * 44100 = 1469.999... → (int) = 1469 → теряем 1 сэмпл!
-    // За 1800 кадров: 1800 сэмплов = 0.04с дрейф + микро-gaps = дребезжание.
+    // Round rather than truncate the sample count. Truncating
+    // (int)(duration * 44100) drops a sample whenever the division isn't
+    // exact — e.g. duration = 1470/44100 = 0.0333...s truncates to 1469
+    // samples instead of 1470. Over ~1800 frames of playback that adds
+    // up to a ~0.04s drift plus small gaps, audible as crackling.
     int totalSamples = static_cast<int>(duration * OUTPUT_SAMPLE_RATE + 0.5);
     int totalFloats  = totalSamples * OUTPUT_CHANNELS;
 
-    // ── Seek только при прыжке ────────────────────────────────────────────
-    // Порог forward: 1.5с вместо duration*8.
-    // При 20мс чанках duration*8=160мс — слишком мало, каждый стык клипов
-    // вызывал лишний seek. 1.5с — достаточно для нормальных пауз.
+    // Only reseek on an actual position jump. The forward threshold is a
+    // flat 1.5s rather than duration*8: with ~20ms chunks, duration*8 is
+    // only 160ms, which is too tight and triggered a reseek at almost
+    // every clip boundary. 1.5s tolerates normal pauses without forcing
+    // an unnecessary seek.
     double fwdThreshold = qMax(1.5, duration * 3.0);
     bool needSeek = (m_lastAudioPos < 0.0)                         ||
                     (startTime < m_lastAudioPos - 0.02)             ||
@@ -611,11 +620,13 @@ QVector<float> MediaDecoder::decodeAudioRange(double startTime, double duration)
         av_seek_frame(m_formatContext, -1, t, AVSEEK_FLAG_BACKWARD);
         avcodec_flush_buffers(m_audioCodecContext);
 
-        // ── Правильный drain ресемплера ──────────────────────────────────
-        // Старый код: swr_convert(ctx, nullptr, 0, nullptr, 0) — это NO-OP!
-        // FFmpeg drain = swr_convert(ctx, &outbuf, N, NULL, 0) — null INPUT, реальный OUTPUT.
-        // Без drain ресемплер хранит ~23мс аудио от ПРЕДЫДУЩЕЙ позиции →
-        // эти сэмплы попадают в начало нового чанка → шуршание/хрипение.
+        // Properly drain the resampler's internal buffer.
+        // swr_convert(ctx, nullptr, 0, nullptr, 0) is a no-op; a real
+        // drain call needs a valid output buffer with a null input:
+        // swr_convert(ctx, &outbuf, N, NULL, 0). Without this step the
+        // resampler retains up to ~23ms of audio from the previous
+        // position, which then leaks into the start of the new chunk as
+        // audible crackling.
         {
             uint8_t* drainBuf = nullptr;
             int drainMax = 4096;
@@ -623,7 +634,7 @@ QVector<float> MediaDecoder::decodeAudioRange(double startTime, double duration)
                              OUTPUT_CHANNELS, drainMax, AV_SAMPLE_FMT_FLT, 0);
             if (drainBuf)
             {
-                // Drain до полной очистки внутреннего буфера
+                // Drain until the resampler's internal buffer is empty.
                 while (swr_convert(m_swrContext, &drainBuf, drainMax, nullptr, 0) > 0) {}
                 av_freep(&drainBuf);
             }
@@ -634,23 +645,24 @@ QVector<float> MediaDecoder::decodeAudioRange(double startTime, double duration)
     else if (!m_audioOverflow.isEmpty() &&
              qAbs(startTime - m_lastAudioPos) > 0.015)
     {
-        // Overflow с предыдущего вызова не соответствует текущей позиции —
-        // сбрасываем, иначе звук из другого места попадёт в начало чанка.
+        // Leftover audio from the previous call doesn't line up with the
+        // current request — discard it, otherwise audio from the wrong
+        // position would end up at the start of this chunk.
         m_audioOverflow.clear();
     }
 
-    // ── Результат = остаток с прошлого вызова + новые сэмплы ─────────────
+    // ── Result = leftover from the previous call + newly decoded samples ──
     QVector<float> result;
     result.reserve(totalFloats + 4096);
 
-    // Сначала берём то что осталось с прошлого раза
+    // Start with whatever was carried over from the last call.
     if (!m_audioOverflow.isEmpty())
     {
         result = m_audioOverflow;
         m_audioOverflow.clear();
     }
 
-    // ── Читаем новые пакеты пока не наберём достаточно ───────────────────
+    // ── Read new packets until we have enough samples ─────────────────────
     AVFrame*  audioFrame = av_frame_alloc();
     AVPacket* pkt        = av_packet_alloc();
 
@@ -670,7 +682,8 @@ QVector<float> MediaDecoder::decodeAudioRange(double startTime, double duration)
 
         while (avcodec_receive_frame(m_audioCodecContext, audioFrame) == 0)
         {
-            // Получаем PTS кадра (best_effort_timestamp точнее pts для B-frames)
+            // best_effort_timestamp is more reliable than pts alone in
+            // the presence of B-frames.
             double frameTimeBase = av_q2d(m_audioStream->time_base);
             double framePts = -1.0;
             if (audioFrame->best_effort_timestamp != AV_NOPTS_VALUE)
@@ -681,8 +694,9 @@ QVector<float> MediaDecoder::decodeAudioRange(double startTime, double duration)
             double frameDur = (double)audioFrame->nb_samples
                               / m_audioCodecContext->sample_rate;
 
-            // Пропускаем кадры полностью ДО нашего окна.
-            // Порог -0.001 вместо -0.005: точнее, меньше пропускается лишнего.
+            // Skip frames that fall entirely before our target window.
+            // A -0.001s tolerance (rather than -0.005s) keeps this
+            // precise and avoids discarding samples we actually need.
             if (framePts >= 0.0 && startTime > 0.05)
             {
                 double frameEnd = framePts + frameDur;
@@ -693,7 +707,7 @@ QVector<float> MediaDecoder::decodeAudioRange(double startTime, double duration)
                 }
             }
 
-            // Ресемплирование
+            // Resample to the output format.
             int maxOut = swr_get_out_samples(m_swrContext, audioFrame->nb_samples);
             if (maxOut <= 0) maxOut = audioFrame->nb_samples * 2 + 256;
 
@@ -711,18 +725,21 @@ QVector<float> MediaDecoder::decodeAudioRange(double startTime, double duration)
             {
                 const float* p = reinterpret_cast<const float*>(outBuf);
 
-                // ── ФИКС РАССИНХРОНА: точный skip после seek ─────────────────
-                // После AVSEEK_FLAG_BACKWARD seek уезжает к видео-keyframe,
-                // который может быть на 2-5с ДО startTime.
-                // Пропускаем ВСЕ кадры до startTime, не только первый.
+                // ── Precise post-seek trim ────────────────────────────────
+                // AVSEEK_FLAG_BACKWARD lands on the nearest video keyframe,
+                // which can be 2-5s before startTime. We need to skip
+                // every frame before startTime, not just the first one.
                 //
-                // m_skipDone = true только когда мы ВЗЯЛИ часть кадра.
-                // Если весь кадр пропущен (skipFloats == converted*CH) —
-                // следующий кадр тоже ДО startTime и тоже нужен skip.
+                // m_skipDone only becomes true once we've actually taken
+                // part of a frame. If an entire frame is skipped
+                // (skipFloats == converted * channels), the next frame is
+                // still before startTime and needs the same check.
                 //
-                // Без этого: trimStart=25с, seek к 22с → первый кадр (22.0с)
-                // пропущен целиком, m_skipDone=true → следующие 130 кадров
-                // (22.0-25.0с) добавляются БЕЗ skip → 3с мусора → дребезжание.
+                // Without this: trimStart=25s, seek lands at 22s -> the
+                // first frame (22.0s) is skipped whole, m_skipDone is set
+                // true too early, and the next ~130 frames (22.0-25.0s)
+                // get appended without skipping -> ~3s of unwanted audio
+                // -> audible garbage at the clip boundary.
                 int skipFloats = 0;
                 if (!m_skipDone && framePts >= 0.0 && framePts < startTime - 0.001)
                 {
@@ -730,10 +747,11 @@ QVector<float> MediaDecoder::decodeAudioRange(double startTime, double duration)
                     int skipSamples = static_cast<int>(skipSec * OUTPUT_SAMPLE_RATE + 0.5);
                     skipFloats = qMin(skipSamples * OUTPUT_CHANNELS,
                                       converted   * OUTPUT_CHANNELS);
-                    // Ставим done ТОЛЬКО если взяли хоть часть кадра
+                    // Only mark skipping as done once part of a frame was kept.
                     if (skipFloats < converted * OUTPUT_CHANNELS)
                         m_skipDone = true;
-                    // Иначе — весь кадр пропущен, следующий тоже нужно проверить
+                    // Otherwise the whole frame was skipped, so the next
+                    // one still needs to be checked.
                 }
 
                 for (int i = skipFloats; i < converted * OUTPUT_CHANNELS; ++i)
@@ -748,7 +766,7 @@ QVector<float> MediaDecoder::decodeAudioRange(double startTime, double duration)
     av_frame_free(&audioFrame);
     av_packet_free(&pkt);
 
-    // ── Flush задержки swr ────
+    // ── Flush the resampler's remaining delayed samples ──
     {
         int delayed = swr_get_delay(m_swrContext, OUTPUT_SAMPLE_RATE);
         if (delayed > 0 && result.size() < totalFloats)
@@ -771,30 +789,31 @@ QVector<float> MediaDecoder::decodeAudioRange(double startTime, double duration)
 
     m_lastAudioPos = startTime + duration;
 
-    // ── Микро fade-in после seek: сглаживание разрыва ────────────────────
-    // При seek av_seek_frame прыгает к keyframe, skip обрезает сэмплы,
-    // но на стыке "последний пропущенный → первый реальный" — резкий скачок
-    // амплитуды → щелчок. При разрезанном видео (trimStart>0) каждый
-    // переход между клипами = seek = щелчок → "шуршание".
-    // Fade-in первых ~3мс (132 сэмпла * 2 канала) убирает скачок.
+    // ── Micro fade-in after a seek, to smooth the discontinuity ───────────
+    // A seek jumps to the nearest keyframe and the trim above discards
+    // the leading samples, but the boundary between "last discarded
+    // sample" and "first kept sample" can still have a sharp amplitude
+    // jump, audible as a click. With trimmed clips (trimStart > 0), every
+    // clip transition involves a seek, so without this fade those clicks
+    // would repeat as an audible crackle. A ~3ms fade-in (132 samples x
+    // 2 channels) removes the discontinuity.
     if (needSeek && !result.isEmpty())
     {
-        const int FADE_SAMPLES = 132; // ~3мс при 44100Hz
+        const int FADE_SAMPLES = 132; // =~ 3ms at 44100Hz
         int fadeFloats = qMin(FADE_SAMPLES * OUTPUT_CHANNELS, result.size());
         for (int i = 0; i < fadeFloats; ++i)
         {
-            float t = (float)i / (float)fadeFloats; // 0.0 → 1.0
+            float t = (float)i / (float)fadeFloats; // 0.0 -> 1.0
             result[i] *= t;
         }
     }
 
-    // ── Сохраняем переполнение, не выбрасываем ───
-    // сохраняем лишнее в m_audioOverflow для следующего вызова.
+    // ── Keep any overflow for next time rather than discarding it ──
     if (result.size() > totalFloats) {
         m_audioOverflow = result.mid(totalFloats);
         result.resize(totalFloats);
     } else {
-        // Дополнить тишиной если не хватило (только у конца файла)
+        // Pad with silence if we came up short (only happens near EOF).
         while (result.size() < totalFloats)
             result.append(0.0f);
     }
@@ -802,7 +821,7 @@ QVector<float> MediaDecoder::decodeAudioRange(double startTime, double duration)
     return result;
 }
 
-// ===== ПЕРЕМОТКА =====
+// ===== SEEK =====
 bool MediaDecoder::seekTo(double timestamp)
 {
     if (!m_formatContext) return false;
@@ -812,7 +831,7 @@ bool MediaDecoder::seekTo(double timestamp)
     if (av_seek_frame(m_formatContext, -1, seekTarget,
                       AVSEEK_FLAG_BACKWARD) < 0)
     {
-        qWarning() << "❌ Ошибка перемотки к" << timestamp;
+        qWarning() << "Seek failed for" << timestamp;
         return false;
     }
 
@@ -822,7 +841,7 @@ bool MediaDecoder::seekTo(double timestamp)
     return true;
 }
 
-// ===== ИНФОРМАЦИЯ =====
+// ===== FILE INFO =====
 double MediaDecoder::getDuration() const
 {
     if (!m_formatContext || m_formatContext->duration == AV_NOPTS_VALUE)
@@ -857,7 +876,7 @@ int MediaDecoder::getAudioChannels() const
     return m_audioCodecContext ? m_audioCodecContext->ch_layout.nb_channels : 0;
 }
 
-// ===== ОСВОБОДИТЬ РЕСУРСЫ =====
+// ===== RELEASE RESOURCES =====
 void MediaDecoder::freeResources()
 {
     if (m_frame) av_frame_free(&m_frame);

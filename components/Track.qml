@@ -3,6 +3,30 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import "../theme.js" as Theme
 
+/**
+ * Track
+ * -----
+ * A single timeline track: renders the visual representation of the clip
+ * list (a Repeater over C++ modelData), handles drag&drop of external
+ * files (video import) and moving existing clips between tracks, and
+ * implements snap logic — both within the track and cross-track (against
+ * the sibling track's clips, passed in via otherTrackClips).
+ *
+ * Two independent DropAreas overlay the whole track with different z and
+ * keys:
+ *   - fileDropArea (z:5, keys: []) — catches external files (drag from
+ *     LeftSidebar or from the OS file explorer);
+ *   - clipMoveDropArea (z:6, keys: ["clip/move"]) — catches dragging an
+ *     existing clip between tracks; sits above in z, so a drop tagged
+ *     "clip/move" is guaranteed to land here rather than in fileDropArea.
+ *
+ * Snap and collision resolution (when dragging a clip within a track —
+ * onMoved, and on cross-track drop — clipMoveDropArea.onDropped) are
+ * implemented in a similar but not identical way in two places in the
+ * file: first try to snap to the nearest edge of a neighboring clip
+ * (within threshold), then check for overlap and auto-shift to the end
+ * of the overlapping clip.
+ */
 Rectangle {
     id: root
     color: Theme.trackBackground
@@ -28,7 +52,8 @@ Rectangle {
     // Пробрасываем запрос контекстного меню наверх в Timeline.qml
     signal contextMenuRequested(int clipId, bool isVideo, real globalX, real globalY)
 
-    // ОБНОВИТЬ КЛИПЫ ИЗ C++
+    // ОБНОВИТЬ КЛИПЫ ИЗ C++: full re-fetch of this track's clip list;
+    // called on startup and on every clipsChanged from C++
     function updateClipsFromCpp() {
         root.clips = cppTimeline.getClipsForTrack(root.trackNumber)
         if (DEBUG_MODE)
@@ -88,6 +113,10 @@ Rectangle {
                        var filepath = ""
                        var time = drop.x / root.pixelsPerSecond
 
+                       // The file path can arrive via three different
+                       // shapes depending on the drag source — the code
+                       // tries them one by one until it finds a non-empty filepath
+
                        // Вариант 1: drag из LeftSidebar (кастомный ключ)
                        if (drop.keys.includes("video/filepath")) {
                            filepath = drop.getDataAsString("video/filepath")
@@ -132,6 +161,8 @@ Rectangle {
 
     // DROP AREA 2: перенос клипов между дорожками
     // keys["clip/move"] генерирует VideoClip через Drag API
+    // Higher z than fileDropArea — guarantees clips are handled here
+    // rather than accidentally falling into the file DropArea
 
     DropArea {
         id: clipMoveDropArea
@@ -150,7 +181,10 @@ Rectangle {
 
                        var time = Math.max(0, drop.x / root.pixelsPerSecond)
 
-                       // ✅ Snap к обеим дорожкам
+                       // ✅ Snap to both tracks: gather all clips on this
+                       // track plus the sibling track's clips (excluding
+                       // the one being dragged) into a single allClips
+                       // list and look for the nearest edge to snap to
                        if (root.snapEnabled) {
                            var threshold = 0.5 // 500ms допуск
                            var allClips = []
@@ -165,13 +199,19 @@ Rectangle {
                                allClips.push(root.otherTrackClips[j])
                            }
 
-                           // Получаем реальную длину перетаскиваемого клипа
+                           // Get the real duration of the clip being
+                           // dragged from C++ (drop.getDataAsString only carries the id)
                            var myDuration = 0
                            var info = cppTimeline ? cppTimeline.getClipInfoById(
                                                         clipId) : null
                            if (info && info.duration !== undefined)
                            myDuration = info.duration
 
+                           // Iterate over all clips and check 4 edge-
+                           // alignment cases: start-start, start-end,
+                           // end-start, end-end (same 4 cases appear again
+                           // below in onMoved — identical logic, but there
+                           // it's for moving a clip within the already open Track)
                            var snapped = false
                            for (var k = 0; k < allClips.length
                                 && !snapped; k++) {
@@ -217,7 +257,7 @@ Rectangle {
                        drop.accept(Qt.MoveAction)
                    }
 
-        // Подсветка при перетаскивании клипа
+        // Highlight while dragging a clip (green — valid cross-track drop)
         Rectangle {
             id: clipMoveHighlight
             anchors.fill: parent
@@ -229,7 +269,7 @@ Rectangle {
         }
     }
 
-    // Подсветка при дропе файла
+    // Highlight while dropping a file (theme accent color — new video import)
     Rectangle {
         id: dropHighlight
         anchors.fill: parent
@@ -240,7 +280,9 @@ Rectangle {
         visible: false
         z: 5
     }
-    // REPEATER ДЛЯ КЛИПОВ
+    // REPEATER ДЛЯ КЛИПОВ: one VideoClip per model item (this track's
+    // clips from C++). x/width are bound to startTime/duration and the
+    // current zoom — the visual geometry always stays in sync with the model
     Repeater {
         id: clipsRepeater
         model: root.clips
@@ -310,6 +352,12 @@ Rectangle {
             }
 
             // СИГНАЛЫ ОТ VideoClip
+            // onMoved: the clip was dragged within this same track (not
+            // cross-track — that case is handled by clipMoveDropArea
+            // above). Logic in 3 steps: 1) snap to the nearest edge,
+            // 2) check for overlaps with other clips after snapping,
+            // 3) if there's an overlap — auto-shift the clip to the end
+            // of the overlapping one
             onMoved: newX => {
                          var newTime = newX / root.pixelsPerSecond
                          var myDuration = modelData.duration
@@ -407,9 +455,11 @@ Rectangle {
                          root.clipMoved(modelData.id, newTime)
                      }
 
-            // Правый трим: пользователь потянул правый край клипа
-            // newPixelWidth — новая визуальная ширина клипа в пикселях.
-            // Пересчитываем в duration и вычисляем новый trimEnd = sourceDuration - newDuration - trimStart
+            // Right trim: the user dragged the right edge of the clip.
+            // newPixelWidth — the new visual width of the clip in pixels.
+            // Convert it to duration and compute the new trimEnd = sourceDuration - newDuration - trimStart.
+            // sourceDuration is reconstructed from the current trimStart/
+            // duration/trimEnd — it isn't stored separately anywhere
             onRightTrimmed: (clipId, newPixelWidth) => {
                 if (!cppTimeline) return
 
@@ -439,11 +489,14 @@ Rectangle {
                 cppTimeline.trimClip(clipId, trimStart, newTrimEnd)
             }
 
+            // Clicking a clip — selects it and notifies upward
             onClicked: {
                 root.clipSelected(modelData.id)
                 root.clipClicked(modelData.id)
             }
 
+            // Deleting a clip: clear the selection if the deleted clip
+            // was selected, then ask C++ to remove it from the model
             onDeleteRequested: id => {
                                    if (DEBUG_MODE)
                                    console.log("🗑️ Delete clip", id)
@@ -453,6 +506,7 @@ Rectangle {
                                    root.clipDeleted(id)
                                }
 
+            // Split the clip at the current playback position
             onSplitRequested: id => {
                                   var splitTime = cppTimeline ? cppTimeline.currentTime : 0
                                   if (DEBUG_MODE) {

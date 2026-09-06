@@ -18,9 +18,11 @@ AudioPlaybackEngine::~AudioPlaybackEngine()
 {
     destroySink();
 }
-// createSink вызывается ОДИН РАЗ при первом startPlayback.
-// Повторные startPlayback переиспользуют существующий sink через reset().
-// Это устраняет утечку WASAPI-потоков при частых перезапусках.
+
+// createSink() runs exactly once, on the first startPlayback() call.
+// Subsequent calls reuse the existing sink via reset()+start() instead of
+// recreating it, which avoids leaking WASAPI output threads on repeated
+// start/stop cycles.
 void AudioPlaybackEngine::createSink()
 {
     QAudioFormat fmt;
@@ -59,17 +61,19 @@ void AudioPlaybackEngine::startPlayback(double fromTime, double speed, double to
 {
     m_feedTimer->stop();
 
-    // Создаём sink только при первом вызове или если был уничтожен.
-    // НЕ пересоздаём на каждый startPlayback — это создаёт новый WASAPI-поток.
-    // Windows лимит ~64 потока → после ~20 перемоток: AvSetMmThreadCharacteristics failed.
+    // Create the sink only on the first call, or after it was explicitly
+    // destroyed. Never recreate it on every startPlayback() — that spins
+    // up a new WASAPI thread each time, and Windows caps the process at
+    // roughly 64 audio threads: after ~20 seeks the sink creation would
+    // fail with "AvSetMmThreadCharacteristics failed".
     if (!m_sink)
     {
         createSink();
     }
     else
     {
-        // Сбрасываем буфер sink без пересоздания потока.
-        // reset() → StoppedState, start() → снова push-режим.
+        // Reset the sink's internal buffer without tearing down its
+        // thread: reset() -> StoppedState, start() -> push mode again.
         m_sink->reset();
         m_sinkDevice = m_sink->start();
         if (m_sink->state() == QAudio::SuspendedState)
@@ -85,8 +89,9 @@ void AudioPlaybackEngine::startPlayback(double fromTime, double speed, double to
     m_playStartMs = QDateTime::currentMSecsSinceEpoch();
     m_playStartTime = fromTime;
 
-    // Предзаполнение буфера: 3 итерации = ~240ms запас до первого тика таймера.
-    // Без этого первые 20-40мс воспроизведения могут дать щелчок/тишину.
+    // Pre-fill the buffer with 3 chunks (~240ms) before the timer's first
+    // tick, otherwise the first 20-40ms of playback can produce a click
+    // or silence.
     for (int i = 0; i < 3; ++i) onFeedTimer();
     m_feedTimer->start();
 
@@ -100,8 +105,8 @@ void AudioPlaybackEngine::stopPlayback()
 {
     m_feedTimer->stop();
     m_playing = false;
-    // Не уничтожаем sink — только приостанавливаем.
-    // Sink переиспользуется при следующем startPlayback через reset()+start().
+    // Suspend rather than destroy the sink — it is reused on the next
+    // startPlayback() via reset()+start().
     if (m_sink && m_sink->state() == QAudio::ActiveState)
         m_sink->suspend();
 #ifndef QT_NO_DEBUG
@@ -130,9 +135,11 @@ double AudioPlaybackEngine::getCurrentAudioTime() const
         return m_playStartTime + (ms / 1000.0) * m_speed;
     }
 
-    // m_writeHead = сколько секунд timeline-аудио отправлено в sink.
-    // sink буферизует часть данных, которые ещё не проиграны динамиком.
-    // Реальная слышимая позиция = writeHead − буфер_sink (в timeline-секундах).
+    // m_writeHead tracks how much timeline audio has been written to the
+    // sink so far. Some of that data is still sitting in the sink's
+    // internal buffer and hasn't reached the speakers yet, so the
+    // audible position is m_writeHead minus that buffered amount
+    // (converted back to timeline seconds).
     qint64 bufferedBytes = m_sink->bufferSize() - m_sink->bytesFree();
     if (bufferedBytes < 0) bufferedBytes = 0;
     double bufferedSec = (double)bufferedBytes
@@ -150,13 +157,13 @@ void AudioPlaybackEngine::onFeedTimer()
         m_sink->resume();
 
     qint64 bytesFree = m_sink->bytesFree();
-    if (bytesFree < (qint64)(sizeof(float) * CHANNELS * 512)) // мин. 11ms запаса
+    if (bytesFree < (qint64)(sizeof(float) * CHANNELS * 512)) // Need >=11ms of headroom
     {
         emit timeUpdated(getCurrentAudioTime());
         return;
     }
 
-    const double MAX_CHUNK_SEC = 0.08; // 80ms — равномернее чем 150ms
+    const double MAX_CHUNK_SEC = 0.08; // 80ms feeds a steadier stream than 150ms did
     int maxFloats  = (int)(MAX_CHUNK_SEC * SAMPLE_RATE * CHANNELS);
     int freeFloats = (int)(bytesFree / sizeof(float));
     int wantFloats = qMin(freeFloats, maxFloats);
@@ -171,6 +178,8 @@ void AudioPlaybackEngine::onFeedTimer()
     {
         if (qAbs(m_speed - 1.0) > 0.01 && audio.size() != wantFloats)
         {
+            // Playback speed != 1x: linearly resample the mixed chunk to
+            // match the number of output samples the sink actually needs.
             toWrite.resize(wantFloats);
             double ratio = (double)audio.size() / wantFloats;
             for (int i = 0; i < wantFloats; i += CHANNELS)
@@ -198,6 +207,8 @@ void AudioPlaybackEngine::onFeedTimer()
     }
     else
     {
+        // No audio available for this range (e.g. a gap between clips) —
+        // write silence but keep the write head advancing.
         toWrite.resize(wantFloats, 0.0f);
         m_writeHead += readDur;
         ++m_silentChunks;
@@ -210,9 +221,9 @@ void AudioPlaybackEngine::onFeedTimer()
     emit timeUpdated(getCurrentAudioTime());
 
     bool pastEnd     = (m_writeHead >= m_totalDuration - 0.05);
-    // Safety net: если pastEnd не сработал (ошибка в totalDuration),
-    // останавливаем после 15с непрерывной тишины.
-    // Старый порог 2.4с ложно срабатывал в промежутках между клипами.
+    // Safety net in case pastEnd never triggers (e.g. totalDuration was
+    // wrong): stop after 15s of continuous silence. The previous 2.4s
+    // threshold fired incorrectly during normal gaps between clips.
     bool longSilence = (m_silentChunks >= 200);
 
     if (pastEnd || longSilence)
@@ -230,7 +241,3 @@ void AudioPlaybackEngine::onFeedTimer()
                            });
     }
 }
-
-
-
-

@@ -4,30 +4,31 @@
 #include <QString>
 #include <QMap>
 
+// A single clip placed on the timeline: a reference to a source file plus
+// its position, trim points, effects, and visibility/audio state.
 struct TimelineClip {
-    // ===== ОСНОВНЫЕ ДАННЫЕ =====
-    QString filepath;        // Путь к исходному видеофайлу
-    int trackIndex;          // Номер дорожки (1 = верхняя/основная, 2 = нижняя/фоновая)
-    double startTime;        // Начало клипа на timeline (в секундах)
-    double duration;         // Длительность клипа на timeline (в секундах)
+    // ===== Core data =====
+    QString filepath;        // Path to the source media file
+    int trackIndex;          // Track number (1 = top/primary, 2 = bottom/background)
+    double startTime;        // Start position on the timeline, in seconds
+    double duration;         // Duration on the timeline, in seconds
 
-    // ===== ОБРЕЗКА (TRIMMING) =====
-    double trimStart;        // Сколько секунд обрезать с начала исходного видео (default: 0.0)
-    double trimEnd;          // Сколько секунд обрезать с конца исходного видео (default: 0.0)
+    // ===== Trimming =====
+    double trimStart;        // Seconds trimmed from the start of the source (default 0.0)
+    double trimEnd;          // Seconds trimmed from the end of the source (default 0.0)
 
-    // ===== ЭФФЕКТЫ =====
+    // ===== Effects =====
     QMap<QString, double> effects;
 
-    // ===== АУДИО =====
-    double audioOffset;      // Смещение аудио относительно видео
-    bool isMuted;            // Выключен ли звук?
+    // ===== Audio =====
+    double audioOffset;      // Audio offset relative to video
+    bool isMuted;            // Whether audio is muted for this clip
 
-    // ===== ВИДИМОСТЬ (для рендеринга) =====
-    // Синхронизируются из QML clipStates перед рендером
-    bool isVideoHidden;      // Скрыто ли видео этого клипа?
-    bool isAudioHidden;      // Скрыто ли аудио этого клипа?
+    // ===== Visibility (used for rendering) =====
+    // Synced from the QML clip-state maps before a render pass.
+    bool isVideoHidden;      // Whether this clip's video is hidden
+    bool isAudioHidden;      // Whether this clip's audio is hidden
 
-    // ===== КОНСТРУКТОР =====
     TimelineClip()
         : trackIndex(0)
         , startTime(0.0)
@@ -40,7 +41,7 @@ struct TimelineClip {
         , isAudioHidden(false)
     {}
 
-    // ===== ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ =====
+    // ===== Helpers =====
     double endTime() const {
         return startTime + duration;
     }
@@ -54,16 +55,15 @@ struct TimelineClip {
         return duration;
     }
 
-    // Время в исходном файле для данного момента на таймлайне
+    // Maps a timeline moment to the corresponding time in the source file.
     double sourceTimeAt(double timelineTime) const {
         return timelineTime - startTime + trimStart;
     }
 
-    // Активен ли клип в данный момент на таймлайне?
+    // Whether the clip is active (visible on the timeline) at a given time.
     bool isActiveAt(double time) const {
         return time >= startTime && time < endTime();
     }
 };
 
 #endif // TIMELINECLIP_H
-

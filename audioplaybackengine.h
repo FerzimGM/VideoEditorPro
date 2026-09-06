@@ -15,14 +15,18 @@
 
 class Timeline;
 
+// Push-mode audio playback engine built on QAudioSink. A timer periodically
+// pulls a mixed audio chunk from the Timeline and writes it into the sink's
+// buffer, keeping the buffer topped up just ahead of what the hardware is
+// currently playing.
 class AudioPlaybackEngine : public QObject
 {
     Q_OBJECT
 public:
     static const int SAMPLE_RATE = 44100;
     static const int CHANNELS = 2;
-    static const int FEED_INTERVAL_MS = 20;   // 20мс = ~50fps тиков
-    static const int BUFFER_MS = 500;  // увеличен для снижения underrun
+    static const int FEED_INTERVAL_MS = 20;   // 20ms ticks =~ 50 feeds/sec
+    static const int BUFFER_MS = 500;         // Sized generously to avoid underruns
 
     explicit AudioPlaybackEngine(Timeline* timeline, QObject* parent = nullptr);
     ~AudioPlaybackEngine();
@@ -47,7 +51,7 @@ private slots:
 private:
     Timeline* m_timeline;
     QAudioSink* m_sink = nullptr;
-    QIODevice* m_sinkDevice = nullptr;   // push-режим
+    QIODevice* m_sinkDevice = nullptr;   // Push-mode write target
     QTimer* m_feedTimer;
 
     double m_startStreamTime = 0.0;
@@ -66,3 +70,4 @@ private:
 };
 
 #endif // AUDIOPLAYBACKENGINE_H
+

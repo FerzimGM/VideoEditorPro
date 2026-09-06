@@ -3,19 +3,36 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import "../theme.js" as Theme
 
+/**
+ * TopMenuBar
+ * ----------
+ * Custom window title bar (used instead of the native one — the app
+ * apparently runs as a frameless window). Combines two roles:
+ *   1) the application's main menu (File/Project/Export) — only emits
+ *      signals outward; the actual actions (opening a file, saving, etc.)
+ *      are performed by the parent component;
+ *   2) window controls (minimize/maximize/close) and a drag area for
+ *      moving the window with the mouse, since there's no native title bar.
+ * All actions merely emit signals — TopMenuBar itself never touches files
+ * or knows any business-logic details.
+ */
 Rectangle {
     id: root
     color: Theme.panelBackground
 
+    // Menu item signals — handled by the owner (main.qml)
     signal openVideo()
     signal openProject()
     signal saveProject()
     signal exportVideo()
+    // Window control signals (needed since there's no native title bar)
     signal minimize()
     signal maximize()
     signal close()
 
-    // Ссылка на Window
+    // Reference to the Window object — needed for manual window dragging
+    // and maximizing, since a frameless window has no native title bar
+    // that would handle this
     property var targetWindow: null
 
     Rectangle {
@@ -55,7 +72,8 @@ Rectangle {
             font.bold: true
         }
 
-        // Пустая область для перетаскивания окна
+        // Empty area used for dragging the window: substitutes for the
+        // native title bar that's missing in frameless mode
         Item {
             Layout.fillWidth: true
             Layout.fillHeight: true
@@ -65,10 +83,15 @@ Rectangle {
 
                 property point clickPos: Qt.point(0, 0)
 
+                // Remember the press point relative to the MouseArea itself
                 onPressed: (mouse) => {
                     clickPos = Qt.point(mouse.x, mouse.y)
                 }
 
+                // Move the window by the cursor delta from the press point;
+                // since clickPos is local to the MouseArea (not screen
+                // coordinates), the window moves without the cursor
+                // "jumping" relative to it
                 onPositionChanged: (mouse) => {
                     if (pressed && root.targetWindow) {
                         var delta = Qt.point(mouse.x - clickPos.x, mouse.y - clickPos.y)
@@ -77,6 +100,8 @@ Rectangle {
                     }
                 }
 
+                // Double-click on the free area — like in regular windows,
+                // maximizes/restores the window
                 onDoubleClicked: {
                     if (root.targetWindow) {
                         root.maximize()
@@ -85,7 +110,8 @@ Rectangle {
             }
         }
 
-        // Кнопки управления окном
+        // Window control buttons (minimize / maximize / close) —
+        // substitute for the native buttons missing on a frameless window
         RowLayout {
             Layout.fillHeight: true
             spacing: 0
@@ -107,7 +133,9 @@ Rectangle {
         }
     }
 
-    // Меню
+    // Application's main dropdown menu; opened via popup() from the "Меню"
+    // button above. Background, item delegate and separators are all
+    // customized to match the app's overall dark theme
     Menu {
         id: mainMenu
         width: 250
@@ -119,6 +147,8 @@ Rectangle {
             radius: Theme.borderRadius
         }
 
+        // Custom menu item delegate: label on the left, shortcut on the
+        // right (pulled from the bound Action.shortcut, if set)
         delegate: MenuItem {
             id: menuItem
             implicitWidth: parent ? parent.width : 0
@@ -208,6 +238,9 @@ Rectangle {
         }
     }
 
+    // Local inline component for a title bar button (icon + text,
+    // hover highlight). Reused both for the "Меню" button and for the
+    // window control buttons below
     component CustomButton: Rectangle {
         property string text: ""
         property string icon: ""
@@ -245,6 +278,4 @@ Rectangle {
             onClicked: parent.clicked()
         }
     }
-
-
 }

@@ -1,3 +1,48 @@
+/**
+ * main.qml
+ * --------
+ * The application's entry point. The root QtObject appRoot holds two
+ * separate ApplicationWindows as properties (rather than a single
+ * Window { Window {} } tree), because the splash screen needs to exist
+ * and be visible BEFORE the main window (with all its heavy components —
+ * Timeline, VideoPlayer, LeftSidebar) has a chance to finish
+ * initializing. The splash closes itself via the loaded() signal (see
+ * SplashScreen.qml), after which mainWindow is shown.
+ *
+ * mainWindow is frameless (Qt.FramelessWindowHint), so this file also
+ * manually implements: resize handles along the window edges (3
+ * MouseAreas at the bottom-right), TopMenuBar as a replacement for the
+ * native title bar, and all the clip context-menu logic (described below).
+ *
+ * Architecturally, main.qml is the "glue" between the purely
+ * presentational QML components (Timeline, VideoPlayer, LeftSidebar,
+ * etc. know nothing about each other and only communicate via signals)
+ * and the C++ core (cppTimeline, a global context object not declared
+ * explicitly in this file). This is also where all the top-level "state
+ * managers" live:
+ *   - playbackManager — currentTime/duration/isPlaying/zoom/speed; the
+ *     single source of truth for every component dealing with playback
+ *     (VideoPlayer, PlaybackControls, Timeline)
+ *   - selectionManager — the selected clip's id, shared down the whole
+ *     Timeline → Track → VideoClip chain
+ *   - clipStates — QML-side mute/hidden state per clip; exists
+ *     SEPARATELY from the C++ clip model because mute/hidden changes
+ *     don't emit a standard dataChanged in C++ and never reach a plain
+ *     binding to modelData — hence the version counters (muteVersion/
+ *     hiddenVersion), which must be explicitly read inside a property
+ *     binding so Qt Quick registers the dependency and recomputes it on
+ *     the next increment
+ *   - clipsCache — a local cache of per-track clip lists, refreshed only
+ *     on the clipsChanged signal (not on every currentTime tick, as it
+ *     used to be — otherwise a two-track get would fire 25+ times a
+ *     second just to check visibility/mute during playback)
+ *
+ * The clip context menus (videoContextMenu/audioContextMenu) are
+ * declared right here, in the ApplicationWindow, rather than in child
+ * .qml files — because Overlay.overlay returns null inside child
+ * components in Qt 6, and Menu.popup() without a valid overlay parent
+ * behaves unpredictably.
+ */
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
@@ -57,6 +102,9 @@ QtObject {
 
         // cutKeyPressed объявлен здесь, в Window root
         // Shortcuts тоже в Window root - доступ без проблем
+        // Debounce flag for splitting a clip: without it, holding down
+        // the C key (OS autorepeat) would call splitClip many times per
+        // second — reset via cutDebounceTimer at the very bottom of the file
         property bool cutKeyPressed: false
 
         // ПАРАМЕТРЫ ЭКСПОРТА (из ExportPanel в LeftSidebar)
@@ -64,7 +112,9 @@ QtObject {
         property string _exportResolution: "1920×1080"
         property string _exportFormat: "MP4"
 
-        // Resize handles
+        // Resize handles — a manual implementation of window resizing by
+        // dragging an edge/corner, required in frameless mode (the window
+        // has no native frame that would normally handle this itself)
         MouseArea {
             anchors.right: parent.right
             anchors.top: parent.top
@@ -135,6 +185,8 @@ QtObject {
         }
 
         // Менеджеры
+        // The currently open/saved project model — used by the project
+        // open/save FileDialogs further down the file
         QtObject {
             id: projectManager
             property string currentProjectPath: ""
@@ -193,6 +245,8 @@ QtObject {
             }
         }
 
+        // Same kind of popup for a failed export — only differs in color
+        // (red instead of green) and display time (5s instead of 4s)
         Rectangle {
             id: renderErrorNotification
             anchors.bottom: parent.bottom
@@ -237,6 +291,15 @@ QtObject {
         // КОНТЕКСТНЫЕ МЕНЮ
         // В дочерних компонентах (.qml файлах) Overlay.overlay возвращает null в Qt 6.
         // Хранит видимость видео/аудио полос каждого клипа
+        //
+        // clipStates — QML-side mute/hidden state that runs PARALLEL to
+        // the C++ model. Reason it exists: setClipMuted/setClipVideoHidden
+        // in C++ don't emit dataChanged for a specific clip, so a direct
+        // binding to modelData.isMuted wouldn't update after a change.
+        // The fix — a dictionary keyed by clipId plus a version counter
+        // (muteVersion/hiddenVersion), which must be explicitly read
+        // inside a property binding (see VideoClip's isMuted in Track.qml)
+        // so Qt Quick tracks the dependency and recomputes the binding on increment
         QtObject {
             id: clipStates
             property var _hidden: ({})
@@ -248,6 +311,9 @@ QtObject {
                 return _muted[clipId] === true
             }
             function setMuted(clipId, val) {
+                // Object.assign creates a NEW object — required, otherwise
+                // Qt Quick won't notice the var-property change (it needs
+                // a new reference, not a mutation of the existing object)
                 var m = Object.assign({}, _muted)
                 m[clipId] = val
                 _muted = m
@@ -316,6 +382,10 @@ QtObject {
             }
         }
 
+        // Context of the currently open context menu: which clip, on
+        // which track, its name and current mute/hidden state — shared
+        // between both menus (video/audio), filled in by the
+        // onShowVideoContextMenu/onShowAudioContextMenu handlers below, before popup()
         QtObject {
             id: menuContext
             property int clipId: -1
@@ -325,6 +395,10 @@ QtObject {
             property bool videoHidden: false
         }
 
+        // Menu shown on right-click over a clip's video strip.
+        // parent: Overlay.overlay is required here (see the note at the
+        // top of the file) — which is exactly why this menu is declared
+        // in main.qml rather than in VideoClip.qml/Track.qml
         Menu {
             id: videoContextMenu
             parent: Overlay.overlay
@@ -437,6 +511,8 @@ QtObject {
             }
         }
 
+        // Menu shown on right-click over a clip's audio strip: same
+        // structure as videoContextMenu, but "hide video" is replaced with "mute audio"
         Menu {
             id: audioContextMenu
             parent: Overlay.overlay
@@ -527,6 +603,10 @@ QtObject {
             }
         }
 
+        // The single source of truth for playback state. Every component
+        // (VideoPlayer, PlaybackControls, Timeline) reads from here via
+        // bindings and writes back via signals — neither the player nor
+        // the timeline keeps its own isPlaying/currentTime
         QtObject {
             id: playbackManager
             property real currentTime: 0
@@ -567,11 +647,19 @@ QtObject {
         }
 
         //  ДИАЛОГИ
+        // Opening a video: a new clip is always added to the END of the
+        // existing clips on track1 (not at the playhead position) — makes
+        // the "pile up material sequentially" workflow easier
         FileDialog {
             id: openVideoDialog
             title: "Открыть видео"
             nameFilters: ["Video files (*.mp4 *.avi *.mov *.mkv)", "All files (*)"]
             onAccepted: {
+                // selectedFile is a file:// URL; normalize it into a
+                // plain OS path (strip the scheme, and on Windows also
+                // strip the extra leading slash before the drive letter:
+                // /C:/... → C:/...). The same pattern repeats in every
+                // FileDialog further down the file.
                 var filepath = selectedFile.toString()
                 filepath = filepath.replace(/^file:\/\/\//, "")
                 if (filepath.match(/^\/[A-Za-z]:\//))
@@ -634,6 +722,8 @@ QtObject {
             }
         }
 
+        // Video export: a save-file dialog, immediately followed by the
+        // actual render process being started in C++
         FileDialog {
             id: exportFileDialog
             fileMode: FileDialog.SaveFile
@@ -651,6 +741,9 @@ QtObject {
                 exportDialog.open()
 
                 // Разрешение из ExportPanel (сохранено в root)
+                // The ComboBox's text entries are parsed by checking for
+                // a substring on one side of the resolution — a simple
+                // but workable approach that avoids a separate enum/mapping
                 var resText = root._exportResolution || "1920×1080"
                 var w = 1920, h = 1080
                 if (resText.indexOf("1280") >= 0) {
@@ -667,6 +760,10 @@ QtObject {
                 var fmt = root._exportFormat || "MP4"
 
                 // Синхронизируем clipStates → C++ и запускаем рендер.
+                // The C++ renderer doesn't know about the QML-side
+                // clipStates (mute/hidden) — before starting a render, we
+                // have to explicitly hand it the current map, otherwise
+                // the render uses the "bare" clip state with no user hides/mutes.
                 // КРИТИЧНО: итерируем по РЕАЛЬНЫМ UID клипов, не по индексам.
                 // clipStates хранит данные по UID (из getClipsForTrack → id),
                 // а не по последовательным индексам 0,1,2.
@@ -692,6 +789,9 @@ QtObject {
         }
 
         // Окно рендера — frameless, поверх всех, не скрывается
+        // Combines two functions in one Window: the export settings form
+        // (visible while isRendering === false) and a progress screen with
+        // a circular indicator + cancel button (visible while isRendering === true)
         Window {
             id: exportDialog
             title: "Экспорт видео"
@@ -718,6 +818,9 @@ QtObject {
             }
 
             // Запрещаем закрытие во время рендера через сигнал
+            // (the close button is hidden during rendering anyway, but the
+            // window could still be closed other ways — e.g. Alt+F4 —
+            // this guard blocks all of them)
             Connections {
                 target: exportDialog
                 function onClosing(close) {
@@ -934,6 +1037,10 @@ QtObject {
                         visible: exportDialog.isRendering
 
                         // Круг прогресса
+                        // Drawn manually via a Canvas 2D context: a
+                        // background ring + a progress arc (starting at
+                        // -90°, clockwise, proportional to progress) + a
+                        // thin inner highlight for depth
                         Canvas {
                             id: progressRing
                             anchors.centerIn: parent
@@ -1040,7 +1147,9 @@ QtObject {
             }
         }
 
-        // Верхняя панель
+        // Верхняя панель: a purely presentational component, every action
+        // arrives as a signal and is handled right here — opening
+        // dialogs, window management (minimize/maximize/close)
         TopMenuBar {
             id: menuBar
             anchors.top: parent.top
@@ -1059,7 +1168,11 @@ QtObject {
             onClose: Qt.quit()
         }
 
-        // ГЛАВНЫЙ LAYOUT
+        // ГЛАВНЫЙ LAYOUT: LeftSidebar on the left, the central column on
+        // the right (ModeSwitcher + VideoPlayer on top, PlaybackControls
+        // and Timeline below). All communication between child components
+        // goes through playbackManager/selectionManager/clipStates above —
+        // the components themselves know nothing about each other
         ColumnLayout {
             anchors.top: menuBar.bottom
             anchors.left: parent.left
@@ -1143,6 +1256,13 @@ QtObject {
                             playbackSpeed: playbackManager.playbackSpeed
                             volume: playbackManager.volume
                             // hideVideo=true только если track1 скрыт И track2 пустой - чёрный экран
+                            // Checks the clip under the playhead on track1:
+                            // if the user hid it (isVideoHidden), checks
+                            // whether track2 has a visible clip under the
+                            // same playhead that could be shown instead.
+                            // Returns true only when both tracks
+                            // simultaneously have "nothing to show" —
+                            // the screen should go fully black
                             hideVideo: {
                                 var _hv = clipStates._hidden
                                 if (!cppTimeline || !clipStates)
@@ -1170,6 +1290,10 @@ QtObject {
                                 return true // оба пусты/скрыты - чёрный экран
                             }
                             // hideTrack1Video: скрыть только videoOutput1 (track1), track2 остаётся
+                            // Unlike hideVideo above — doesn't consider
+                            // track2 at all, just forwards track1's state
+                            // as-is (used for independently controlling
+                            // compositing layer visibility in VideoPlayer/C++)
                             hideTrack1Video: {
                                 var _hv2 = clipStates._hidden
                                 if (!cppTimeline || !clipStates)
@@ -1185,6 +1309,11 @@ QtObject {
                                 return false
                             }
                             // Per-track audio muting: каждый трек глушится независимо
+                            // A track's audio is muted for EITHER of two
+                            // reasons: an explicit "hide audio" (isAudioHidden)
+                            // OR a specific clip's mute (isMuted) — two
+                            // different menu items with different semantics,
+                            // but both must ultimately result in silence
                             hideAudio1: {
                                 var _mv1 = clipStates.muteVersion
                                 var _ha1 = clipStates._hidden
@@ -1221,6 +1350,15 @@ QtObject {
                             }
 
                             // Обновляем playhead — только UI, не пишем в C++ во время воспроизведения
+                            // The 0.05s threshold filters out micro-jitter
+                            // from C++ (don't refresh the UI on every
+                            // insignificant change). Writing back to
+                            // cppTimeline.currentTime is only allowed
+                            // while paused — during playback C++ drives
+                            // time itself, and writing back would trigger
+                            // seekTo → FrameCache reset → an unnecessary
+                            // re-decode (see the README's "key design
+                            // decisions" section)
                             onTimePositionChanged: time => {
                                                        if (Math.abs(
                                                                playbackManager.currentTime
@@ -1273,6 +1411,9 @@ QtObject {
                                     playbackManager.currentTime = t
                                     if (playbackManager.isPlaying) {
                                         // Перезапускаем с новой позиции
+                                        // (C++ doesn't support seeking "on
+                                        // the fly" during playback — same
+                                        // pattern as in VideoPlayer.qml)
                                         cppTimeline.startPlayback(
                                             t, playbackManager.playbackSpeed)
                                     } else {
@@ -1282,6 +1423,8 @@ QtObject {
 
                         onSpeedChanged: speed => {
                                             playbackManager.playbackSpeed = speed
+                                            // Changing speed on the fly —
+                                            // the same restart pattern as seek above
                                             if (playbackManager.isPlaying)
                                             cppTimeline.startPlayback(
                                                 playbackManager.currentTime,
@@ -1298,6 +1441,10 @@ QtObject {
                         }
 
                         onCutClicked: {
+                            // cutKeyPressed — a debounce flag shared with
+                            // the "C" keyboard shortcut further down the
+                            // file: without it, a fast repeated click/press
+                            // could call splitClip twice in a row
                             if (!root.cutKeyPressed) {
                                 root.cutKeyPressed = true
                                 var t = playbackManager.currentTime
@@ -1359,6 +1506,10 @@ QtObject {
                                        }
 
                         // *** Получаем выбор клипа снизу вверх: VideoClip - Track - Timeline - main ***
+                        // Clicking an already-selected clip clears the
+                        // selection (toggle) — so the user can click empty
+                        // timeline space OR click the clip again to remove
+                        // the selection border
                         onClipSelected: id => {
                                             selectionManager.selectedClipId
                                             = (selectionManager.selectedClipId === id) ? -1 : id
@@ -1373,6 +1524,15 @@ QtObject {
                                                     id)
                                             }
                         //  ДОБАВИТЬ ЭТИ ОБРАБОТЧИКИ (после onEffectsRequested):
+                        // Fills menuContext with up-to-date clip data
+                        // (including the current isMuted — VideoClip
+                        // doesn't pass it directly, so it has to be looked
+                        // up by id among the track's clips), then converts
+                        // the click's global screen coordinates into the
+                        // window's contentItem local coordinates
+                        // (mapFromGlobal) — Menu.popup() expects
+                        // coordinates in the parent's coordinate system
+                        // (Overlay.overlay), not screen coordinates
                         onShowVideoContextMenu: (clipId, track, clipName, x, y) => {
                                                     menuContext.clipId = clipId
                                                     menuContext.track = track
@@ -1420,6 +1580,10 @@ QtObject {
 
         // ГОРЯЧИЕ КЛАВИШИ
         // Все Shortcut находятся в Window root - cutKeyPressed доступен без проблем
+        // J/L vs Left/Right — two different seek step sizes: J/L jump by
+        // a "large" interval of 5s×speed (mirroring the seek buttons in
+        // PlaybackControls), while Left/Right move by 0.033s (~1 frame at
+        // 30fps) for frame-accurate navigation
         Shortcut {
             sequence: "Space"
             onActivated: playbackManager.isPlaying = !playbackManager.isPlaying
@@ -1508,6 +1672,8 @@ QtObject {
         }
 
         // C — разрезать выделенный клип по playhead
+        // Mirrors onCutClicked from PlaybackControls (same cutKeyPressed
+        // debounce) — two different ways to trigger the same action
         Shortcut {
             sequence: "C"
             onActivated: {
@@ -1569,6 +1735,9 @@ QtObject {
                              10, playbackManager.zoomLevel - 20)
         }
 
+        // Resets cutKeyPressed 200ms after a cut — long enough to ignore
+        // OS key autorepeat, but short enough not to block the user from
+        // making a new deliberate cut
         Timer {
             id: cutDebounceTimer
             interval: 200

@@ -3,6 +3,20 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import "../theme.js" as Theme
 
+/**
+ * Timeline
+ * --------
+ * The main timeline component: two clip tracks, a time ruler, a playhead
+ * with click/drag seeking, and mouse-wheel zoom (Ctrl+scroll). The
+ * component itself holds no clip model — it comes from C++
+ * (cppTimeline.getClipsForTrack) and is cached in track1Clips/track2Clips,
+ * so each Track can be handed the neighboring track's clips for
+ * cross-track snap (the magnet can "grab" clip edges from either track).
+ *
+ * Clip selection is passed down the component chain
+ * (Timeline → Track → VideoClip) via the selectedClipId property rather
+ * than global state — keeping the UI declarative.
+ */
 Rectangle {
     id: root
     color: Theme.timelineBackground
@@ -27,6 +41,9 @@ Rectangle {
             console.log("🧲 Snap:", snapEnabled ? "ВКЛ" : "ВЫКЛ")
     }
 
+    // Refresh the local clip cache on any change on the C++ side (adding,
+    // removing, or moving a clip affects both tracks because of
+    // cross-track snap, so we re-read both at once)
     Connections {
         target: cppTimeline
         function onClipsChanged() {
@@ -45,6 +62,8 @@ Rectangle {
     // Выделение клипов через property-цепочку (main → Timeline → Track → VideoClip)
     property int selectedClipId: -1
     property var clipStates: null
+    // Context of the last opened context menu — needed so menu items
+    // (e.g. mute) know which clip they should apply to
     property int _ctxClipId: -1
     property int _ctxTrack: 1
     property bool _ctxIsMuted: false
@@ -57,6 +76,9 @@ Rectangle {
     signal showVideoContextMenu(int clipId, int track, string clipName, real x, real y)
     signal showAudioContextMenu(int clipId, int track, string clipName, bool isMuted, real x, real y)
 
+    // zoomLevel is an arbitrary unit (percent-like), pixelsPerSecond is the
+    // actual drawing scale; the conversion is fixed as /10, i.e.
+    // zoomLevel=100 corresponds to 10 pixels per second
     onZoomLevelChanged: {
         pixelsPerSecond = zoomLevel / 10
     }
@@ -71,6 +93,8 @@ Rectangle {
         function onClipsChanged() {
             if (DEBUG_MODE)
                 console.log("📋 Clips changed")
+            // Clear selection on any change to the clip set — the
+            // selected clip may have been removed or moved
             root.clipSelected(-1)
         }
     }
@@ -95,7 +119,8 @@ Rectangle {
         anchors.fill: parent
         spacing: 0
 
-        // Левая панель с номерами дорожек
+        // Left panel with track numbers — static, doesn't scroll along
+        // with the timeline content (unlike the Flickable on the right)
         Rectangle {
             Layout.preferredWidth: 120
             Layout.fillHeight: true
@@ -149,7 +174,8 @@ Rectangle {
             }
         }
 
-        // Область таймлайна
+        // Timeline area: a horizontally scrollable strip with the time
+        // ruler and the clip tracks
         Flickable {
             id: timelineFlickable
             Layout.fillWidth: true
@@ -170,7 +196,11 @@ Rectangle {
                 }
             }
 
-            // Масштабирование колесиком мыши (Ctrl+scroll)
+            // Mouse-wheel zoom (Ctrl+scroll). The MouseArea intentionally
+            // accepts no mouse buttons (acceptedButtons: NoButton) — it
+            // exists only to intercept the wheel event; a regular scroll
+            // (without Ctrl) isn't captured and passes through to the
+            // Flickable as usual
             MouseArea {
                 anchors.fill: parent
                 propagateComposedEvents: true
@@ -205,6 +235,10 @@ Rectangle {
                 }
 
                 // используем root.pixelsPerSecond и root.snapEnabled
+                // One Track per track (2 total). Each Track is handed the
+                // NEIGHBORING track's clips (otherTrackClips) — this is
+                // the cross-track snap mechanism: the magnet "sees" clip
+                // boundaries on the other track while dragging
                 Repeater {
                     model: 2
 
@@ -255,7 +289,9 @@ Rectangle {
                                            }
                                        }
 
-                        // Когда клип подвинули
+                        // Клип подвинули — Track already computed the new
+                        // position (accounting for snap); here we just
+                        // forward the result to C++
                         onClipMoved: (clipId, newTime) => {
                                          if (cppTimeline) {
                                              cppTimeline.moveClip(clipId,
@@ -265,6 +301,11 @@ Rectangle {
                                      }
                         onEffectsRequested: id => root.effectsRequested(id)
 
+                        // Context menu (right-click on a clip): save the
+                        // context (which clip, which track, its name and
+                        // mute status) into the _ctx* properties for later
+                        // use by menu items, then emit the signal upward —
+                        // main.qml decides which menu (video/audio) to show
                         onContextMenuRequested: (id, isVideo, gx, gy) => {
                                                     // Сохраняем контекст
                                                     var clips = cppTimeline ? cppTimeline.getClipsForTrack(index + 1) : []
@@ -302,7 +343,9 @@ Rectangle {
                 }
             }
 
-            // Линия воспроизведения (Playhead)
+            // Playhead: its position is computed directly from currentTime
+            // (an x-binding), so it's always visually in sync with the
+            // actual time, with no manual updates needed
             Rectangle {
                 id: playhead
                 x: root.currentTime * root.pixelsPerSecond
@@ -312,7 +355,8 @@ Rectangle {
                 color: Theme.rubyPrimary
                 z: 1000
 
-                // Треугольник сверху
+                // Triangle on top — drawn via Canvas rather than a separate
+                // rotated Item, to get the exact "flag" shape of the playhead
                 Rectangle {
                     anchors.horizontalCenter: parent.horizontalCenter
                     y: -10
@@ -359,12 +403,18 @@ Rectangle {
                 }
 
                 Behavior on x {
+                    // The x animation is disabled while dragging the
+                    // playhead with the mouse — otherwise it would "lag"
+                    // behind the cursor
                     enabled: !playheadMouseArea.drag.active
                     NumberAnimation {
                         duration: 50
                     }
                 }
             }
+            // Click on the ruler zone — quick seek to the clicked position;
+            // the zone is limited to 40px height (ruler only, not the
+            // whole timeline height, so it doesn't interfere with clip selection)
             MouseArea {
                 id: playheadMouseArea
                 anchors.top: parent.top
@@ -383,6 +433,8 @@ Rectangle {
         }
     }
 
+    // Playhead timecode formatting, with frames (HH:MM:SS, or
+    // MM:SS:frames at 30 fps — for precise frame-accurate navigation)
     function formatTime(seconds) {
         var hours = Math.floor(seconds / 3600)
         var mins = Math.floor((seconds % 3600) / 60)
@@ -398,6 +450,8 @@ Rectangle {
         return num < 10 ? "0" + num : String(num)
     }
 
+    // Track label in the left panel: track number + V/A icons denoting
+    // video and audio support on the track
     component TrackLabel: Rectangle {
         property int trackNumber: 1
         color: Theme.panelBackground

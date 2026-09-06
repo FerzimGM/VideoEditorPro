@@ -1,3 +1,21 @@
+/**
+ * ClipEffectsDialog
+ * -----------------
+ * A separate window (not a modal dialog over main.qml, but its own
+ * Window — Qt.WindowStaysOnTopHint) showing the list of active effects
+ * for the selected clip, grouped into three categories: Video / Audio /
+ * Transitions. The dialog itself contains no effect-editing widgets
+ * (sliders, etc.) — applying effects apparently happens elsewhere in the
+ * UI, and this dialog is an overview/summary with the ability to remove
+ * any single effect or reset everything at once.
+ *
+ * All data comes from C++ (cppTimeline.getClipEffects) as a flat
+ * key→value map; the QML side decides which effects to show (isNeutral
+ * filters out effects at their "default" value, so the list only shows
+ * effects that are actually applied), which category to put them in
+ * (effectMeta[key].cat), and how to format the value for display
+ * (effectMeta[key].fmt).
+ */
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
@@ -25,7 +43,12 @@ Window {
     property var transitionEffects: []
     property int totalCount: videoEffects.length + audioEffects.length + transitionEffects.length
 
-    //  Мета-данные всех эффектов
+    //  Мета-данные всех эффектов: a lookup table of key → {icon, label,
+    // category, value-formatting function}. The single source of truth
+    // for display — the rest of the dialog only reads from effectMeta,
+    // no labels/icons are duplicated anywhere else.
+    // The keys (chroma_key, tint_hue, transition_in/out, etc.) match the
+    // effect names used in C++ (Timeline::setClipEffect and friends)
     readonly property var effectMeta: ({
                                            "brightness": {
                                                "icon": "☀️",
@@ -283,6 +306,15 @@ Window {
                                            }
                                        })
 
+    // Determines whether an effect's value is "neutral" (the effect is
+    // effectively off/not applied) — such effects aren't shown in the
+    // list. Thresholds are tailored to each effect's semantics (0 for
+    // additive types like brightness, 1.0 for multiplicative types like
+    // contrast/saturation/volume, 0.5 for boolean types like grayscale/invert).
+    // tint_strength, chroma_threshold, chroma_smoothness, _frameIdx, _uid
+    // are always considered neutral: they're helper parameters of other
+    // effects (tint_hue, chroma_key) or internal fields, and don't get
+    // their own row in the list
     function isNeutral(key, val) {
         if (key === "brightness" && Math.abs(val) < 0.01)
             return true
@@ -318,6 +350,10 @@ Window {
     }
 
     // ===== API =====
+    // Opens the dialog for a specific clip: looks up its name among the
+    // clips of both tracks (C++ stores clips flat per track, there's no
+    // direct lookup by id), centers the window relative to parentWindow,
+    // and requests focus
     function openForClip(id) {
         clipId = id
         clipName = ""
@@ -343,6 +379,11 @@ Window {
         requestActivate()
     }
 
+    // Re-reads the clip's effects from C++ and sorts them into the three
+    // display categories. Transitions (transition_in/out) are collected
+    // separately from the main loop and merged into at most 2 rows
+    // (in/out), since transition_duration is a shared parameter for both
+    // directions and shouldn't get its own row
     function refreshEffects() {
         if (!cppTimeline || clipId < 0) {
             videoEffects = []
@@ -409,6 +450,11 @@ Window {
         transitionEffects = tr
     }
 
+    // Removes an effect along with its dependent helper parameters:
+    // chroma_key also removes chroma_threshold/chroma_smoothness,
+    // tint_hue removes tint_strength. For transitions, duration is only
+    // removed once BOTH directions (in and out) have been removed, since
+    // they share a single duration parameter
     function removeEffect(key) {
         if (!cppTimeline || clipId < 0)
             return
@@ -434,6 +480,9 @@ Window {
         refreshEffects()
     }
 
+    // Full reset: a hard-coded list of every possible effect key (matches
+    // effectMeta's keys plus helper parameters) — removes them all at
+    // once, without relying on the current videoEffects/audioEffects state
     function resetAll() {
         if (!cppTimeline || clipId < 0)
             return
@@ -450,6 +499,9 @@ Window {
     }
 
     // ===== РАЗМЕТКА =====
+    // Since the window is frameless (no native title bar), dragging the
+    // dialog by its header is done manually via a MouseArea in the top
+    // panel — the same pattern used in TopMenuBar.qml
     Rectangle {
         anchors.fill: parent
         color: Theme.backgroundColor
@@ -594,6 +646,11 @@ Window {
             }
 
             // ── Тело ──
+            // Three structurally identical blocks (VIDEO / AUDIO /
+            // TRANSITIONS): a colored section header + a Repeater of
+            // EffectRow entries. A section is hidden entirely (visible)
+            // if it has no effects — so empty categories don't take up
+            // space in the list
             Rectangle {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
@@ -868,6 +925,11 @@ Window {
     // ═══════════════════════════════════
     //  КОМПОНЕНТ: Строка одного эффекта
     // ═══════════════════════════════════
+    // Generic row for any effect category: icon + name + value badge +
+    // delete button. effectData comes from the Repeater (see
+    // refreshEffects) and already carries the display-ready strings
+    // (label/icon/valStr), pre-computed earlier — the row itself does no
+    // formatting, only rendering
     component EffectRow: Rectangle {
         id: efRowRoot
         property var effectData: null

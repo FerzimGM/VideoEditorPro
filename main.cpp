@@ -9,38 +9,38 @@
 
 int main(int argc, char *argv[])
 {
-    // КРИТИЧНО! Форсируем OpenGL через переменную окружения
-    // Это работает даже если setGraphicsApi не срабатывает
+    // Force the OpenGL backend via environment variable. This takes
+    // effect even in cases where setGraphicsApi() alone doesn't stick.
     qputenv("QSG_RHI_BACKEND", "opengl");
 
-    // КРИТИЧНО! Порядок
-    // 1. Сначала устанавливаем Graphics API
+    // Order matters here:
+    // 1. Set the graphics API before the application object exists.
     QQuickWindow::setGraphicsApi(QSGRendererInterface::OpenGL);
 
-    // 2. Потом создаём приложение
+    // 2. Create the application.
     QGuiApplication app(argc, argv);
 
-    // 3. Потом стиль
+    // 3. Apply the QML style.
     QQuickStyle::setStyle("Basic");
 
     app.setOrganizationName("MyDiplomWork");
     app.setApplicationName("VideoEditor Pro");
 
-    // ── C++ объект таймлайна ──────────────────────────────────────────────
+    // ── C++ timeline object ────────────────────────────────────────────
     Timeline timeline;
 
-    // ── Image Provider для live-превью кадров ────────────────────────────
-    // QQmlEngine ВЛАДЕЕТ провайдером (удаляет при деструкции engine).
-    // Timeline хранит не-владеющий указатель.
+    // ── Image provider for live preview frames ───────────────────────
+    // The QQmlEngine takes ownership of the provider and deletes it when
+    // the engine is destroyed. Timeline only keeps a non-owning pointer.
     auto* frameProvider = new EffectImageProvider();
     timeline.setImageProvider(frameProvider);
 
     QQmlApplicationEngine engine;
 
-    // Регистрация: в QML доступно "image://effects/..."
+    // Registers the provider so QML can use "image://effects/...".
     engine.addImageProvider("effects", frameProvider);
 
-    // Регистрация cppTimeline
+    // Expose the Timeline instance to QML as "cppTimeline".
     engine.rootContext()->setContextProperty("cppTimeline", &timeline);
 
     engine.rootContext()->setContextProperty("DEBUG_MODE",
@@ -51,7 +51,7 @@ int main(int argc, char *argv[])
 #endif
     );
 
-    qDebug() << "✅ Timeline + EffectImageProvider зарегистрированы";
+    qDebug() << "Timeline + EffectImageProvider зарегистрированы";
 
     const QUrl url(QStringLiteral("qrc:/main.qml"));
     QObject::connect(&engine, &QQmlApplicationEngine::objectCreated,

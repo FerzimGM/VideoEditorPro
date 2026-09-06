@@ -6,14 +6,18 @@
 #include <QMutex>
 #include <QMutexLocker>
 
+// Bridges decoded/composited frames from the C++ side to QML via the
+// "image://effects/..." URL scheme, so the preview Image element can
+// simply bind its source and receive live frame updates.
 class EffectImageProvider : public QQuickImageProvider
 {
 public:
     EffectImageProvider()
         : QQuickImageProvider(QQuickImageProvider::Image)
     {
-        // Инициализируем чёрным кадром 1280×720 чтобы не было ошибки
-        // "Failed to get image from provider" при старте до первого клипа
+        // Start with a black 1280x720 placeholder so QML doesn't report
+        // "Failed to get image from provider" before the first frame
+        // (or the first clip) is available.
         m_frame = QImage(1280, 720, QImage::Format_RGB888);
         m_frame.fill(Qt::black);
     }
@@ -39,3 +43,4 @@ private:
 };
 
 #endif // EFFECTIMAGEPROVIDER_H
+

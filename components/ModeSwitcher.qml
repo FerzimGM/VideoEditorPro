@@ -3,6 +3,15 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import "../theme.js" as Theme
 
+/**
+ * ModeSwitcher
+ * ------------
+ * Panel for switching the application's working mode: "Editing" vs "Export".
+ * Purely presentational component — it doesn't perform the mode switch
+ * itself, it only holds the current selection (currentMode) and notifies
+ * its owner via the modeChanged() signal. The actual mode-switch logic
+ * (which panels to show/hide) lives higher up the tree, in the parent.
+ */
 Rectangle {
     id: root
     color: Theme.panelBackground
@@ -10,8 +19,8 @@ Rectangle {
     border.color: Theme.borderLight
     border.width: 1
 
-    property int currentMode: 0
-    signal modeChanged(int mode)
+    property int currentMode: 0     // 0 = editing mode, 1 = export mode
+    signal modeChanged(int mode)    // emitted when any mode button is clicked
 
     ColumnLayout {
         anchors.fill: parent
@@ -38,6 +47,8 @@ Rectangle {
             }
         }
 
+        // Mode buttons; selection (isSelected) is derived by comparing
+        // against root.currentMode, so only one button highlights as active
         ModeButton {
             text: "РЕДАКТИРОВАНИЕ"
             icon: "⬚"
@@ -61,6 +72,8 @@ Rectangle {
         Item { Layout.fillHeight: true }
     }
 
+    // Local inline component for a mode button: icon + label, with
+    // selection/hover highlighting and an animated color transition
     component ModeButton: Rectangle {
         property string text: ""
         property string icon: ""
@@ -69,13 +82,14 @@ Rectangle {
 
         Layout.fillWidth: true
         Layout.preferredHeight: 100
-        
+
+        // Background state priority: selected > hovered > default
         color: {
             if (isSelected) return Theme.selectedColor
             if (mouseArea.containsMouse) return Theme.hoverColor
             return Theme.buttonBackground
         }
-        
+
         radius: Theme.borderRadius
         border.color: isSelected ? Theme.rubyPrimary : Theme.borderLight
         border.width: isSelected ? 2 : 1

@@ -6,7 +6,7 @@
 #include <algorithm>
 #include <cmath>
 
-//  RenderWorker — выполняется в фоновом потоке
+// RenderWorker runs on a background thread.
 
 // Forward declarations for Effects functions used before namespace definition
 namespace Effects {
@@ -38,7 +38,7 @@ void RenderWorker::process()
     m_cancelled = false;
 
     if (m_clips.isEmpty()) {
-        emit errorOccurred("Нет клипов для рендеринга");
+        emit errorOccurred("No clips to render");
         emit renderFinished(false);
         return;
     }
@@ -54,11 +54,11 @@ void RenderWorker::process()
     encoder.setFrameRate(m_fps);
     encoder.setBitrate(m_bitrate);
     encoder.setAudioEnabled(true);
-    encoder.setFormat(m_format); // явный формат — не зависит от расширения файла
+    encoder.setFormat(m_format); // Explicit format, independent of the file extension.
 
     if (!encoder.createOutputFile(m_outputPath, m_outputWidth, m_outputHeight))
     {
-        emit errorOccurred("Не могу создать выходной файл");
+        emit errorOccurred("Failed to create output file");
         emit renderFinished(false);
         return;
     }
@@ -68,16 +68,18 @@ void RenderWorker::process()
     int currentFrame = 0;
     int lastPercent = -1;
 
-    // Аудио-счётчик: точное число сэмплов вместо float * SR.
-    // Старый код: int totalFloats = (int)(frameTime * SR * CH) → целочисленное усечение
-    // теряло ~2 сэмпла на кадр → аудио короче видео → "аудио кончается раньше".
+    // Audio sample counter: computed as an exact sample count rather than
+    // float * SR. Truncating int totalFloats = (int)(frameTime * SR * CH)
+    // drops roughly 2 samples per frame, so the audio track ends up
+    // shorter than the video and finishes early.
     int64_t audioSamplesWritten = 0;
     const int SR = MediaDecoder::OUTPUT_SAMPLE_RATE;
     const int CH = MediaDecoder::OUTPUT_CHANNELS;
 
     for (int f = 0; f < totalFrames && !m_cancelled; ++f)
     {
-        // Время вычисляется от номера кадра — без float-накопления
+        // Derive time from the frame index rather than accumulating a
+        // float each iteration, to avoid compounding rounding error.
         double time = (double)f / m_fps;
 
         QImage frame = compositeVideoAt(time);
@@ -89,23 +91,23 @@ void RenderWorker::process()
 
         if (!encoder.writeVideoFrame(frame))
         {
-            emit errorOccurred("Ошибка записи видеокадра");
+            emit errorOccurred("Video frame write error");
             encoder.finish();
             closeAllDecoders();
             emit renderFinished(false);
             return;
         }
 
-        // Аудио: точное число сэмплов для этого кадра.
-        // Для 30fps: кадр 0 → 0..1470, кадр 1 → 1470..2940, ...
-        // Никакой потери от float → int.
+        // Audio: exact sample count for this frame.
+        // At 30fps: frame 0 -> samples 0..1470, frame 1 -> 1470..2940, ...
+        // No float -> int truncation loss.
         int64_t audioSampleEnd = (int64_t)((f + 1) / m_fps * SR + 0.5);
         int samplesThisFrame = (int)(audioSampleEnd - audioSamplesWritten);
         int floatsThisFrame  = samplesThisFrame * CH;
         double audioDuration = (double)samplesThisFrame / SR;
 
         QVector<float> audio = mixAudioAt(time, audioDuration);
-        // Гарантируем правильный размер — pad или trim
+        // Guarantee the exact expected size — pad or trim as needed.
         if (audio.size() < floatsThisFrame)
             audio.resize(floatsThisFrame, 0.0f);
         else if (audio.size() > floatsThisFrame)
@@ -196,8 +198,10 @@ QImage RenderWorker::compositeVideoAt(double time)
         frame = frame.scaled(m_outputWidth, m_outputHeight, Qt::KeepAspectRatio, Qt::SmoothTransformation);
         if (frame.width() == m_outputWidth && frame.height() == m_outputHeight) return frame;
 
-        // Letterboxing: если ARGB32 (хромакей) — canvas тоже ARGB32 с прозрачным фоном.
-        // Без этого: RGB888 canvas уничтожал альфа-канал → хромакей не работал.
+        // Letterboxing: if the source has an alpha channel (chroma key),
+        // the canvas must be ARGB32 with a transparent background too —
+        // an RGB888 canvas would discard the alpha channel and break
+        // chroma key compositing downstream.
         QImage::Format canvasFmt = hasAlpha ? QImage::Format_ARGB32 : QImage::Format_RGB888;
         QImage canvas(m_outputWidth, m_outputHeight, canvasFmt);
         canvas.fill(hasAlpha ? qRgba(0, 0, 0, 0) : qRgb(0, 0, 0));
@@ -205,7 +209,7 @@ QImage RenderWorker::compositeVideoAt(double time)
         int dx = (m_outputWidth  - frame.width())  / 2;
         int dy = (m_outputHeight - frame.height()) / 2;
 
-        // Используем QPainter для корректного копирования с альфой
+        // Copy scanlines directly to preserve the alpha channel correctly.
         for (int y = 0; y < frame.height(); ++y) {
             const uchar* src = frame.constScanLine(y);
             uchar* dst = canvas.scanLine(y + dy);
@@ -215,7 +219,7 @@ QImage RenderWorker::compositeVideoAt(double time)
         return canvas;
     };
 
-    //  Вычислить прогресс перехода для клипа
+    // Compute a clip's transition progress (0..1).
     auto transitionProgress = [&](const TimelineClip* clip, bool forIn) -> float
     {
         if (!clip) return -1.0f;
@@ -236,8 +240,8 @@ QImage RenderWorker::compositeVideoAt(double time)
         }
     };
 
-    // Получить тип перехода (int-enum)
-    // Хранится как числа: 0=none,1=fade,2=wipe_right,3=wipe_left,4=zoom_in,5=zoom_out,6=flash
+    // Look up the transition type (stored as an int enum):
+    // 0=none, 1=fade, 2=wipe_right, 3=wipe_left, 4=zoom_in, 5=zoom_out, 6=flash
     auto transitionType = [&](const TimelineClip* clip, bool forIn) -> int
     {
         if (!clip) return 0;
@@ -245,7 +249,7 @@ QImage RenderWorker::compositeVideoAt(double time)
         return static_cast<int>(clip->effects.value(key, 0.0));
     };
 
-    // Применить переход к кадру
+    // Apply a transition to a frame.
     auto applyTransition = [&](QImage frame, const TimelineClip* clip, bool forIn) -> QImage
     {
         float prog = transitionProgress(clip, forIn);
@@ -264,7 +268,7 @@ QImage RenderWorker::compositeVideoAt(double time)
         }
     };
 
-    // Получить и обработать кадры дорожек
+    // Fetch and process each track's frame.
     QImage frame1, frame2;
     const TimelineClip* c1 = nullptr;
     const TimelineClip* c2 = nullptr;
@@ -275,7 +279,7 @@ QImage RenderWorker::compositeVideoAt(double time)
         QImage raw = decodeVideoFrame(clip1, time);
         if (!raw.isNull())
         {
-            frame1 = applyClipEffects(raw, *clip1); // может вернуть ARGB32 (хромакей)
+            frame1 = applyClipEffects(raw, *clip1); // May return ARGB32 (chroma key applied).
             frame1 = scaleFrame(frame1);
         }
     }
@@ -292,21 +296,24 @@ QImage RenderWorker::compositeVideoAt(double time)
         }
     }
 
-    // Композитинг: Track2 — фон, Track1 — основной слой сверху
+    // Compositing: Track 2 is the background, Track 1 is the primary
+    // layer on top.
     //
-    // Логика слоёв:
-    //    Только Track1 - показываем Track1
-    //    Только Track2 - показываем Track2
-    //    Track1 + Track2 (нет α) - Track2 как фон, Track1 поверх целиком
-    //    Track1 (ARGB, хромакей) - попиксельный альфа-блендинг над Track2
+    // Layering rules:
+    //   Track 1 only          -> show Track 1.
+    //   Track 2 only          -> show Track 2.
+    //   Track 1 + Track 2,
+    //   no alpha on Track 1   -> Track 2 as background, Track 1 fully opaque on top.
+    //   Track 1 has alpha
+    //   (chroma key)          -> per-pixel alpha blend of Track 1 over Track 2.
     //
     QImage result;
 
     auto alphaBlend = [&](QImage fg, QImage bg) -> QImage
     {
-        // fg — ARGB32 (с альфой от хромакея), bg — фон
+        // fg is ARGB32 (alpha from chroma key), bg is the background frame.
         QImage b = bg.convertToFormat(QImage::Format_ARGB32);
-        QImage f = fg; // уже ARGB32
+        QImage f = fg; // Already ARGB32.
         if (f.size() != b.size())
             f = f.scaled(b.size(), Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
         QImage out(b.size(), QImage::Format_RGB888);
@@ -330,11 +337,11 @@ QImage RenderWorker::compositeVideoAt(double time)
 
     if (!frame1.isNull() && !frame2.isNull()) {
         if (f1HasAlpha) {
-            // Хромакей: track1 (прозрачный FG) над track2 (фон)
+            // Chroma key: track 1 (transparent foreground) over track 2 (background).
             result = alphaBlend(frame1, frame2);
         } else {
-            // Оба непрозрачны: track2 фон, track1 полностью сверху
-            // (track2 видна только там где нет track1 по времени)
+            // Both opaque: track 2 as background, track 1 fully on top.
+            // (Track 2 is only visible where track 1 has no clip active.)
             result = frame1.convertToFormat(QImage::Format_RGB888);
         }
     } else if (!frame1.isNull()) {
@@ -345,8 +352,9 @@ QImage RenderWorker::compositeVideoAt(double time)
         return QImage();
     }
 
-    // ── Переходы применяются к каждому кадру ДО финального результата ──
-    // переходы применяем к frame1/frame2 отдельно, потом пересобираем.
+    // ── Transitions are applied to each frame before the final composite ──
+    // Transitions run on frame1/frame2 individually, and the composite is
+    // then rebuilt from the transitioned frames.
     bool hadTrans = false;
     if (c1 && !frame1.isNull()) {
         QImage f1t = frame1;
@@ -371,7 +379,7 @@ QImage RenderWorker::compositeVideoAt(double time)
     }
     if (hadTrans)
     {
-        // Пересобираем result с обновлёнными кадрами
+        // Rebuild the composite using the transitioned frames.
         if (!frame1.isNull() && !frame2.isNull()) {
             result = (frame1.format()==QImage::Format_ARGB32)
                      ? alphaBlend(frame1, frame2)
@@ -416,15 +424,17 @@ QImage RenderWorker::decodeVideoFrame(TimelineClip* clip, double timelineTime)
 
     QImage frame;
 
-    // ── PTS-синхронизированное чтение ────────────────────────────────────
-    // Проблема: getNextFrame возвращает кадры с PTS исходника.
-    // Если fps рендера (30) ≠ fps исходника (29.97), getNextFrame
-    // возвращает кадры через 33.37мс, но рендер ждёт через 33.33мс.
-    // За 1000 кадров дрейф = 0.33с → рассинхрон.
+    // ── PTS-synchronized reading ────────────────────────────────────────
+    // getNextFrame() returns frames timed to the source file's own PTS.
+    // When the render fps (e.g. 30) differs from the source fps (e.g.
+    // 29.97), getNextFrame() yields a frame every 33.37ms while the
+    // renderer advances every 33.33ms. Over 1000 frames that drift adds
+    // up to 0.33s, which is enough to visibly desync.
     //
-    // Решение: после getNextFrame проверяем реальный PTS.
-    // Если декодер отстаёт (PTS < sourceTime) — читаем ещё кадры.
-    // Если декодер впереди — принимаем кадр (следующий запрос подтянется).
+    // Fix: after each getNextFrame() call, check the frame's actual PTS.
+    // If the decoder is behind (PTS < sourceTime), read another frame.
+    // If the decoder is ahead, accept the frame — the next request will
+    // catch up.
 
     bool isSequential = (lastPos >= 0.0 &&
                          sourceTime >= lastPos - frameDur * 0.5 &&
@@ -432,22 +442,22 @@ QImage RenderWorker::decodeVideoFrame(TimelineClip* clip, double timelineTime)
 
     if (isSequential)
     {
-        // Sequential: читаем getNextFrame, корректируя по PTS
+        // Sequential playback: read via getNextFrame(), correcting for PTS drift.
         for (int attempt = 0; attempt < 5; ++attempt)
         {
             frame = decoder->getNextFrame();
             if (frame.isNull()) break;
 
             double pts = decoder->getLastVideoPts();
-            // Если PTS достаточно близко к sourceTime — принимаем
+            // Accept the frame once its PTS is close enough to sourceTime.
             if (pts < 0 || pts >= sourceTime - frameDur * 0.5)
                 break;
-            // PTS отстаёт — пропускаем кадр, читаем следующий
+            // PTS still behind — discard this frame and read the next one.
             frame = QImage();
         }
     }
 
-    // Если sequential не дал результат — точный seek
+    // If the sequential path didn't produce a frame, fall back to an exact seek.
     if (frame.isNull())
     {
         frame = decoder->getFrameAt(sourceTime);
@@ -486,9 +496,9 @@ QVector<float> RenderWorker::decodeAudioChunk(TimelineClip* clip,
                                               double timelineTime,
                                               double duration)
 {
-    // PER-CLIP KEY — уникален для каждого разрезанного клипа.
-    // Без этого два клипа из одного файла делили один декодер →
-    // m_audioOverflow и m_lastAudioPos одного портили аудио другого.
+    // Per-clip key, unique for every split clip. Without this, two clips
+    // sharing the same source file would share a decoder, and one clip's
+    // m_audioOverflow / m_lastAudioPos state would corrupt the other's audio.
     QString key = clip->filepath
                   + "|" + QString::number(clip->startTime, 'f', 4)
                   + "|" + QString::number(clip->trimStart, 'f', 4);
@@ -508,7 +518,7 @@ QVector<float> RenderWorker::decodeAudioChunk(TimelineClip* clip,
 
     double sourceTime = clip->sourceTimeAt(timelineTime);
 
-    // Ограничиваем до конца клипа — не читаем за trimEnd
+    // Clamp to the clip's end — never read past trimEnd.
     double timeToEnd = clip->endTime() - timelineTime;
     double readDur = qMin(duration, timeToEnd);
     if (readDur <= 0.0) return QVector<float>();
@@ -516,32 +526,33 @@ QVector<float> RenderWorker::decodeAudioChunk(TimelineClip* clip,
     QVector<float> audio = decoder->decodeAudioRange(sourceTime, readDur);
     if (audio.isEmpty()) return audio;
 
-    // ── Fade-out при приближении к концу клипа ──────────────────────────
-    // Без этого: клип заканчивается → резкий обрыв аудио → щелчок.
-    // Fade-out последних ~3мс убирает щелчок на границе клипов.
+    // ── Fade-out as the clip approaches its end ───────────────────────────
+    // Without this, the clip's audio would end abruptly, producing an
+    // audible click. Fading out the last ~3ms removes that click at
+    // clip boundaries.
     if (timeToEnd < duration && !audio.isEmpty())
     {
-        const int FADE_SAMPLES = 132; // ~3мс при 44100Hz
+        const int FADE_SAMPLES = 132; // =~ 3ms at 44100Hz
         int fadeFloats = qMin(FADE_SAMPLES * 2, audio.size());
         int fadeStart = audio.size() - fadeFloats;
         for (int i = 0; i < fadeFloats; ++i)
         {
-            float t = 1.0f - (float)i / (float)fadeFloats; // 1.0 → 0.0
+            float t = 1.0f - (float)i / (float)fadeFloats; // 1.0 -> 0.0
             audio[fadeStart + i] *= t;
         }
     }
 
-    // Дополнить тишиной до полного размера фрейма если клип кончился раньше
+    // Pad with silence to a full frame's worth if the clip ended early.
     int wantFloats = static_cast<int>(duration * 44100 * 2 + 0.5);
     if (audio.size() < wantFloats)
         audio.resize(wantFloats, 0.0f);
 
     const int SR  = 44100;
     const int CH  = 2;
-    // Per-clip key для буферов эффектов (reverb, echo)
+    // Per-clip key for time-based effect buffers (reverb, echo).
     const QString& clipBufKey = key;
 
-    // ── Вспомогательная лямбда: получить/инициализировать кольцевой буфер ──
+    // ── Helper: fetch or (re)initialize a persistent ring buffer ─────────
     auto getCBuf = [&](const QString& key, int size) -> QVector<float>&
     {
         auto& buf = m_audioDelayBufs[key];
@@ -556,7 +567,7 @@ QVector<float> RenderWorker::decodeAudioChunk(TimelineClip* clip,
     };
 
 
-    // 1. ГРОМКОСТЬ — простое умножение (работает per-chunk)
+    // 1. VOLUME — simple gain multiplication (works per-chunk).
 
     auto it = clip->effects.find("volume");
     if (it != clip->effects.end())
@@ -567,7 +578,7 @@ QVector<float> RenderWorker::decodeAudioChunk(TimelineClip* clip,
     }
 
 
-    // 2. МОНО — усреднение каналов (per-chunk)
+    // 2. MONO — averages the two channels (per-chunk).
 
     it = clip->effects.find("mono");
     if (it != clip->effects.end() && it.value() > 0.5)
@@ -580,14 +591,14 @@ QVector<float> RenderWorker::decodeAudioChunk(TimelineClip* clip,
     }
 
 
-    // 3. РАСШИРЕНИЕ СТЕРЕО — M/S обработка (per-chunk, без задержки)
+    // 3. STEREO WIDEN — Mid/Side processing (per-chunk, no delay involved).
 
     it = clip->effects.find("stereo_widen");
     if (it != clip->effects.end() && it.value() > 0.01)
     {
         float width = static_cast<float>(it.value());
         float midGain  = 1.0f;
-        float sideGain = 1.0f + width * 2.5f; // усиливаем боковую составляющую
+        float sideGain = 1.0f + width * 2.5f; // Boost the side (stereo difference) component.
         for (int i = 0; i + 1 < audio.size(); i += 2)
         {
             float mid  = (audio[i] + audio[i+1]) * 0.5f;
@@ -597,17 +608,18 @@ QVector<float> RenderWorker::decodeAudioChunk(TimelineClip* clip,
         }
     }
 
-    // 4. РЕВЕРБЕРАЦИЯ — comb-filter с КОЛЬЦЕВЫМ БУФЕРОМ (персистентный)
+    // 4. REVERB — comb filter with a persistent ring buffer.
     //    y[n] = x[n]*dry + (x[n] + g*y[n-D])*wet
-    //    Буфер сохраняет состояние между чанками → задержка любой длины работает
+    //    The buffer's state carries over between chunks, so delays of
+    //    any length work correctly across chunk boundaries.
 
     it = clip->effects.find("reverb");
     if (it != clip->effects.end() && it.value() > 0.01)
     {
         double roomSize = it.value();                       // 0..1
-        int delayMs = static_cast<int>(25 + roomSize * 75); // 25..100мс
-        int D = qMax(CH * 2, SR / 1000 * delayMs * CH); // семплов (стерео), min=CH*2
-        float g = static_cast<float>(roomSize * 0.65f); // feedback < 1 → стабильно
+        int delayMs = static_cast<int>(25 + roomSize * 75); // 25..100ms
+        int D = qMax(CH * 2, SR / 1000 * delayMs * CH); // Samples (stereo), min = CH*2.
+        float g = static_cast<float>(roomSize * 0.65f); // Feedback < 1 keeps the filter stable.
         float wet = static_cast<float>(roomSize * 0.45f);
         float dry = 1.0f - wet * 0.6f;
 
@@ -618,23 +630,23 @@ QVector<float> RenderWorker::decodeAudioChunk(TimelineClip* clip,
         {
             float delayed = buf[wp];
             float reverbed = audio[i] + delayed * g;
-            buf[wp] = reverbed;                             // записываем в буфер
+            buf[wp] = reverbed;                             // Store into the ring buffer.
             audio[i] = qBound(-1.0f, audio[i]*dry + reverbed*wet, 1.0f);
             wp = (wp + 1) % D;
         }
     }
 
 
-    // 5. ЭХО — delay line с КОЛЬЦЕВЫМ БУФЕРОМ (персистентный)
+    // 5. ECHO — delay line with a persistent ring buffer.
     //    y[n] = x[n] + feedback * y[n-D]
 
     it = clip->effects.find("echo");
     if (it != clip->effects.end() && it.value() > 0.01)
     {
         double strength  = it.value();                          // 0..1
-        int delayMs = static_cast<int>(150 + strength * 350); // 150..500мс
-        int D = qMax(CH * 2, SR / 1000 * delayMs * CH); // min=CH*2
-        float feedback = static_cast<float>(strength * 0.55f);  // < 1 → затухает
+        int delayMs = static_cast<int>(150 + strength * 350); // 150..500ms
+        int D = qMax(CH * 2, SR / 1000 * delayMs * CH); // min = CH*2.
+        float feedback = static_cast<float>(strength * 0.55f);  // < 1 so the tail decays.
 
         QVector<float>& buf = getCBuf(clipBufKey + "_echo", D);
         int& wp = getPos(clipBufKey + "_echo");
@@ -642,20 +654,20 @@ QVector<float> RenderWorker::decodeAudioChunk(TimelineClip* clip,
         for (int i = 0; i < audio.size(); ++i) {
             float delayed = buf[wp];
             float out = audio[i] + delayed * feedback;
-            buf[wp] = qBound(-1.0f, out, 1.0f);            // запись для следующего цикла
+            buf[wp] = qBound(-1.0f, out, 1.0f);            // Store for the next cycle.
             audio[i] = qBound(-1.0f, out, 1.0f);
             wp = (wp + 1) % D;
         }
     }
 
 
-    // 6. ПИТЧ — ресэмплинг (меняет скорость+тон, простой вариант)
+    // 6. PITCH — resampling-based shift (simple approach; changes speed and tone together).
 
     it = clip->effects.find("pitch");
     if (it != clip->effects.end() && qAbs(it.value()) > 0.1) {
         double semitones = it.value();
         double ratio = std::pow(2.0, semitones / 12.0);
-        int outSize = audio.size(); // сохраняем длину чанка
+        int outSize = audio.size(); // Keep the chunk length unchanged.
         QVector<float> shifted(outSize, 0.0f);
         for (int i = 0; i < outSize; ++i) {
             double srcIdx = i * ratio;
@@ -669,7 +681,7 @@ QVector<float> RenderWorker::decodeAudioChunk(TimelineClip* clip,
     }
 
 
-    // 7. НОРМАЛИЗАЦИЯ — пиковая (per-chunk, с ограничением усиления)
+    // 7. NORMALIZE — peak-based gain (per-chunk, with a gain cap).
 
     it = clip->effects.find("normalize");
     if (it != clip->effects.end() && it.value() > 0.01)
@@ -679,18 +691,18 @@ QVector<float> RenderWorker::decodeAudioChunk(TimelineClip* clip,
         for (float s : audio) peak = qMax(peak, qAbs(s));
         if (peak > 1e-5f)
         {
-            float gain = qMin(target / peak, 6.0f); // не более +6x во избежание шума
+            float gain = qMin(target / peak, 6.0f); // Cap at +6x to avoid amplifying noise.
             for (float& s : audio) s = qBound(-1.0f, s * gain, 1.0f);
         }
     }
 
 
-    // 8. ФЕЙД-ИН / ФЕЙД-АУТ — по позиции клипа
+    // 8. FADE IN / FADE OUT — based on the clip's position on the timeline.
 
     it = clip->effects.find("fade_in");
     if (it != clip->effects.end() && it.value() > 0.01)
     {
-        double fadeFraction = it.value();        // доля длительности клипа
+        double fadeFraction = it.value();        // Fraction of the clip's total duration.
         double clipDur  = clip->duration;
         double posStart = timelineTime - clip->startTime;
         double fadeEnd  = clipDur * fadeFraction;
@@ -730,29 +742,30 @@ QVector<float> RenderWorker::decodeAudioChunk(TimelineClip* clip,
 }
 
 
-//  namespace Effects — свободные функции, доступны всем
-//  (RenderWorker::applyClipEffects + RenderEngine статические методы)
+// namespace Effects — free functions shared by both RenderWorker's
+// per-clip effect pipeline and RenderEngine's static preview methods.
 
 namespace Effects
 {
 
 // ── Alpha-preservation helper ─────────────────────────────────────────────
-// Все функции в этом namespace конвертируют кадр в RGB888 и теряют альфу.
-// После применения хромакея кадр становится ARGB32.
-// Чтобы grayscale/sepia/blur и т.д. не уничтожали альфу — используем этот
-// хелпер: запоминаем альфа-маску ДО эффекта, восстанавливаем ПОСЛЕ.
-// Использование: auto result = preserveAlpha(frame, [&](QImage& f){ f = blur(f, r); });
+// Every effect function in this namespace converts its frame to RGB888,
+// which discards any alpha channel. After chroma key is applied, a frame
+// is ARGB32. To keep effects like grayscale/sepia/blur from destroying
+// that alpha, this helper captures the alpha mask before running the
+// effect and reapplies it afterward.
+// Usage: auto result = preserveAlpha(frame, [&](QImage& f){ f = blur(f, r); });
 template<typename Func>
 static QImage preserveAlpha(const QImage& frame, Func applyEffect)
 {
     if (frame.format() != QImage::Format_ARGB32)
     {
-        // Нет альфы — просто применяем эффект
+        // No alpha channel — just run the effect directly.
         QImage copy = frame;
         applyEffect(copy);
         return copy;
     }
-    // Сохраняем альфа-канал попиксельно
+    // Capture the alpha channel per pixel.
     int w = frame.width(), h = frame.height();
     QVector<uchar> alphaMap(w * h);
     for (int y = 0; y < h; ++y) {
@@ -760,10 +773,10 @@ static QImage preserveAlpha(const QImage& frame, Func applyEffect)
         for (int x = 0; x < w; ++x)
             alphaMap[y * w + x] = (uchar)qAlpha(line[x]);
     }
-    // Применяем эффект (он конвертирует в RGB888)
+    // Run the effect (it converts the frame to RGB888 internally).
     QImage copy = frame;
     applyEffect(copy);
-    // Восстанавливаем альфу: конвертируем результат в ARGB32 и вставляем маску
+    // Restore alpha: convert the result back to ARGB32 and reapply the mask.
     QImage result = copy.convertToFormat(QImage::Format_ARGB32);
     for (int y = 0; y < h; ++y) {
         QRgb* line = reinterpret_cast<QRgb*>(result.scanLine(y));
@@ -1022,25 +1035,25 @@ QImage grain(const QImage& frame, double strength, int frameIndex)
 }
 
 
-// ХРОМАКЕЙ (Green Screen Removal)
+// CHROMA KEY (green screen removal)
 //
-// Алгоритм: цветовое пространство YCbCr
-//   1. Вычисляем «зелёность» пикселя через Cb/Cr хроминанс
-//   2. Если попадает в диапазон зелёного — делаем прозрачным
-//   3. smoothness — размытие края маски (spill suppression)
+// Algorithm, working in an RGB-derived chrominance space:
+//   1. Estimate a pixel's "greenness" from how far G dominates over R and B.
+//   2. If it falls within the green range, make the pixel transparent.
+//   3. smoothness controls edge softening / spill suppression.
 //
-// threshold : 0.05..0.8  (чувствительность, типично 0.3–0.5)
-// smoothness: 0.0..0.3   (размытие границы маски)
+// threshold : 0.05..0.8  (sensitivity; typically 0.3-0.5)
+// smoothness: 0.0..0.3   (mask edge softening)
 //
-// Возвращает ARGB32 — прозрачные пиксели там, где был зелёный фон.
-// compositeVideoAt() затем накладывает Track1 поверх Track2.
+// Returns ARGB32, with transparent pixels wherever the green background was.
+// compositeVideoAt() then composites Track 1 over Track 2 using this alpha.
 
 QImage chromaKey(const QImage& frame, double threshold, double smoothness)
 {
     QImage result = frame.convertToFormat(QImage::Format_ARGB32);
     int w = result.width(), h = result.height();
     float thr  = static_cast<float>(threshold);
-    float soft = static_cast<float>(qMax(smoothness, 0.01)); // зона мягкого края
+    float soft = static_cast<float>(qMax(smoothness, 0.01)); // Width of the soft-edge zone.
 
     for (int y = 0; y < h; ++y)
     {
@@ -1052,31 +1065,33 @@ QImage chromaKey(const QImage& frame, double threshold, double smoothness)
             float g = qGreen(px) / 255.0f;
             float b = qBlue(px)  / 255.0f;
 
-            // YCbCr хроминанс — именно Cb и Cr определяют «цветность»
-            // Зелёный цвет: высокий G, низкий R и B относительно G
-            float greenness = g - qMax(r, b); // > 0 когда G доминирует
+            // Greenness: how much G dominates over R and B.
+            // A strongly green pixel (typical chroma-key background) has
+            // high G and low R/B relative to G.
+            float greenness = g - qMax(r, b); // > 0 when G dominates.
 
             float alpha;
             if (greenness < thr - soft)
             {
-                alpha = 1.0f; // точно не зелёный → оставляем
+                alpha = 1.0f; // Clearly not green — keep it opaque.
             }
             else if (greenness > thr + soft)
             {
-                alpha = 0.0f; // точно зелёный → убираем
+                alpha = 0.0f; // Clearly green — make it fully transparent.
             }
             else
             {
-                // Мягкий переход (anti-aliasing края)
+                // Soft transition (edge anti-aliasing).
                 alpha = 1.0f - (greenness - (thr - soft)) / (2.0f * soft);
                 alpha = qBound(0.0f, alpha, 1.0f);
             }
 
-            // Spill suppression: убираем зелёный отблеск с краёв
-            // Если есть остаточное зеленение — нейтрализуем G каналом
+            // Spill suppression: remove residual green tinting near the
+            // edges of the subject by clamping the green channel toward
+            // the neighboring red/blue values.
             if (alpha > 0.0f && alpha < 1.0f)
             {
-                float spillG = qMin(r, b); // заменяем G средним соседей
+                float spillG = qMin(r, b); // Replace excess green with the min of R/B.
                 r = qBound(0.0f, r, 1.0f);
                 b = qBound(0.0f, b, 1.0f);
                 g = qBound(0.0f, qMin(g, spillG * 1.2f), 1.0f);
@@ -1094,13 +1109,13 @@ QImage chromaKey(const QImage& frame, double threshold, double smoothness)
 }
 
 
-// ПЕРЕХОДЫ — генерация промежуточного кадра
+// TRANSITIONS — intermediate-frame generation.
 //
-// progress: 0.0 (начало перехода) → 1.0 (конец перехода)
-// Все переходы принимают два кадра и возвращают смешанный.
+// progress runs from 0.0 (transition start) to 1.0 (transition end).
+// Every transition function takes two frames and returns a blended one.
 
 
-// Вспомогательная: альфа-смешивание двух кадров
+// Alpha-blends two frames together.
 static QImage blendFrames(const QImage& a, const QImage& b, float alpha)
 {
     QImage fa = a.convertToFormat(QImage::Format_RGB888);
@@ -1118,7 +1133,7 @@ static QImage blendFrames(const QImage& a, const QImage& b, float alpha)
     return result;
 }
 
-// Fade (появление/затухание через чёрный)
+// Fade (through black).
 QImage transitionFade(const QImage& frame, float progress, bool fadeIn)
 {
     QImage black(frame.size(), QImage::Format_RGB888);
@@ -1127,7 +1142,7 @@ QImage transitionFade(const QImage& frame, float progress, bool fadeIn)
                   : blendFrames(frame, black, progress);
 }
 
-// Wipe (шторка)
+// Wipe.
 QImage transitionWipe(const QImage& from, const QImage& to, float progress, bool rightToLeft)
 {
     QImage fa = from.convertToFormat(QImage::Format_RGB888);
@@ -1139,7 +1154,7 @@ QImage transitionWipe(const QImage& from, const QImage& to, float progress, bool
         uchar* lr = result.scanLine(y);
         const uchar* lb = fb.constScanLine(y);
         if (rightToLeft) {
-            // справа налево: правая часть показывает новый кадр
+            // Right to left: the new frame reveals from the right edge.
             int startX = fa.width() - cutX;
             for (int x = startX; x < fa.width(); ++x)
                 for (int c = 0; c < 3; ++c) lr[x*3+c] = lb[x*3+c];
@@ -1151,7 +1166,7 @@ QImage transitionWipe(const QImage& from, const QImage& to, float progress, bool
     return result;
 }
 
-// Zoom In (приближение — следующий кадр появляется из центра)
+// Zoom in/out — the destination frame grows out of (or the source shrinks into) the center.
 QImage transitionZoom(const QImage& from, const QImage& to, float progress, bool zoomIn)
 {
     QImage fa = from.convertToFormat(QImage::Format_RGB888);
@@ -1174,29 +1189,29 @@ QImage transitionZoom(const QImage& from, const QImage& to, float progress, bool
         int srcOff = (startX - ox) * 3;
         memcpy(dst + startX * 3, src + srcOff, (endX - startX) * 3);
     }
-    // Плавное смешивание по краям зума
+    // Smooth cross-fade over the edges of the zoomed region.
     return blendFrames(zoomIn ? fa : result, zoomIn ? result : fb, progress);
 }
 
-// Flash (вспышка — белый кадр на пике)
+// Flash — a white frame at the peak of the transition.
 QImage transitionFlash(const QImage& from, const QImage& to, float progress)
 {
     QImage white(from.size(), QImage::Format_RGB888);
     white.fill(Qt::white);
     if (progress < 0.5f)
     {
-        float t = progress * 2.0f; // 0→1 нарастание к белому
+        float t = progress * 2.0f; // 0->1 ramping toward white.
         return blendFrames(from, white, t);
     } else
     {
-        float t = (progress - 0.5f) * 2.0f; // 0→1 спад от белого
+        float t = (progress - 0.5f) * 2.0f; // 0->1 ramping from white to the destination.
         return blendFrames(white, to, t);
     }
 }
 
 } // namespace Effects
 
-//  RenderWorker — методы эффектов
+// RenderWorker — effect methods.
 
 
 QImage RenderWorker::applyClipEffects(const QImage& frame, const TimelineClip& clip)
@@ -1204,11 +1219,13 @@ QImage RenderWorker::applyClipEffects(const QImage& frame, const TimelineClip& c
     if (clip.effects.isEmpty()) return frame;
     QImage result = frame;
 
-    // ── Хромакей применяется ПОСЛЕДНИМ ──────────────────────────────────
-    // Все визуальные эффекты (brightness, temperature и т.д.) конвертируют
-    // кадр в RGB888. Если хромакей (ARGB32) применить раньше — следующий
-    // эффект уничтожит альфа-канал → зелёный фон остаётся.
-    // Решение: сначала все эффекты (RGB888), потом хромакей (→ ARGB32).
+    // ── Chroma key runs last ──────────────────────────────────────────────
+    // Every other visual effect (brightness, temperature, etc.) converts
+    // the frame to RGB888. If chroma key (which produces ARGB32) ran
+    // before them, the next effect would strip the alpha channel and the
+    // green background would reappear.
+    // Solution: run all other effects first (on RGB888), then chroma key
+    // last (converting to ARGB32).
     bool hasChromaKey = false;
     double chromaThr = 0.35, chromaSoft = 0.10;
 
@@ -1217,7 +1234,7 @@ QImage RenderWorker::applyClipEffects(const QImage& frame, const TimelineClip& c
         const QString& name = it.key();
         double value = it.value();
 
-        // Пропускаем хромакей — применим в конце
+        // Skip chroma key here — it's applied at the end.
         if (name == "chroma_key" && value > 0.5) {
             hasChromaKey = true;
             chromaThr  = clip.effects.value("chroma_threshold",  0.35);
@@ -1258,7 +1275,8 @@ QImage RenderWorker::applyClipEffects(const QImage& frame, const TimelineClip& c
         }
     }
 
-    // Хромакей — последний: результат ARGB32 не будет затёрт другими эффектами
+    // Chroma key runs last: its ARGB32 output won't be overwritten by
+    // any other effect afterward.
     if (hasChromaKey)
     {
         result = Effects::chromaKey(result, chromaThr, chromaSoft);
@@ -1267,7 +1285,7 @@ QImage RenderWorker::applyClipEffects(const QImage& frame, const TimelineClip& c
     return result;
 }
 
-// Яркость: аддитивный сдвиг -1.0..+1.0 → ±255
+// Brightness: additive shift, -1.0..+1.0 maps to +-255.
 QImage RenderWorker::applyBrightness(const QImage& frame, double value)
 {
     QImage result = frame.convertToFormat(QImage::Format_RGB888);
@@ -1284,7 +1302,7 @@ QImage RenderWorker::applyBrightness(const QImage& frame, double value)
     return result;
 }
 
-// Контраст: value 0..3, 1.0 = оригинал
+// Contrast: value 0..3, 1.0 = unchanged.
 QImage RenderWorker::applyContrast(const QImage& frame, double value)
 {
     QImage result = frame.convertToFormat(QImage::Format_RGB888);
@@ -1334,7 +1352,7 @@ QImage RenderWorker::applyGrayscale(const QImage& frame)
 }
 
 
-//  RenderEngine — менеджер (главный поток)
+// RenderEngine — the manager, running on the main thread.
 
 
 RenderEngine::RenderEngine(QObject *parent)
@@ -1370,13 +1388,13 @@ bool RenderEngine::startRender()
 {
     if (m_clips.isEmpty())
     {
-        emit error("Нет клипов для рендеринга");
+        emit error("No clips to render");
         emit renderFinished(false);
         return false;
     }
     if (m_outputPath.isEmpty())
     {
-        emit error("Не указан путь для сохранения");
+        emit error("No output path specified");
         emit renderFinished(false);
         return false;
     }
@@ -1398,7 +1416,7 @@ bool RenderEngine::startRender()
     m_worker->setOutputResolution(m_outputWidth, m_outputHeight);
     m_worker->setFps(m_fps);
     m_worker->setBitrate(m_bitrate);
-    m_worker->setFormat(m_format); // передаём явный формат ("MP4","WebM" и т.д.)
+    m_worker->setFormat(m_format); // Pass the explicit format ("MP4", "WebM", etc.)
 
     connect(m_thread, &QThread::started, m_worker, &RenderWorker::process);
     connect(m_worker, &RenderWorker::progressChanged, this, &RenderEngine::progressChanged);
@@ -1416,12 +1434,12 @@ void RenderEngine::cancel()
     if (m_worker) m_worker->cancel();
 }
 
-// СТАТИЧЕСКИЕ ЭФФЕКТЫ ДЛЯ ПРЕВЬЮ
+// STATIC PREVIEW EFFECTS
 
 QImage RenderEngine::applyBrightness(const QImage& frame, double value)
 {
-    // Если кадр ARGB32 (после хромакея) — работаем с ARGB32, сохраняя альфа.
-    // Иначе конвертируем в RGB888 как раньше.
+    // If the frame is ARGB32 (post chroma-key), operate on it directly
+    // to preserve alpha. Otherwise convert to RGB888 as before.
     bool hasAlpha = (frame.format() == QImage::Format_ARGB32);
     QImage result = hasAlpha ? frame.copy() : frame.convertToFormat(QImage::Format_RGB888);
     int shift = static_cast<int>(value * 255.0);
@@ -1431,7 +1449,7 @@ QImage RenderEngine::applyBrightness(const QImage& frame, double value)
             QRgb* line = reinterpret_cast<QRgb*>(result.scanLine(y));
             for (int x = 0; x < result.width(); ++x) {
                 int a = qAlpha(line[x]);
-                if (a == 0) continue; // прозрачный пиксель — не трогаем
+                if (a == 0) continue; // Fully transparent pixel — leave it alone.
                 int r = qBound(0, qRed(line[x])   + shift, 255);
                 int g = qBound(0, qGreen(line[x]) + shift, 255);
                 int b = qBound(0, qBlue(line[x])  + shift, 255);
@@ -1531,7 +1549,7 @@ QImage RenderEngine::applyGrayscale(const QImage& frame)
     return result;
 }
 
-// статические методы — делегируют в namespace Effects
+// Static methods delegate to namespace Effects.
 QImage RenderEngine::applyBlur(const QImage& frame, double radius) { return Effects::blur(frame, radius); }
 QImage RenderEngine::applySharpness(const QImage& frame, double strength) { return Effects::sharpness(frame, strength); }
 QImage RenderEngine::applyHue(const QImage& frame, double degrees) { return Effects::hue(frame, degrees); }
@@ -1560,11 +1578,12 @@ QImage RenderEngine::applyTransition(const QImage& from, const QImage& to, int t
 }
 
 // RenderEngine::applyEffectsToFrame
-// ПОРЯДОК ПРИМЕНЕНИЯ ЭФФЕКТОВ:
-//   1. Хромакей — ПЕРВЫМ, пока исходные цвета не тронуты.
-//      После него кадр становится ARGB32 с прозрачным фоном.
-//   2. Все остальные эффекты — сохраняют альфа-канал через hasAlpha-ветки.
-//      grayscale/sepia/invert работают с RGB-каналами, не трогая альфу.
+// EFFECT APPLICATION ORDER:
+//   1. Chroma key runs first, while the source colors are still untouched.
+//      It converts the frame to ARGB32 with a transparent background.
+//   2. Every other effect preserves the alpha channel via its hasAlpha
+//      branch — grayscale/sepia/invert operate on the RGB channels only
+//      and leave alpha untouched.
 
 QImage RenderEngine::applyEffectsToFrame(const QImage& frame,
                                          const QMap<QString, double>& effects,
@@ -1572,16 +1591,16 @@ QImage RenderEngine::applyEffectsToFrame(const QImage& frame,
 {
     QImage result = frame;
 
-    // ШАГ 1: Хромакей первым — работает с исходными цветами
+    // Step 1: chroma key first, operating on the original colors.
     if (effects.value("chroma_key", 0.0) > 0.5)
     {
         double thr  = effects.value("chroma_threshold",  0.35);
         double soft = effects.value("chroma_smoothness", 0.10);
         result = applyChromaKey(result, thr, soft);
-        // result теперь ARGB32; все apply* функции умеют работать с ARGB32
+        // result is now ARGB32; every apply* function below handles ARGB32 correctly.
     }
 
-    // ШАГ 2: Остальные эффекты (apply* функции сохраняют альфа если ARGB32)
+    // Step 2: remaining effects (each apply* function preserves alpha when the input is ARGB32).
     for (auto it = effects.constBegin(); it != effects.constEnd(); ++it) {
         const QString& name = it.key();
         double value = it.value();
@@ -1629,5 +1648,4 @@ QImage RenderEngine::applyEffectsToFrame(const QImage& frame,
 
     return result;
 }
-
 

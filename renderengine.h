@@ -13,22 +13,21 @@ class MediaDecoder;
 class MediaEncoder;
 
 /**
- * RenderEngine — композитинг + кодирование всего таймлайна.
+ * RenderEngine — compositing and encoding for the full timeline export.
  *
- * АРХИТЕКТУРА:
- *   Таймлайн → [Track 1 (основная, поверх)] + [Track 2 (фоновая)]
+ * Architecture:
+ *   Timeline -> [Track 1 (primary, foreground)] + [Track 2 (background)]
  *
- *   Для каждого момента времени:
- *     1. Видео: Track1 поверх Track2.
- *        Если Track1 скрыт или пуст → берём Track2.
- *        Если оба пусты → чёрный кадр.
- *     2. Аудио: миксуем оба трека (с учётом mute/audioHidden).
- *     3. Применяем эффекты к видео.
- *     4. Записываем в энкодер.
- *
+ *   For every timeline moment:
+ *     1. Video: Track 1 composited over Track 2.
+ *        If Track 1 is hidden or has no active clip, Track 2 is used.
+ *        If both are empty, a black frame is emitted.
+ *     2. Audio: both tracks are mixed (respecting mute/audioHidden state).
+ *     3. Per-clip effects are applied to the video.
+ *     4. The result is written to the encoder.
  */
 
-// ===== РАБОЧИЙ ОБЪЕКТ =====
+// ===== WORKER OBJECT =====
 class RenderWorker : public QObject {
     Q_OBJECT
 public:
@@ -58,7 +57,7 @@ private:
     int m_outputHeight;
     double m_fps;
     int m_bitrate;
-    QString m_format;     // "MP4","MKV","WebM" — передаётся из RenderEngine
+    QString m_format;     // "MP4", "MKV", "WebM" — passed down from RenderEngine
     bool m_cancelled;
 
     QMap<QString, MediaDecoder*>m_videoDecoders;
@@ -85,7 +84,7 @@ private:
 };
 
 
-// ===== МЕНЕДЖЕР РЕНДЕРИНГА =====
+// ===== RENDER MANAGER =====
 class RenderEngine : public QObject
 {
     Q_OBJECT
@@ -104,8 +103,8 @@ public:
     bool startRender();
     void cancel();
 
-    // ── Статические эффекты для превью и live-display ────────────────────
-    // Применяет весь стек эффектов из effects-карты к кадру.
+    // ── Static effect functions, shared by preview and live display ──────
+    // Applies the full effect stack from an effects map to a single frame.
     static QImage applyEffectsToFrame(const QImage& frame,
                                       const QMap<QString, double>& effects,
                                       int frameIndex = 0);

@@ -1,23 +1,31 @@
 #ifndef FRAMECACHE_H
 #define FRAMECACHE_H
 
-// FrameCache — скользящее окно кэша кадров.
+// FrameCache — a thread-safe sliding-window cache of decoded video frames.
 //
-// ПРАВИЛО ВЫТЕСНЕНИЯ:
-//   Удаляем только кадры ПОЗАДИ (playPos - KEEP_BEHIND).
-//   Кадры впереди (prefetch-буфер) — не трогаем никогда.
+// Eviction policy:
+//   Frames are only evicted from behind the current playback position
+//   (older than playPos - KEEP_BEHIND). Frames ahead of playback — the
+//   prefetch buffer — are never touched while eviction candidates exist
+//   behind the play head.
 //
-// РАЗМЕР:
-//   MAX_FRAMES = 150: PREFETCH_AHEAD=2.5с × 30fps = 75 кадров вперёд
-//                   + KEEP_BEHIND = 30 кадров позади
-//                   + 45 кадров запаса при рывках декодера.
-//   Память: 150 × 1920×1080 × 3б ≈ 935 МБ на поток.
-//   При 2 потоках ≈ 1.9 ГБ — приемлемо для 32 ГБ RAM.
+// Capacity:
+//   MAX_FRAMES = 150, sized to hold PREFETCH_AHEAD (2.5s x 30fps = ~75
+//   frames ahead) plus KEEP_BEHIND (30 frames behind) plus headroom for
+//   decoder stalls/bursts.
+//   Memory footprint: 150 x 1920x1080 x 3 bytes =~ 935 MB per track;
+//   with two concurrent tracks, ~1.9 GB, which is acceptable on a
+//   32 GB machine.
 //
-// СТАРАЯ ОШИБКА (причина циклических зависаний каждые ~20с):
-//   if (first.key() < m_playPosition - 10) erase(first)
-//   else erase(last)   ← удалял только что задекодированный кадр ВПЕРЕДИ
-//   → DecoderThread перепрефетчивал его → снова удалялся → бесконечный цикл.
+// Design note:
+//   An earlier eviction rule fell back to erasing the most recently
+//   decoded frame whenever no frame existed far enough behind the play
+//   position. Because that frame was still needed for imminent playback,
+//   the decoder thread would immediately re-decode and re-insert it,
+//   producing a repeating stall roughly every 20 seconds. The current
+//   rule only evicts the furthest-ahead frame once it exceeds
+//   playPos + KEEP_BEHIND, so the decoder thread naturally stops
+//   prefetching before that point and the frame is not re-requested.
 
 #include <QMap>
 #include <QImage>
@@ -38,20 +46,20 @@ struct FrameCache {
             auto first = m_frames.begin();
             if (first.key() < m_playPosition - KEEP_BEHIND)
             {
-                // Кадр достаточно далеко позади — удаляем
+                // Old enough behind the play head — safe to drop.
                 m_frames.erase(first);
             }
             else
             {
-                // Нет старых кадров позади.
-                // Prefetch ушёл слишком далеко вперёд — удаляем самый дальний.
-                // DecoderThread остановится через PREFETCH_AHEAD и не будет
-                // перепрефетчировать его (в отличие от старого кода).
+                // No eviction candidate behind the play head: prefetch has
+                // run too far ahead. Drop the furthest-ahead frame instead;
+                // the decoder thread's PREFETCH_AHEAD limit stops it from
+                // immediately re-decoding the same frame.
                 auto last = m_frames.end(); --last;
                 if (last.key() > m_playPosition + KEEP_BEHIND)
                     m_frames.erase(last);
                 else
-                    break; // все кадры в нужной зоне — выходим
+                    break; // Every cached frame is within the working set.
             }
         }
     }
@@ -64,9 +72,11 @@ struct FrameCache {
         return false;
     }
 
-    // maxDistance по умолчанию = 2 (±67мс при 30fps).
-    // Старое значение 5 (±167мс) давало визуальное дёргание:
-    // getNearest возвращал кадр из будущего когда декодер чуть опережал.
+    // Returns the cached frame closest to frameNumber within maxDistance.
+    // Default maxDistance = 2 (+-67ms at 30fps). A larger tolerance (e.g. 5)
+    // was tried previously and produced visible judder, since it could
+    // return a frame slightly ahead of the intended position whenever the
+    // decoder was a little ahead of playback.
     bool getNearest(int frameNumber, QImage& out, int maxDistance = 2)
     {
         QMutexLocker lock(&m_mutex);

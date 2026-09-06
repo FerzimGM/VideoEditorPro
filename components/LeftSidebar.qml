@@ -1,3 +1,23 @@
+/**
+ * LeftSidebar
+ * -----------
+ * The app's left panel with two independent modes (switched via
+ * currentMode, driven from outside by ModeSwitcher):
+ *   0 — Effects mode: three main tabs (Video/Audio/Transitions); Video
+ *       and Audio each have nested sub-tabs. Editor effects are held as
+ *       a "draft" in property fields (effectBrightness, etc.) — moving a
+ *       slider immediately updates the live preview via a binding to
+ *       videoPlayer.effectXxx, but changes are NOT written to C++/the
+ *       project until the user clicks "Apply" (applyCurrentEffect). This
+ *       lets you drag a slider and see the result live without creating
+ *       extra history/model entries on every micro-change.
+ *   1 — Export mode: a simple export-settings form (ExportPanel).
+ *
+ * All reusable visual blocks are extracted into inline components at the
+ * end of the file (FxSlider, FxCheck, FxCategory, TransitionCard,
+ * ExportPanel, SettingRow) — the UI markup earlier in the file is almost
+ * entirely repeated combinations of these components, one set per effect.
+ */
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
@@ -9,13 +29,14 @@ Rectangle {
 
     property int currentMode: 0
     property var videoPlayer: null
-    property string selectedEffect: ""
+    property string selectedEffect: "" // name of the effect selected in the category list (used by applyCurrentEffect)
 
     signal exportRequested(string resolution, string format)
 
     property int selectedClipId: -1
 
-    // Видео эффекты
+    // Video effects — "draft" values for the live-preview sliders;
+    // the real values are applied to C++ separately, via applyCurrentEffect()
     property real effectBrightness: 0.0
     property real effectContrast: 1.0
     property real effectSaturation: 1.0
@@ -58,6 +79,10 @@ Rectangle {
     property int videoSubTab: 0 // 0=Цвет 1=Стилизация 2=Фокус
     property int audioSubTab: 0 // 0=Динамика 1=Пространство 2=Тон
 
+    // Loads the currently selected clip's effect values from C++ into
+    // the local properties (the slider draft). When clipId < 0 (nothing
+    // selected) — resets everything to the default values. Called
+    // automatically whenever selectedClipId changes (see the handler below)
     function loadEffectsFromClip(clipId) {
         if (clipId < 0 || !cppTimeline) {
             effectBrightness = 0.0
@@ -134,6 +159,15 @@ Rectangle {
 
     onSelectedClipIdChanged: loadEffectsFromClip(selectedClipId)
 
+    // Applies the currently selected effect (root.selectedEffect) to the
+    // clip, pushing its "draft" value from the property into C++. The
+    // mapping "Russian display name" → "C++ effect key" is implemented as
+    // an if/else chain over the human-readable Russian labels (the same
+    // ones shown in FxCategory) — not the most flexible approach, but
+    // direct and easy to read. Some effects write two or three keys at
+    // once (e.g. "Насыщенность" [Saturation] sets both saturation AND
+    // grayscale, "Тинт" [Tint] sets tint_hue and tint_strength) — that's
+    // how the corresponding parameters interact in the C++ renderer
     function applyCurrentEffect() {
         if (!cppTimeline || root.selectedClipId < 0
                 || root.selectedEffect === "")
@@ -202,6 +236,9 @@ Rectangle {
             cppTimeline.applyEffect(id, "auto_enhance", root.effectAutoEnhance)
     }
 
+    // Resets all effects on the current clip: a hard-coded list of keys
+    // (matches the list in ClipEffectsDialog.resetAll) gets removed from
+    // C++, then the draft properties are re-read from the now-empty state
     function resetAllEffects() {
         if (!cppTimeline || root.selectedClipId < 0)
             return
@@ -244,7 +281,9 @@ Rectangle {
                 anchors.margins: Theme.spacing
                 spacing: 6
 
-                // Главные вкладки
+                // Main tabs: Video / Audio / Transitions.
+                // Switching tabs resets selectedEffect — so an effect
+                // from another category doesn't stay selected when you come back
                 Rectangle {
                     Layout.fillWidth: true
                     Layout.preferredHeight: 38
@@ -301,6 +340,10 @@ Rectangle {
                 }
 
                 // Подвкладки
+                // Sub-tabs: the set of items depends on mainTab (Video
+                // and Audio have different sub-categories); hidden
+                // entirely on the "Transitions" tab (mainTab === 2), since
+                // that tab has its own separate layout below with no sub-tabs
                 Rectangle {
                     Layout.fillWidth: true
                     Layout.preferredHeight: 28
@@ -1464,7 +1507,9 @@ Rectangle {
             }
         }
 
-        // РЕЖИМ ЭКСПОРТА
+        // EXPORT MODE: a simple settings form, doesn't export anything
+        // itself — just collects the user's choices and emits
+        // exportRequested upward (the actual export is done by main.qml → C++)
         Item {
             Layout.fillWidth: true
             Layout.fillHeight: true
@@ -1479,7 +1524,11 @@ Rectangle {
 
     //  КОМПОНЕНТЫ — все используют id-ссылки вместо parent.parent цепочек
 
-    //  Слайдер с подписью
+    //  Labeled slider: the generic effect slider, used for every
+    // continuous numeric parameter (brightness, contrast, etc.).
+    // rainbow/warm — two special track-background modes for specific
+    // effects (Hue — rainbow gradient, Temperature — blue-orange
+    // gradient); with both false, a plain filled progress bar is drawn
     component FxSlider: Item {
         id: fxSlRoot
         property string label: ""
@@ -1598,7 +1647,7 @@ Rectangle {
         }
     }
 
-    // Чекбокс с подписью
+    // Labeled checkbox: for boolean effects (Grayscale, Invert, Mono, etc.)
     component FxCheck: Item {
         id: fxChkRoot
         property string label: ""
@@ -1650,7 +1699,9 @@ Rectangle {
         }
     }
 
-    //  Категория эффектов
+    //  Effect category: a collapsible group (collapsed) listing the
+    // effects in this sub-category; selecting an effect in the list sets
+    // root.selectedEffect, which applyCurrentEffect() later reads
     component FxCategory: Column {
         id: fxCatRoot
         property string catTitle: ""
@@ -1792,7 +1843,8 @@ Rectangle {
         }
     }
 
-    // Карточка перехода
+    // Transition card: a clickable tile for choosing a
+    // transition_in/transition_out type (Fade in, Wipe, Flash, etc.)
     component TransitionCard: Item {
         id: tcRoot
         property string cardLabel: ""
@@ -1851,7 +1903,10 @@ Rectangle {
         }
     }
 
-    // Экспорт
+    // Export: the export settings form (resolution + format) — used in
+    // the "EXPORT MODE" block above. Values are read directly from the
+    // ComboBoxes at the moment the export button is clicked; no separate
+    // property state is kept for them
     component ExportPanel: ColumnLayout {
         spacing: Theme.spacingLarge
         signal exportClicked(string resolution, string format)
@@ -1909,6 +1964,9 @@ Rectangle {
                 }
             }
         }
+        // Saving itself reads the current text of the selected ComboBoxes
+        // (resC/fmtC) directly at click time — a simple way to avoid
+        // duplicating their state in separate properties
         Button {
             text: "СОХРАНИТЬ ВИДЕО"
             Layout.fillWidth: true
@@ -1938,6 +1996,8 @@ Rectangle {
         }
     }
 
+    // "Label + field" row for the export settings form (used with the
+    // resolution/format ComboBoxes above)
     component SettingRow: RowLayout {
         property string label: ""
         Layout.fillWidth: true

@@ -23,6 +23,9 @@ class EffectImageProvider;
 class AudioPlaybackEngine;
 class MediaDecoder;
 
+// Timeline is the central coordinator exposed to QML: it owns the clip
+// list, drives live preview and playback, and delegates rendering/export
+// to RenderEngine.
 class Timeline : public QObject
 {
     Q_OBJECT
@@ -43,7 +46,7 @@ public:
 
     void setCurrentTime(double time);
 
-    // ── Image Provider ────────────────────────────────────────────────────
+    // ── Image provider ────────────────────────────────────────────────────
     void setImageProvider(EffectImageProvider* provider);
 
     // ── Live preview ──────────────────────────────────────────────────────
@@ -51,13 +54,13 @@ public:
                                             int selectedClipId = -1,
                                             const QVariantMap& previewEffects = {});
 
-    // ── Совместимость ─────────────────────────────────────────────────────
+    // ── Synchronous frame access (used sparingly, e.g. thumbnails) ────────
     Q_INVOKABLE QImage  getCurrentFrameAt(double time, int trackIndex = 1);
 
     Q_INVOKABLE QVariantMap getClipInfoAt(double time, int trackIndex = 1);
     Q_INVOKABLE QVariantMap getClipInfoById(int uidOrIndex);
 
-    // ── Воспроизведение ───────────────────────────────────────────────────
+    // ── Playback ──────────────────────────────────────────────────────────
     Q_INVOKABLE void startPlayback(double fromTime, double speed = 1.0);
     Q_INVOKABLE void stopPlayback();
     Q_INVOKABLE void setPlaybackVolume(double volume);
@@ -65,11 +68,11 @@ public:
     Q_INVOKABLE void setTrackVideoHidden(int track, bool hidden);
     Q_INVOKABLE double getPlaybackTime() const;
 
-    // ── Аудио-микс для AudioPlaybackEngine ───────────────────────────────
+    // ── Audio mixdown for AudioPlaybackEngine ────────────────────────────
     QVector<float> getMixedAudio(double time, double duration,
                                  bool t1muted = false, bool t2muted = false);
 
-    // ── Клипы ─────────────────────────────────────────────────────────────
+    // ── Clip operations ──────────────────────────────────────────────────
     Q_INVOKABLE bool addClip(const QString& filepath, int trackIndex, double startTime);
     Q_INVOKABLE bool removeClip(int index);
     Q_INVOKABLE bool moveClip(int index, int newTrackIndex, double newStartTime);
@@ -129,7 +132,7 @@ private:
 
     QList<TimelineClip> m_clips;
     double m_currentTime = 0.0;
-    bool m_frameProcessing = false;  // защита от накопления кадров
+    bool m_frameProcessing = false;  // Guards against frame requests piling up
     int m_nextUid = 0;
     int m_previewFrameIndex = 0;
 
@@ -140,14 +143,15 @@ private:
     double m_playbackSpeed = 1.0;
     bool m_stopping = false;
     bool m_forceNextFrame = false;
-    // Персистентные кольцевые буферы для аудиоэффектов (reverb/echo) в live-режиме
+    // Persistent ring buffers for audio effects (reverb/echo) during live playback
     QHash<QString, std::vector<float>> m_audioDelayBufs;
     QHash<QString, int> m_audioDelayPos;
-    qint64 m_lastSyncDecodeMs = 0; // разрешить sync-decode при следующем cache miss
+    qint64 m_lastSyncDecodeMs = 0; // Allows one synchronous decode on the next cache miss
 
-    // Фоновый поток применения эффектов.
-    // void* чтобы не тащить QFutureWatcher (шаблон) в заголовок.
-    // Реальный тип: QFutureWatcher<QImage>*, инициализируется в startPlayback.
+    // Background thread for applying effects to preview frames.
+    // Stored as void* to avoid pulling the QFutureWatcher template into
+    // the header. Actual type: QFutureWatcher<QImage>*, allocated in
+    // startPlayback().
     std::atomic<bool> m_bgFrameProcessing{false};
     void* m_frameWatcher = nullptr;
 
@@ -156,8 +160,8 @@ private:
     double toSourceTime(const QString& filepath, int trackIndex, double timelineTime) const;
     MediaDecoder* getOrCreateAudioDecoder(const QString& clipKey, const QString& filepath);
 
-    // Ключ для m_decoderThreads / m_frameCaches: filepath|trackIndex
-    // Каждая дорожка получает свой DecoderThread, даже для одного файла.
+    // Key format for m_decoderThreads / m_frameCaches: "filepath|trackIndex".
+    // Each track gets its own DecoderThread, even when sharing a source file.
     static QString decoderKey(const QString& fp, int track) {
         return fp + "|" + QString::number(track);
     }
@@ -174,6 +178,5 @@ private:
 };
 
 #endif // TIMELINE_H
-
 
 

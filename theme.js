@@ -1,55 +1,55 @@
-// тема в стиле серое с рубиновыми акцентами
+// Theme: dark navy background with ruby accents.
 
 .pragma library
 
-// ЦВЕТА ФОНА
-var backgroundColor = "#1b2838"           // Основной фон (темно-синий Steam)
-var backgroundDark = "#141d2a"           // Темный фон
-var backgroundLight = "#2a475e"          // Светлый фон
-var panelBackground = "#16202d"          // Фон панелей
+// BACKGROUND COLORS
+var backgroundColor = "#1b2838"           // Main background (Steam-inspired navy)
+var backgroundDark = "#141d2a"           // Darker background
+var backgroundLight = "#2a475e"          // Lighter background
+var panelBackground = "#16202d"          // Panel background
 
-// РУБИНОВЫЕ АКЦЕНТЫ
-var rubyPrimary = "#c7254e"              // Основной рубиновый
-var rubyLight = "#e74c3c"                // Светлый рубиновый
-var rubyDark = "#9b1b3a"                 // Темный рубиновый
-var rubyGradientStart = "#c7254e"        // Начало градиента
-var rubyGradientEnd = "#8b1538"          // Конец градиента
+// RUBY ACCENTS
+var rubyPrimary = "#c7254e"              // Primary ruby
+var rubyLight = "#e74c3c"                // Light ruby
+var rubyDark = "#9b1b3a"                 // Dark ruby
+var rubyGradientStart = "#c7254e"        // Gradient start
+var rubyGradientEnd = "#8b1538"          // Gradient end
 
-// СЕРЫЕ ТОНА (ТЕКСТ)
-var textPrimary = "#c7d5e0"              // Основной текст
-var textSecondary = "#8f98a0"            // Вторичный текст
-var textDisabled = "#4c5f6b"             // Отключенный текст
+// GRAY TONES (TEXT)
+var textPrimary = "#c7d5e0"              // Primary text
+var textSecondary = "#8f98a0"            // Secondary text
+var textDisabled = "#4c5f6b"             // Disabled text
 
-// ГРАНИЦЫ И РАЗДЕЛИТЕЛИ
-var borderColor = "#1a1a1a"              // Цвет границ
-var borderLight = "#3a3a3a"              // Светлые границы
-var dividerColor = "#2a2a2a"             // Разделители
+// BORDERS AND DIVIDERS
+var borderColor = "#1a1a1a"              // Border color
+var borderLight = "#3a3a3a"              // Light borders
+var dividerColor = "#2a2a2a"             // Dividers
 
-//  СОСТОЯНИЯ ЭЛЕМЕНТОВ
-var hoverColor = "#2a475e"               // При наведении
-var pressedColor = "#1e3a52"             // При нажатии
-var selectedColor = "#3e5871"            // При выборе
+// ELEMENT STATES
+var hoverColor = "#2a475e"               // Hover state
+var pressedColor = "#1e3a52"             // Pressed state
+var selectedColor = "#3e5871"            // Selected state
 
-//  ТАЙМЛАЙН
-var timelineBackground = "#0f1419"       // Фон таймлайна
-var trackBackground = "#1a2332"          // Фон дорожек
-var clipColor = "#3498db"                // Цвет видео клипов
-var clipSelectedColor = "#5dade2"        // Выбранный клип
-var waveformColor = "#2ecc71"            // Цвет аудио (waveform)
+// TIMELINE
+var timelineBackground = "#0f1419"       // Timeline background
+var trackBackground = "#1a2332"          // Track background
+var clipColor = "#3498db"                // Video clip color
+var clipSelectedColor = "#5dade2"        // Selected clip
+var waveformColor = "#2ecc71"            // Waveform color
 
-//  ЭЛЕМЕНТЫ УПРАВЛЕНИЯ
-var buttonBackground = "#2a475e"         // Фон кнопок
-var buttonHover = "#355a7a"              // Кнопка при наведении
-var buttonPressed = "#1e3a52"            // Кнопка при нажатии
-var buttonDisabled = "#1a2838"           // Отключенная кнопка
+// CONTROLS
+var buttonBackground = "#2a475e"         // Button background
+var buttonHover = "#355a7a"              // Button hover
+var buttonPressed = "#1e3a52"            // Button pressed
+var buttonDisabled = "#1a2838"           // Disabled button
 
-// ШРИФТ
+// FONT
 var fontFamily = "Segoe UI"
 var fontSize = 12
 var fontSizeSmall = 10
 var fontSizeLarge = 14
 
-// РАЗМЕРЫ
+// SIZES
 var borderRadius = 4
 var borderRadiusLarge = 6
 var borderWidth = 1
@@ -57,12 +57,13 @@ var spacing = 8
 var spacingSmall = 4
 var spacingLarge = 12
 
-//  ПАНЕЛИ
+// PANELS
 var panelHeight = 40
 var toolbarHeight = 50
 var timelineHeight = 300
 var sidebarWidth = 250
 var trackHeight = 60
 
-// ============ АНИМАЦИИ ============
+// ============ ANIMATIONS ============
 var animationDuration = 150
+

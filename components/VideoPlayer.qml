@@ -1,4 +1,25 @@
 // VideoPlayer.qml — Live-превью через FFmpeg + EffectImageProvider
+/**
+ * VideoPlayer
+ * -----------
+ * The video preview area. This component doesn't decode or render frames
+ * itself — it only asks C++ (cppTimeline) to prepare the next frame given
+ * the current position, selected clip and active effects, then displays
+ * the result through a custom image provider (image://effects/frame_N).
+ *
+ * Two independent frame-update paths:
+ *   1) Playback (isPlaying=true) — C++ drives the frames on its own and
+ *      fires frameReadyForDisplay() for every decoded frame; the QML side
+ *      doesn't run any timers of its own.
+ *   2) Paused/scrubbing — any change to currentTime, effects, or the
+ *      selected clip schedules a single frame request through debounce
+ *      timers (scrubTimer/effectTimer), so rapid slider dragging doesn't
+ *      flood C++ with a burst of requests.
+ *
+ * The Image's source changes via incrementing _frameId rather than a
+ * direct path reference — this guarantees Qt re-reads the image from the
+ * provider even when the URL would otherwise look "the same" as a string.
+ */
 import QtQuick
 import QtQuick.Controls
 
@@ -53,7 +74,14 @@ Rectangle {
     signal playbackStopped
     signal timePositionChanged(real time)
 
-    // Публичный метод seek
+    /**
+     * Seek the player to position time.
+     * During playback, fully restarts C++ playback from the new position
+     * (volume/mute need to be reapplied before starting). While paused,
+     * it just defers a frame request via scrubTimer, so a burst of rapid
+     * seek() calls (e.g. while dragging the playhead) doesn't overload
+     * the C++ decoder with redundant requests.
+     */
     function seek(time) {
         var t = Math.max(0, time)
         if (isPlaying) {
@@ -67,10 +95,13 @@ Rectangle {
         timePositionChanged(t)
     }
 
-    // Счётчик кадров
+    // Frame counter — incremented on every new frame; used as part of the
+    // image provider's URL to force a re-read of the image (Image won't
+    // update if source stays the same string)
     property int _frameId: 0
 
-    // Видео-дисплей
+    // Video display: the frame comes not from a file but from C++ through
+    // a custom "effects" image provider (see Effectimageprovider.h in core)
     Image {
         id: videoDisplay
         anchors.fill: parent
@@ -82,7 +113,8 @@ Rectangle {
         source: "image://effects/frame_" + videoPlayer._frameId
     }
 
-    // Плейсхолдер
+    // Placeholder, shown while there isn't a single frame yet (_frameId
+    // === 0, i.e. no clips on the timeline yet) or when video is explicitly hidden
     Column {
         anchors.centerIn: parent
         spacing: 12
@@ -102,31 +134,37 @@ Rectangle {
         }
     }
 
-    // Соединения с C++
+    // Connections to C++: react to decoder/playback events
     Connections {
         target: cppTimeline
 
+        // A newly decoded frame is ready — just bump the counter, the
+        // Image will pick up the new source and re-request the picture
         function onFrameReadyForDisplay() {
             videoPlayer._frameId++
         }
 
-        // НЕ пишем videoPlayer.currentTime = time — сломает binding в main.qml
+        // Do NOT write videoPlayer.currentTime = time — it would break the binding in main.qml
         function onPlaybackTimeUpdated(time) {
             videoPlayer.timePositionChanged(time)
         }
 
         function onPlaybackEnded() {
-            // Только сигнал — main.qml сам сбросит isPlaying и время
+            // Signal only — main.qml resets isPlaying and time itself
             videoPlayer.playbackStopped()
         }
 
+        // If the set of clips on the timeline changed while paused —
+        // the preview needs to be refreshed (e.g. the clip under the playhead changed)
         function onClipsChanged() {
             if (!videoPlayer.isPlaying)
                 Qt.callLater(videoPlayer.requestPreview)
         }
     }
 
-    //  Play / Pause
+    //  Play / Pause: on start, sync volume/mute before starting playback
+    // (C++ doesn't persist them between playback sessions); on stop,
+    // request one final frame (freeze-frame)
     onIsPlayingChanged: {
         if (isPlaying) {
             cppTimeline.setPlaybackVolume(volume)
@@ -139,6 +177,10 @@ Rectangle {
         }
     }
 
+    // Changing speed on the fly: C++ doesn't support "reconfigure speed
+    // without stopping", so we have to read the exact current position,
+    // stop, and restart playback at the new speed — otherwise audio and
+    // video could drift out of sync
     onPlaybackSpeedChanged: {
         if (isPlaying) {
             var exactTime = cppTimeline.getPlaybackTime()
@@ -147,6 +189,8 @@ Rectangle {
         }
     }
 
+    // Volume and track mute states are pushed to C++ immediately on
+    // change — regardless of whether playback is running
     onVolumeChanged: if (cppTimeline)
                          cppTimeline.setPlaybackVolume(volume)
     onHideAudio1Changed: if (cppTimeline)
@@ -154,6 +198,9 @@ Rectangle {
     onHideAudio2Changed: if (cppTimeline)
                              cppTimeline.setTrackAudioMuted(2, hideAudio2)
 
+    // Hiding a video track: pushed to C++, and while paused also forces
+    // a preview refresh (via effectTimer), since the visible picture
+    // should change immediately rather than waiting for the next playback frame
     onHideTrack1VideoChanged: {
         if (cppTimeline)
             cppTimeline.setTrackVideoHidden(1, hideTrack1Video)
@@ -167,7 +214,9 @@ Rectangle {
             effectTimer.restart()
     }
 
-    // Скруббинг
+    // Scrubbing: moving the playhead while paused shouldn't trigger a
+    // decode on every micro-change of currentTime — the timer batches a
+    // burst of rapid changes into a single final frame request after 50ms of idle
     onCurrentTimeChanged: {
         if (!isPlaying)
             scrubTimer.restart()
@@ -181,7 +230,9 @@ Rectangle {
                          videoPlayer.requestPreview()
     }
 
-    // requestPreview
+    // requestPreview — the single entry point for requesting a frame from
+    // the C++ core. Called during scrubbing, after the effects debounce,
+    // and after the selected clip changes — anywhere a static frame needs a refresh
     function requestPreview() {
         if (!cppTimeline)
             return
@@ -189,6 +240,11 @@ Rectangle {
                                            buildEffectsMap())
     }
 
+    // Builds a map of active effects to pass to C++.
+    // Each effect is only included in the map if its value noticeably
+    // deviates from the neutral one (thresholds chosen empirically) —
+    // this saves the C++ renderer work: it never processes effects absent
+    // from the map, instead of checking each one for "neutrality" itself
     function buildEffectsMap() {
         var m = {}
         if (Math.abs(effectBrightness) > 0.001)
@@ -233,7 +289,11 @@ Rectangle {
         return m
     }
 
-    // Ползунки эффектов (debounce 80мс)
+    // Effect sliders (80ms debounce): most effects produce a continuous
+    // stream of changes while dragging a slider, so the frame request is
+    // deferred through effectTimer to avoid decoding on every micro-change.
+    // Binary effects (grayscale, invert, chromaKey) toggle instantly with
+    // no debounce — they're plain checkboxes that don't "jitter" on interaction
     onEffectBrightnessChanged: if (!isPlaying)
                                    effectTimer.restart()
     onEffectContrastChanged: if (!isPlaying)
@@ -275,6 +335,7 @@ Rectangle {
     onEffectChromaSmoothnessChanged: if (!isPlaying)
                                          effectTimer.restart()
 
+    // Single shared debounce timer for all "smooth" (non-binary) effects
     Timer {
         id: effectTimer
         interval: 80
@@ -285,5 +346,7 @@ Rectangle {
     onSelectedClipIdChanged: if (!isPlaying)
                                  Qt.callLater(requestPreview)
 
+    // Request the first frame right after the component is created, so
+    // the app doesn't show an empty black screen longer than necessary at startup
     Component.onCompleted: Qt.callLater(requestPreview)
 }
