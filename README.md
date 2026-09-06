@@ -1,5 +1,5 @@
 # VideoEditor Pro
-Read on <kbd>[<img title="Русский язык" alt="Русский язык" src="https://cdn.jsdelivr.net/gh/hampusborgos/country-flags@main/svg/ru.svg" width="22">]()</kbd>
+Читать на <kbd>[<img title="Русский язык" alt="Русский язык" src="https://cdn.jsdelivr.net/gh/hampusborgos/country-flags@main/svg/ru.svg" width="22">](README_ru.md)</kbd>
 
 A cross-platform non-linear video editor built in C++17 with Qt 6 and FFmpeg.  
 Designed as a lightweight, offline-first alternative to proprietary editors.
@@ -27,25 +27,25 @@ University (2026), direction 09.03.02 "Information Systems and Technologies".
 ## Features
 
 ### Video editing
-- **Two-track non-linear timeline** — arrange, move, trim, and split clips
+- **Two-track non-linear timeline** - arrange, move, trim, and split clips
   on two independent video tracks
-- **Non-destructive editing** — all operations reference source files;
+- **Non-destructive editing** - all operations reference source files;
   originals are never modified
-- **Clip operations** — add, remove, move, trim (left/right edge), split at
+- **Clip operations** - add, remove, move, trim (left/right edge), split at
   arbitrary position, drag-and-drop reorder
 
 ### Decoding & playback
 - **Hardware-accelerated decoding** with automatic fallback chain:
   D3D11VA → DXVA2 → software (CPU)
-- **Prefetch frame cache** (`FrameCache`) — sliding-window cache of 150
+- **Prefetch frame cache** (`FrameCache`) - sliding-window cache of 150
   decoded frames per track, keeps playback smooth without re-decoding
-- **Background decoder thread** (`DecoderThread`) — decodes 2.5 s ahead of
+- **Background decoder thread** (`DecoderThread`) - decodes 2.5 s ahead of
   the playback position; fast seek via `seekAndDecode()` jumps directly to
   the nearest I-frame
-- **Audio/video synchronization** — push-model audio engine
+- **Audio/video synchronization** - push-model audio engine
   (`AudioPlaybackEngine`) feeds 20 ms chunks to `QAudioSink`; audible
   position is corrected for sink buffer latency on every tick
-- **Preview mode** — decoder outputs half-resolution frames (÷4 pixel count)
+- **Preview mode** - decoder outputs half-resolution frames (÷4 pixel count)
   to reduce CPU load during live playback; full resolution is used only during
   export
 
@@ -69,13 +69,13 @@ University (2026), direction 09.03.02 "Information Systems and Technologies".
 | ChromaKey | RGB greenness metric + soft edge + spill suppression |
 
 ### Audio effects
-- Reverb — comb filter with persistent ring buffer (feedback < 1)
-- Echo — delay line with configurable feedback
-- Stereo Widen — Mid/Side encoding with Side gain boost
-- Pitch Shift — linear-interpolation resampling (equal temperament: 2^(s/12))
-- Normalize — peak-based gain with ×6 cap
-- Fade In / Fade Out — per-sample linear gain ramp
-- Automatic micro-fade — 3 ms tail fade on every clip boundary (eliminates
+- Reverb - comb filter with persistent ring buffer (feedback < 1)
+- Echo - delay line with configurable feedback
+- Stereo Widen - Mid/Side encoding with Side gain boost
+- Pitch Shift - linear-interpolation resampling (equal temperament: 2^(s/12))
+- Normalize - peak-based gain with ×6 cap
+- Fade In / Fade Out - per-sample linear gain ramp
+- Automatic micro-fade - 3 ms tail fade on every clip boundary (eliminates
   clicks)
 
 ### Export
@@ -248,7 +248,7 @@ Tested on two machines:
 | 1080p | GPU D3D11VA | 87% | 5.4% |
 | 4K | GPU D3D11VA | 98% | 9.6% |
 
-RAM usage during preview: 620–770 MB (dominated by FrameCache — up to 150
+RAM usage during preview: 620–770 MB (dominated by FrameCache - up to 150
 decoded frames per track).
 
 ---
@@ -267,12 +267,12 @@ decoded frames per track).
 
 ## License
 
-MIT License — see [LICENSE](LICENSE) for details.
+MIT License - see [LICENSE](LICENSE) for details.
 
 ---
 
 ## Author
 
-**Ilya Kartashov** — [github.com/kartashov](https://github.com/)  
+**Ilya Kartashov** - [github.com/kartashov](https://github.com/)  
 Bachelor's thesis, Moscow Polytechnic University, 2026  
 Direction: 09.03.02 "Information Systems and Technologies"
