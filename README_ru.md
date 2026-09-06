@@ -1,6 +1,8 @@
 # VideoEditor Pro
 Read on <kbd>[<img title="English" alt="English" src="https://cdn.jsdelivr.net/gh/hampusborgos/country-flags@main/svg/us.svg" width="22">](README.md)</kbd>
 
+![Логотип](screenshot/logo.png)
+
 Кроссплатформенный нелинейный видеоредактор на C++17 с Qt 6 и FFmpeg.
 Лёгкая, работающая офлайн альтернатива проприетарным редакторам.
 
@@ -103,6 +105,26 @@ VideoEditor Pro - десктопное приложение для монтаж�
 - Все цвета, шрифты и отступы заданы в `theme.js`
 - Компоненты: `TopMenuBar`, `LeftSidebar`, `VideoPlayer`, `PlaybackControls`,
   `Timeline`, `Track`, `VideoClip`, `ClipEffectsDialog`
+
+---
+
+## 📸 Скриншоты
+
+### Главный интерфейс
+![Главный интерфейс](screenshot/main.png)
+*Основной интерфейс с тёмной темой и многодорожечным таймлайном*
+
+---
+
+##  Производительность
+
+### Видеоэффекты
+![Эффекты](screenshot/effect.gif)
+*Предпросмотр эффектов в реальном времени благодаря FrameCache*
+
+### Процесс экспорта
+![Экспорт](screenshot/export.gif)
+*Диалог экспорта с отображением прогресса и настройками формата*
 
 ---
 
