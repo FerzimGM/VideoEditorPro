@@ -1,5 +1,5 @@
 # VideoEditor Pro
-<kbd>[<img title="English (Pirate)" alt="English" src="https://firstcontributions.github.io/assets/Readme/pirate.png" width="22">]()</kbd>
+<kbd>[<img title="English" alt="English" src="https://firstcontributions.github.io/assets/Readme/english.png" width="22">]()</kbd>
 
 A cross-platform non-linear video editor built in C++17 with Qt 6 and FFmpeg.  
 Designed as a lightweight, offline-first alternative to proprietary editors.
