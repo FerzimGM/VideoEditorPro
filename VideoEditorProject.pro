@@ -16,29 +16,6 @@ SOURCES += \
     renderengine.cpp \
     timeline.cpp
 
-INCLUDEPATH += C:/FFmpegForQt/include
-
-LIBS += C:/FFmpegForQt/lib/avcodec.lib
-LIBS += C:/FFmpegForQt/lib/avformat.lib
-LIBS += C:/FFmpegForQt/lib/avutil.lib
-LIBS += C:/FFmpegForQt/lib/swscale.lib
-LIBS += C:/FFmpegForQt/lib/swresample.lib
-LIBS += -lUser32
-
-RC_ICONS = VideoEditorPro.ico
-
-FFMPEG_BIN = C:/FFmpegForQt/bin
-win32 {
-    DESTDIR = $$OUT_PWD/debug
-    QMAKE_POST_LINK += $$quote(xcopy /Y /D "$$FFMPEG_BIN\*.dll" "$$DESTDIR" $$escape_expand(\n\t))
-}
-
-qnx: target.path = /tmp/$${TARGET}/bin
-else: unix:!android: target.path = /opt/$${TARGET}/bin
-!isEmpty(target.path): INSTALLS += target
-
-DISTFILES +=
-
 HEADERS += \
     Effectimageprovider.h \
     FrameCache.h \
@@ -49,3 +26,23 @@ HEADERS += \
     mediaencoder.h \
     renderengine.h \
     timeline.h
+
+RC_ICONS = VideoEditorPro.ico
+
+INCLUDEPATH += C:/FFmpegForQt/include
+
+LIBS += -LC:/FFmpegForQt/lib \
+        -lavcodec -lavformat -lavutil -lswscale -lswresample -lUser32
+
+win32 {
+    FFMPEG_BIN = C:/FFmpegForQt/bin
+    OUT_DIR = $$OUT_PWD/debug
+
+    QMAKE_POST_LINK += $$quote(cmd /c xcopy /Y /Q C:\FFmpegForQt\bin\*.dll $$OUT_DIR)
+}
+
+qnx: target.path = /tmp/$${TARGET}/bin
+else: unix:!android: target.path = /opt/$${TARGET}/bin
+!isEmpty(target.path): INSTALLS += target
+
+DISTFILES +=
