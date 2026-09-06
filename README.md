@@ -255,13 +255,13 @@ decoded frames per track).
 
 ## Roadmap
 
-- [✔] More than 2 video tracks
-- [✔] Text overlays and title cards
-- [✔] Subtitle support (libass)
-- [✔] GPU-accelerated export (NVENC for NVIDIA, AMF for AMD)
-- [✔] VA-API hardware decoding on Linux
-- [✔] Transition effects between adjacent clips
-- [✔] Audio waveform visualization in timeline clips
+- [ ] More than 2 video tracks
+- [ ] Text overlays and title cards
+- [ ] Subtitle support (libass)
+- [ ] GPU-accelerated export (NVENC for NVIDIA, AMF for AMD)
+- [ ] VA-API hardware decoding on Linux
+- [ ] Transition effects between adjacent clips
+- [ ] Audio waveform visualization in timeline clips
 
 ---
 
