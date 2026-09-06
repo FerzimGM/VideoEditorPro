@@ -1,8 +1,8 @@
 # VideoEditor Pro
-<kbd>[<img title="English (United States)" alt="English (United States)" src="https://flagcdn.com" width="22">]()</kbd>
+Read on <kbd>[<img title="English" alt="English" src="https://cdn.jsdelivr.net/gh/hampusborgos/country-flags@main/svg/us.svg" width="22">](README.md)</kbd>
 
-A cross-platform non-linear video editor built in C++17 with Qt 6 and FFmpeg.  
-Designed as a lightweight, offline-first alternative to proprietary editors.
+Кроссплатформенный нелинейный видеоредактор на C++17 с Qt 6 и FFmpeg.
+Лёгкая, работающая офлайн альтернатива проприетарным редакторам.
 
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![Qt](https://img.shields.io/badge/Qt-6.x-green)
@@ -12,205 +12,212 @@ Designed as a lightweight, offline-first alternative to proprietary editors.
 
 ---
 
-## Overview
+## Обзор
 
-VideoEditor Pro is a desktop video editing application that provides a full
-non-linear editing workflow: import media, arrange clips on a multi-track
-timeline, apply real-time effects, preview with audio/video sync, and export
-to common container formats.
+VideoEditor Pro - десктопное приложение для монтажа видео с полным
+нелинейным рабочим процессом: импорт медиафайлов, размещение клипов на
+многодорожечном таймлайне, применение эффектов в реальном времени,
+предпросмотр с синхронизацией аудио/видео и экспорт в популярные
+контейнерные форматы.
 
-The project was developed as a Bachelor's thesis at Moscow Polytechnic
-University (2026), direction 09.03.02 "Information Systems and Technologies".
+Проект разработан как выпускная квалификационная работа бакалавра в
+Московском Политехническом Университете (2026), направление 09.03.02
+«Информационные системы и технологии».
 
 ---
 
-## Features
+## Возможности
 
-### Video editing
-- **Two-track non-linear timeline** — arrange, move, trim, and split clips
-  on two independent video tracks
-- **Non-destructive editing** — all operations reference source files;
-  originals are never modified
-- **Clip operations** — add, remove, move, trim (left/right edge), split at
-  arbitrary position, drag-and-drop reorder
+### Видеомонтаж
+- **Двухдорожечный нелинейный таймлайн** - расстановка, перемещение,
+  обрезка и разделение клипов на двух независимых видеодорожках
+- **Неразрушающее редактирование** - все операции ссылаются на исходные
+  файлы; оригиналы никогда не изменяются
+- **Операции с клипами** - добавление, удаление, перемещение, обрезка
+  (левый/правый край), разделение в произвольной точке, перетаскивание
+  для изменения порядка
 
-### Decoding & playback
-- **Hardware-accelerated decoding** with automatic fallback chain:
-  D3D11VA → DXVA2 → software (CPU)
-- **Prefetch frame cache** (`FrameCache`) — sliding-window cache of 150
-  decoded frames per track, keeps playback smooth without re-decoding
-- **Background decoder thread** (`DecoderThread`) — decodes 2.5 s ahead of
-  the playback position; fast seek via `seekAndDecode()` jumps directly to
-  the nearest I-frame
-- **Audio/video synchronization** — push-model audio engine
-  (`AudioPlaybackEngine`) feeds 20 ms chunks to `QAudioSink`; audible
-  position is corrected for sink buffer latency on every tick
-- **Preview mode** — decoder outputs half-resolution frames (÷4 pixel count)
-  to reduce CPU load during live playback; full resolution is used only during
-  export
+### Декодирование и воспроизведение
+- **Аппаратно-ускоренное декодирование** с автоматической цепочкой
+  отката: D3D11VA → DXVA2 → программное (CPU)
+- **Кэш предзагрузки кадров** (`FrameCache`) - скользящее окно из 150
+  декодированных кадров на дорожку, обеспечивает плавное воспроизведение
+  без повторного декодирования
+- **Фоновый поток декодера** (`DecoderThread`) - декодирует на 2,5 с
+  вперёд от текущей позиции воспроизведения; быстрый переход
+  (`seekAndDecode()`) прыгает напрямую к ближайшему I-кадру
+- **Синхронизация аудио и видео** - аудиодвижок с push-моделью
+  (`AudioPlaybackEngine`) подаёт 20-мс фрагменты в `QAudioSink`;
+  слышимая позиция корректируется с учётом задержки буфера на каждом такте
+- **Режим предпросмотра** - декодер выдаёт кадры в половинном разрешении
+  (÷4 по количеству пикселей) для снижения нагрузки на CPU во время
+  живого воспроизведения; полное разрешение используется только при
+  экспорте
 
-### Video effects (14)
-| Effect | Description |
-|--------|-------------|
-| Brightness | Linear shift of all channels |
-| Contrast | Scale around mid-point 128 |
-| Saturation | HSV-space S-component scaling (BT.601 luma) |
-| Grayscale | BT.601 weighted luminance |
-| Blur | Separable box filter (2 passes, O(2r+1) per pixel) |
-| Sharpness | Unsharp mask (original − blurred) × strength |
-| Hue | HSV hue rotation by arbitrary degrees |
-| Sepia | 3×3 empirical mixing matrix + intensity blend |
-| Vignette | Radial darkening (squared distance, no sqrt) |
-| Invert | 255 − I per channel |
-| Posterize | Uniform quantization to N levels |
-| Pixelate | Block-average downscaling |
-| Temperature | Asymmetric R/B channel shift |
-| Grain | Deterministic XOR-shift noise keyed on (x, y, frame) |
-| ChromaKey | RGB greenness metric + soft edge + spill suppression |
+### Видеоэффекты (14)
+| Эффект | Описание |
+|--------|----------|
+| Яркость | Линейный сдвиг всех каналов |
+| Контраст | Масштабирование относительно средней точки 128 |
+| Насыщенность | Масштабирование S-компоненты в пространстве HSV (яркость по BT.601) |
+| Оттенки серого | Взвешенная яркость по BT.601 |
+| Размытие | Разделяемый box-фильтр (2 прохода, O(2r+1) на пиксель) |
+| Резкость | Unsharp mask (оригинал − размытие) × сила эффекта |
+| Оттенок | Поворот оттенка в пространстве HSV на произвольный угол |
+| Сепия | Эмпирическая матрица смешения 3×3 + смешение по интенсивности |
+| Виньетирование | Радиальное затемнение (квадрат расстояния, без sqrt) |
+| Инверсия | 255 − I для каждого канала |
+| Постеризация | Равномерное квантование до N уровней |
+| Пикселизация | Понижение разрешения усреднением блоков |
+| Температура | Асимметричный сдвиг каналов R/B |
+| Зерно | Детерминированный XOR-shift шум, привязанный к (x, y, кадр) |
+| Хромакей | Метрика "зелёности" RGB + мягкий край + подавление parazitной подсветки |
 
-### Audio effects
-- Reverb — comb filter with persistent ring buffer (feedback < 1)
-- Echo — delay line with configurable feedback
-- Stereo Widen — Mid/Side encoding with Side gain boost
-- Pitch Shift — linear-interpolation resampling (equal temperament: 2^(s/12))
-- Normalize — peak-based gain with ×6 cap
-- Fade In / Fade Out — per-sample linear gain ramp
-- Automatic micro-fade — 3 ms tail fade on every clip boundary (eliminates
-  clicks)
+### Аудиоэффекты
+- Реверберация - гребенчатый фильтр с постоянным кольцевым буфером (обратная связь < 1)
+- Эхо - линия задержки с настраиваемой обратной связью
+- Расширение стерео - кодирование Mid/Side с усилением Side-канала
+- Изменение высоты тона - ресэмплинг линейной интерполяцией (равномерная темперация: 2^(s/12))
+- Нормализация - усиление по пиковому значению с ограничением ×6
+- Плавное появление / затухание - линейное изменение усиления на каждый сэмпл
+- Автоматический микро-фейд - затухание 3 мс на каждой границе клипа (устраняет щелчки)
 
-### Export
-- Video codec: **H.264** (libx264, VBR)
-- Audio codec: **AAC**
-- Containers: **MP4**, **MKV**, **AVI**, **MOV**, **WebM**
-- Resolution: configurable (default 1920×1080)
-- Progress reporting and cancellation at any time
-- Exact audio sample counting per frame (prevents audio/video drift at non-integer fps)
+### Экспорт
+- Видеокодек: **H.264** (libx264, VBR)
+- Аудиокодек: **AAC**
+- Контейнеры: **MP4**, **MKV**, **AVI**, **MOV**, **WebM**
+- Разрешение: настраиваемое (по умолчанию 1920×1080)
+- Отображение прогресса и возможность отмены в любой момент
+- Точный подсчёт аудиосэмплов на кадр (предотвращает рассинхронизацию аудио/видео при нецелых fps)
 
-### Project persistence
-- Projects saved as **JSON** (clip paths, positions, trim points, effects map)
-- Portable: file contains only paths + parameters, no media data
-- Typical project file size: a few kilobytes
+### Хранение проектов
+- Проекты сохраняются в формате **JSON** (пути к клипам, позиции, точки
+  обрезки, карта эффектов)
+- Портативность: файл содержит только пути и параметры, без самих
+  медиаданных
+- Типичный размер файла проекта: несколько килобайт
 
-### UI
-- QML / Qt Quick interface with hardware-accelerated rendering (OpenGL)
-- Dark theme (Steam-inspired navy + ruby accent palette)
-- All colors, fonts, and spacing defined in `theme.js`
-- Components: `TopMenuBar`, `LeftSidebar`, `VideoPlayer`, `PlaybackControls`,
+### Интерфейс
+- Интерфейс на QML / Qt Quick с аппаратно-ускоренным рендерингом (OpenGL)
+- Тёмная тема (палитра в стиле Steam - тёмно-синий + рубиновый акцент)
+- Все цвета, шрифты и отступы заданы в `theme.js`
+- Компоненты: `TopMenuBar`, `LeftSidebar`, `VideoPlayer`, `PlaybackControls`,
   `Timeline`, `Track`, `VideoClip`, `ClipEffectsDialog`
 
 ---
 
-## Architecture
+## Архитектура
 
 ```
-QML (UI layer)
-    │  signals / slots / Q_INVOKABLE
+QML (слой интерфейса)
+    │  сигналы / слоты / Q_INVOKABLE
     ▼
 Timeline  ──────────────────────────────► EffectImageProvider
-(C++ core, QObject, exported to QML)          ▲ setFrame()
+(ядро на C++, QObject, экспортируется в QML)  ▲ setFrame()
     │                                          │ image://effects/frame
     ├── QList<TimelineClip>                    │
     │                                     QML VideoPlayer
     ├── MediaDecoder  ◄── DecoderThread ──► FrameCache
-    │   (GPU / CPU fallback, FFmpeg)
+    │   (GPU / CPU откат, FFmpeg)
     │
     ├── AudioPlaybackEngine
-    │   (QAudioSink push-mode, 44100 Hz stereo float32)
+    │   (QAudioSink push-режим, 44100 Гц стерео float32)
     │
     ├── RenderEngine
     │   └── RenderWorker  (QThread)
-    │       ├── MediaDecoder  (full-res video)
-    │       ├── MediaDecoder  (audio)
-    │       └── MediaEncoder  → output file
+    │       ├── MediaDecoder  (видео полного разрешения)
+    │       ├── MediaDecoder  (аудио)
+    │       └── MediaEncoder  → выходной файл
     │
     └── FFmpeg
         libavformat · libavcodec · libswscale · libswresample
 ```
 
-### Key design decisions
+### Ключевые инженерные решения
 
-| Problem | Solution |
+| Проблема | Решение |
 |---------|----------|
-| Windows WASAPI thread limit (~64 threads) exhausted after ~20 seeks | Reuse single `QAudioSink` via `reset()` + `start()` instead of recreating |
-| FrameCache eviction deleting frames just ahead of playback → infinite re-decode loop | Evict only frames > KEEP_BEHIND positions *behind* play position; delete furthest-ahead only when no old frames exist |
-| Audio/video drift at non-integer fps | Count audio samples per frame as `round((f+1)/fps × SR) − samplesWritten` instead of `(int)(frameTime × SR)` |
-| Seek between clips from the same file on track 2 → decoder sequential-decodes the gap → stutter | Detect position jump > 2 s in `updatePlayPosition()` and trigger a full seek |
-| Slow seek (`getFrameAt`) vs fast prefetch decode | `seekAndDecode()` seeks to I-frame and skips intermediate frames without `sws_scale`, then `getNextFrame()` continues sequentially |
+| Лимит потоков Windows WASAPI (~64 потока) исчерпывался после ~20 переходов | Переиспользование одного `QAudioSink` через `reset()` + `start()` вместо пересоздания |
+| Вытеснение кадров из FrameCache удаляло кадры прямо перед позицией воспроизведения → бесконечный цикл повторного декодирования | Вытеснять только кадры дальше KEEP_BEHIND позиций *позади* точки воспроизведения; удалять самый дальний кадр впереди только если старых кадров не осталось |
+| Рассинхронизация аудио/видео при нецелых fps | Подсчёт аудиосэмплов на кадр как `round((f+1)/fps × SR) − samplesWritten` вместо `(int)(frameTime × SR)` |
+| Переход между клипами одного файла на 2-й дорожке → декодер последовательно декодирует пропуск → заикание | Обнаружение скачка позиции > 2 с в `updatePlayPosition()` и запуск полного перехода (seek) |
+| Медленный переход (`getFrameAt`) против быстрого декодирования с предзагрузкой | `seekAndDecode()` переходит к I-кадру и пропускает промежуточные кадры без `sws_scale`, затем `getNextFrame()` продолжает последовательно |
 
 ---
 
-## Tech Stack
+## Технологический стек
 
-| Component | Technology |
+| Компонент | Технология |
 |-----------|-----------|
-| Language | C++17 |
-| UI framework | Qt 6.5+ (Qt Quick, Qt Multimedia, Qt Concurrent) |
-| UI language | QML |
-| Media decoding/encoding | FFmpeg 6.x (libavformat, libavcodec, libswscale, libswresample) |
-| GPU decoding | D3D11VA, DXVA2 (Windows) |
-| Build system | qmake |
+| Язык | C++17 |
+| UI-фреймворк | Qt 6.5+ (Qt Quick, Qt Multimedia, Qt Concurrent) |
+| Язык интерфейса | QML |
+| Декодирование/кодирование медиа | FFmpeg 6.x (libavformat, libavcodec, libswscale, libswresample) |
+| GPU-декодирование | D3D11VA, DXVA2 (Windows) |
+| Система сборки | qmake |
 | IDE | Qt Creator |
 
 ---
 
-## Project Structure
+## Структура проекта
 
 ```
 VideoEditorProject/
-├── main.cpp                  # Entry point — init OpenGL, register QML context
-├── timeline.h / .cpp         # Core coordinator — all clip operations, playback control
-├── TimelineClip.h            # Data structure for a single clip on the timeline
-├── mediadecoder.h / .cpp     # FFmpeg decoder wrapper (video + audio, GPU fallback)
-├── mediaencoder.h / .cpp     # FFmpeg encoder wrapper (H.264 + AAC muxer)
-├── renderengine.h / .cpp     # Export engine — compositing, effects, RenderWorker thread
-├── audioplaybackengine.h/.cpp# Push-mode audio output (QAudioSink)
-├── decoderthread.h           # Background prefetch decode thread
-├── FrameCache.h              # Thread-safe sliding-window frame cache
-├── Effectimageprovider.h     # QQuickImageProvider bridge — C++ frame → QML Image
+├── main.cpp                  # Точка входа — инициализация OpenGL, регистрация QML-контекста
+├── timeline.h / .cpp         # Основной координатор — все операции с клипами, управление воспроизведением
+├── TimelineClip.h            # Структура данных для одного клипа на таймлайне
+├── mediadecoder.h / .cpp     # Обёртка над FFmpeg-декодером (видео + аудио, откат на CPU)
+├── mediaencoder.h / .cpp     # Обёртка над FFmpeg-энкодером (мультиплексор H.264 + AAC)
+├── renderengine.h / .cpp     # Движок экспорта — компоновка, эффекты, поток RenderWorker
+├── audioplaybackengine.h/.cpp# Аудиовывод в push-режиме (QAudioSink)
+├── decoderthread.h           # Фоновый поток предзагрузочного декодирования
+├── FrameCache.h              # Потокобезопасный скользящий кэш кадров
+├── Effectimageprovider.h     # Мост QQuickImageProvider — кадр C++ → изображение QML
 ├── qml/
-│   ├── main.qml              # Root window layout
-│   ├── VideoPlayer.qml       # Preview area (image://effects/ source)
-│   ├── Timeline.qml          # Timeline with zoom and playhead
-│   ├── Track.qml             # Single video track
-│   ├── VideoClip.qml         # Draggable clip block with trim handles
-│   ├── PlaybackControls.qml  # Play/pause/seek/speed/volume bar
-│   ├── LeftSidebar.qml       # Media import panel
-│   ├── TopMenuBar.qml        # File / Export / Settings menu
-│   ├── ClipEffectsDialog.qml # Per-clip effect sliders
-│   ├── ModeSwitcher.qml      # Track mode controls
-│   └── theme.js              # Design tokens (colors, fonts, spacing)
-└── VideoEditorProject.pro    # qmake build file
+│   ├── main.qml              # Разметка корневого окна
+│   ├── VideoPlayer.qml       # Область предпросмотра (источник image://effects/)
+│   ├── Timeline.qml          # Таймлайн с масштабированием и указателем воспроизведения
+│   ├── Track.qml             # Одна видеодорожка
+│   ├── VideoClip.qml         # Перетаскиваемый блок клипа с ручками обрезки
+│   ├── PlaybackControls.qml  # Панель воспроизведения/паузы/перехода/скорости/громкости
+│   ├── LeftSidebar.qml       # Панель импорта медиафайлов
+│   ├── TopMenuBar.qml        # Меню Файл / Экспорт / Настройки
+│   ├── ClipEffectsDialog.qml # Слайдеры эффектов для клипа
+│   ├── ModeSwitcher.qml      # Управление режимом дорожки
+│   └── theme.js              # Дизайн-токены (цвета, шрифты, отступы)
+└── VideoEditorProject.pro    # Файл сборки qmake
 ```
 
 ---
 
-## Build Instructions
+## Инструкция по сборке
 
-### Prerequisites
+### Требования
 
-| Dependency | Version | Notes |
+| Зависимость | Версия | Примечания |
 |-----------|---------|-------|
-| Qt | 6.5+ | Modules: Quick, Multimedia, Concurrent, Widgets |
-| FFmpeg | 6.x | Built with libx264 and AAC encoder |
-| Compiler | MSVC 2019/2022 (Windows) or GCC 10+ / Clang 12+ | C++17 required |
+| Qt | 6.5+ | Модули: Quick, Multimedia, Concurrent, Widgets |
+| FFmpeg | 6.x | Собран с libx264 и AAC-энкодером |
+| Компилятор | MSVC 2019/2022 (Windows) или GCC 10+ / Clang 12+ | Требуется C++17 |
 
 ### Windows (Qt Creator)
 
-1. Install Qt 6.5+ via the Qt online installer
-2. Download a pre-built FFmpeg Windows build with shared libraries
-   ([gyan.dev](https://www.gyan.dev/ffmpeg/builds/) recommended)
-3. Extract FFmpeg to `C:/FFmpegForQt/` (or edit `INCLUDEPATH` / `LIBS` in `.pro`)
-4. Open `VideoEditorProject.pro` in Qt Creator and press **Build**
+1. Установить Qt 6.5+ через онлайн-инсталлятор Qt
+2. Скачать готовую сборку FFmpeg для Windows с общими библиотеками
+   (рекомендуется [gyan.dev](https://www.gyan.dev/ffmpeg/builds/))
+3. Распаковать FFmpeg в `C:/FFmpegForQt/` (либо отредактировать
+   `INCLUDEPATH` / `LIBS` в `.pro`-файле)
+4. Открыть `VideoEditorProject.pro` в Qt Creator и нажать **Build**
 
-The post-build step in `.pro` automatically copies FFmpeg DLLs to the output
-directory:
+Шаг после сборки в `.pro`-файле автоматически копирует DLL-файлы FFmpeg
+в выходную директорию:
 ```
 xcopy /Y /D "C:/FFmpegForQt/bin/*.dll" "<output_dir>"
 ```
 
 ### Linux / macOS
 
-Install FFmpeg via package manager:
+Установить FFmpeg через менеджер пакетов:
 ```bash
 # Ubuntu / Debian
 sudo apt install libavcodec-dev libavformat-dev libavutil-dev \
@@ -220,59 +227,62 @@ sudo apt install libavcodec-dev libavformat-dev libavutil-dev \
 brew install ffmpeg
 ```
 
-Edit `.pro` to replace Windows `INCLUDEPATH` / `LIBS` with pkg-config output:
+Отредактировать `.pro`-файл, заменив Windows-переменные `INCLUDEPATH` /
+`LIBS` на вывод pkg-config:
 ```pro
 LIBS += $$system(pkg-config --libs libavcodec libavformat libavutil libswscale libswresample)
 INCLUDEPATH += $$system(pkg-config --cflags-only-I libavcodec | sed 's/-I//g')
 ```
 
-Then build:
+Затем собрать:
 ```bash
 qmake VideoEditorProject.pro && make -j$(nproc)
 ```
 
-> **Note:** GPU hardware decoding (D3D11VA / DXVA2) is Windows-only. On Linux
-> and macOS the decoder automatically falls back to software (CPU) mode. VA-API
-> support for Linux is a planned future improvement.
+> **Примечание:** аппаратное GPU-декодирование (D3D11VA / DXVA2) доступно
+> только на Windows. На Linux и macOS декодер автоматически переходит на
+> программный (CPU) режим. Поддержка VA-API для Linux - планируемое
+> улучшение в будущем.
 
 ---
 
-## Performance
+## Производительность
 
-Tested on two machines:
+Протестировано на двух машинах:
 
-| Resolution | Decode mode | CPU load (IdeaPad L340, i3) | CPU load (Desktop, i5-14500 + RTX 5060 Ti) |
+| Разрешение | Режим декодирования | Загрузка CPU (IdeaPad L340, i3) | Загрузка CPU (Desktop, i5-14500 + RTX 5060 Ti) |
 |-----------|------------|----------------------------|---------------------------------------------|
-| 720p | CPU software | 85% | 9.1% |
-| 1080p | CPU software | 93% | 11.8% |
+| 720p | Программный (CPU) | 85% | 9.1% |
+| 1080p | Программный (CPU) | 93% | 11.8% |
 | 1080p | GPU D3D11VA | 87% | 5.4% |
 | 4K | GPU D3D11VA | 98% | 9.6% |
 
-RAM usage during preview: 620–770 MB (dominated by FrameCache — up to 150
-decoded frames per track).
+Использование ОЗУ во время предпросмотра: 620–770 МБ (в основном за счёт
+FrameCache - до 150 декодированных кадров на дорожку).
 
 ---
 
-## Roadmap
+## Планы развития
 
-- [ ] More than 2 video tracks
-- [ ] Text overlays and title cards
-- [ ] Subtitle support (libass)
-- [ ] GPU-accelerated export (NVENC for NVIDIA, AMF for AMD)
-- [ ] VA-API hardware decoding on Linux
-- [ ] Transition effects between adjacent clips
-- [ ] Audio waveform visualization in timeline clips
-
----
-
-## License
-
-MIT License — see [LICENSE](LICENSE) for details.
+- [ ] Более двух видеодорожек
+- [ ] Текстовые оверлеи и титры
+- [ ] Поддержка субтитров (libass)
+- [ ] GPU-ускоренный экспорт (NVENC для NVIDIA, AMF для AMD)
+- [ ] Аппаратное декодирование VA-API на Linux
+- [ ] Эффекты переходов между соседними клипами
+- [ ] Визуализация звуковой волны на клипах в таймлайне
 
 ---
 
-## Author
+## Лицензия
 
-**Ilya Kartashov** — [github.com/kartashov](https://github.com/)  
-Bachelor's thesis, Moscow Polytechnic University, 2026  
-Direction: 09.03.02 "Information Systems and Technologies"
+MIT License - подробности см. в файле [LICENSE](LICENSE).
+
+---
+
+## Автор
+
+**Илья Карташов** - [github.com/kartashov](https://github.com/)
+Выпускная квалификационная работа бакалавра, Московский Политехнический
+Университет, 2026
+Направление: 09.03.02 «Информационные системы и технологии»
