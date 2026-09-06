@@ -1,7 +1,6 @@
 # VideoEditor Pro
 <kbd>[<img title="English (United States)" alt="English (United States)" src="https://flagcdn.com" width="22">]()</kbd>
 
-
 A cross-platform non-linear video editor built in C++17 with Qt 6 and FFmpeg.  
 Designed as a lightweight, offline-first alternative to proprietary editors.
 
