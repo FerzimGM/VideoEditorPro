@@ -1,4 +1,5 @@
 # VideoEditor Pro
+Read on <kbd>[<img title="Русский язык" alt="Русский язык" src="https://cdn.jsdelivr.net/gh/hampusborgos/country-flags@main/svg/ru.svg" width="22">]()</kbd>
 
 A cross-platform non-linear video editor built in C++17 with Qt 6 and FFmpeg.  
 Designed as a lightweight, offline-first alternative to proprietary editors.
