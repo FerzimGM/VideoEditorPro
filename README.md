@@ -1,6 +1,8 @@
 # VideoEditor Pro
 Читать на <kbd>[<img title="Русский язык" alt="Русский язык" src="https://cdn.jsdelivr.net/gh/hampusborgos/country-flags@main/svg/ru.svg" width="22">](README_ru.md)</kbd>
 
+![Logotype](screenshot/logo.png)
+
 A cross-platform non-linear video editor built in C++17 with Qt 6 and FFmpeg.  
 Designed as a lightweight, offline-first alternative to proprietary editors.
 
@@ -97,6 +99,26 @@ University (2026), direction 09.03.02 "Information Systems and Technologies".
 - All colors, fonts, and spacing defined in `theme.js`
 - Components: `TopMenuBar`, `LeftSidebar`, `VideoPlayer`, `PlaybackControls`,
   `Timeline`, `Track`, `VideoClip`, `ClipEffectsDialog`
+
+---
+
+## 📸 Screenshots
+
+### Main Interface
+![Main Interface](screenshot/main.png)
+*Main editing interface with dark theme and multi-track timeline*
+
+---
+
+## 🎬 Real-time Performance
+
+### Video Effects
+![Effects](screenshot/effect.gif)
+*Real-time video effects preview powered by FrameCache*
+
+### Export Process
+![Export](screenshot/export.gif)
+*Export dialog with progress tracking and format settings*
 
 ---
 
